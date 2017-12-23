@@ -1,0 +1,20 @@
+<map id="RedisModuleCallReply" name="RedisModuleCallReply">
+<area shape="rect" id="node2" href="$structRedisModuleCtx.html" title="{RedisModuleCtx\n|+ getapifuncptr\l+ amqueue_len\l+ amqueue_used\l+ flags\l+ postponed_arrays\l+ postponed_arrays_count\l+ blocked_privdata\l+ keys_pos\l+ keys_count\l|}" alt="" coords="244,1219,420,1413"/>
+<area shape="rect" id="node3" href="$structRedisModuleBlockedClient.html" title="{RedisModuleBlockedClient\n|+ free_privdata\l+ privdata\l+ dbid\l|}" alt="" coords="404,1513,583,1619"/>
+<area shape="rect" id="node4" href="$structRedisModule.html" title="{RedisModule\n|+ handle\l+ name\l+ ver\l+ apiver\l|}" alt="" coords="411,983,509,1105"/>
+<area shape="rect" id="node5" href="$structlist.html" title="{list\n|+ dup\l+ free\l+ match\l+ len\l|}" alt="" coords="195,697,266,818"/>
+<area shape="rect" id="node7" href="$structclient.html" title="{client\n|+ id\l+ fd\l+ querybuf\l+ pending_querybuf\l+ querybuf_peak\l+ argc\l+ reqtype\l+ multibulklen\l+ bulklen\l+ reply_bytes\land 26 more...\l|}" alt="" coords="592,932,728,1156"/>
+<area shape="rect" id="node6" href="$structlistNode.html" title="{listNode\n|+ value\l|}" alt="" coords="258,461,329,539"/>
+<area shape="rect" id="node8" href="$structredisDb.html" title="{redisDb\n|+ id\l+ avg_ttl\l|}" alt="" coords="623,711,697,803"/>
+<area shape="rect" id="node9" href="$structdict.html" title="{dict\n|+ privdata\l+ rehashidx\l+ iterators\l|}" alt="" coords="615,447,705,553"/>
+<area shape="rect" id="node14" href="$structblockingState.html" title="{blockingState\n|+ timeout\l+ xread_count\l+ xread_retry_time\l+ xread_retry_ttl\l+ numreplicas\l+ reploffset\l+ module_blocked_handle\l|}" alt="" coords="721,675,895,840"/>
+<area shape="rect" id="node10" href="$structdictht.html" title="{dictht\n|+ size\l+ sizemask\l+ used\l|}" alt="" coords="519,219,609,325"/>
+<area shape="rect" id="node11" href="$structdictEntry.html" title="{dictEntry\n|+ key\l+ v\l|}" alt="" coords="527,5,601,97"/>
+<area shape="rect" id="node12" href="$structdictType.html" title="{dictType\n|+ hashFunction\l+ keyDup\l+ valDup\l+ keyCompare\l+ keyDestructor\l+ valDestructor\l|}" alt="" coords="634,197,750,347"/>
+<area shape="rect" id="node13" href="$structredisObject.html" title="{redisObject\n|+ type\l+ encoding\l+ lru\l+ refcount\l+ ptr\l|}" alt="" coords="953,204,1041,340"/>
+<area shape="rect" id="node17" href="$structmultiCmd.html" title="{multiCmd\n|+ argc\l|}" alt="" coords="1106,461,1185,539"/>
+<area shape="rect" id="node15" href="$structredisCommand.html" title="{redisCommand\n|+ name\l+ proc\l+ arity\l+ sflags\l+ flags\l+ getkeys_proc\l+ firstkey\l+ lastkey\l+ keystep\l+ microseconds\l+ calls\l|}" alt="" coords="1136,160,1251,384"/>
+<area shape="rect" id="node16" href="$structmultiState.html" title="{multiState\n|+ count\l+ minreplicas\l+ minreplicas_timeout\l|}" alt="" coords="1002,704,1153,811"/>
+<area shape="rect" id="node18" href="$structRedisModulePoolAllocBlock.html" title="{RedisModulePoolAllocBlock\n|+ size\l+ used\l+ memory\l|}" alt="" coords="5,991,192,1097"/>
+<area shape="rect" id="node19" href="$structAutoMemEntry.html" title="{AutoMemEntry\n|+ ptr\l+ type\l|}" alt="" coords="277,998,387,1090"/>
+</map>

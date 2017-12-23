@@ -1,0 +1,2974 @@
+\hypertarget{redis-cli_8c_source}{}\section{redis-\/cli.c}
+\label{redis-cli_8c_source}\index{src/redis-\/cli.\+c@{src/redis-\/cli.\+c}}
+
+\begin{DoxyCode}
+00001 \textcolor{comment}{/* Redis CLI (command line interface)}
+00002 \textcolor{comment}{ *}
+00003 \textcolor{comment}{ * Copyright (c) 2009-2012, Salvatore Sanfilippo <antirez at gmail dot com>}
+00004 \textcolor{comment}{ * All rights reserved.}
+00005 \textcolor{comment}{ *}
+00006 \textcolor{comment}{ * Redistribution and use in source and binary forms, with or without}
+00007 \textcolor{comment}{ * modification, are permitted provided that the following conditions are met:}
+00008 \textcolor{comment}{ *}
+00009 \textcolor{comment}{ *   * Redistributions of source code must retain the above copyright notice,}
+00010 \textcolor{comment}{ *     this list of conditions and the following disclaimer.}
+00011 \textcolor{comment}{ *   * Redistributions in binary form must reproduce the above copyright}
+00012 \textcolor{comment}{ *     notice, this list of conditions and the following disclaimer in the}
+00013 \textcolor{comment}{ *     documentation and/or other materials provided with the distribution.}
+00014 \textcolor{comment}{ *   * Neither the name of Redis nor the names of its contributors may be used}
+00015 \textcolor{comment}{ *     to endorse or promote products derived from this software without}
+00016 \textcolor{comment}{ *     specific prior written permission.}
+00017 \textcolor{comment}{ *}
+00018 \textcolor{comment}{ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"}
+00019 \textcolor{comment}{ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE}
+00020 \textcolor{comment}{ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE}
+00021 \textcolor{comment}{ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE}
+00022 \textcolor{comment}{ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR}
+00023 \textcolor{comment}{ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF}
+00024 \textcolor{comment}{ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS}
+00025 \textcolor{comment}{ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN}
+00026 \textcolor{comment}{ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)}
+00027 \textcolor{comment}{ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE}
+00028 \textcolor{comment}{ * POSSIBILITY OF SUCH DAMAGE.}
+00029 \textcolor{comment}{ */}
+00030 
+00031 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \hyperlink{fmacros_8h}{"fmacros.h"}
+00032 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \hyperlink{version_8h}{"version.h"}
+00033 
+00034 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{stdio}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00035 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{string}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00036 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{stdlib}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00037 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{signal}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00038 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{unistd}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00039 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{time}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00040 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{ctype}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00041 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{errno}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00042 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{sys}\textcolor{preprocessor}{/}\textcolor{preprocessor}{stat}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00043 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{sys}\textcolor{preprocessor}{/}\textcolor{preprocessor}{time}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00044 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{assert}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00045 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{fcntl}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00046 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{limits}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00047 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{math}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00048 
+00049 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{hiredis}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00050 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{sds}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>} \textcolor{comment}{/* use sds.h from hiredis, so that only one set of sds functions will be present in
+       the binary */}
+00051 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \hyperlink{zmalloc_8h}{"zmalloc.h"}
+00052 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{"linenoise.h"}
+00053 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \hyperlink{help_8h}{"help.h"}
+00054 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \hyperlink{anet_8h}{"anet.h"}
+00055 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \hyperlink{ae_8h}{"ae.h"}
+00056 
+00057 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{UNUSED}\textcolor{preprocessor}{(}\textcolor{preprocessor}{V}\textcolor{preprocessor}{)} \textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{keywordtype}{void}\textcolor{preprocessor}{)} \textcolor{preprocessor}{V}\textcolor{preprocessor}{)}
+00058 
+00059 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{OUTPUT\_STANDARD} 0
+00060 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{OUTPUT\_RAW} 1
+00061 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{OUTPUT\_CSV} 2
+00062 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{REDIS\_CLI\_KEEPALIVE\_INTERVAL} 15 \textcolor{comment}{/* seconds */}
+00063 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{REDIS\_CLI\_DEFAULT\_PIPE\_TIMEOUT} 30 \textcolor{comment}{/* seconds */}
+00064 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{REDIS\_CLI\_HISTFILE\_ENV} \textcolor{stringliteral}{"REDISCLI\_HISTFILE"}
+00065 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{REDIS\_CLI\_HISTFILE\_DEFAULT} \textcolor{stringliteral}{".rediscli\_history"}
+00066 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{REDIS\_CLI\_RCFILE\_ENV} \textcolor{stringliteral}{"REDISCLI\_RCFILE"}
+00067 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{REDIS\_CLI\_RCFILE\_DEFAULT} \textcolor{stringliteral}{".redisclirc"}
+00068 
+00069 \textcolor{comment}{/* --latency-dist palettes. */}
+00070 \textcolor{keywordtype}{int} spectrum\_palette\_color\_size = 19;
+00071 \textcolor{keywordtype}{int} spectrum\_palette\_color[] = \{0,233,234,235,237,239,241,243,245,247,144,143,142,184,226,214,208,202,
+      196\};
+00072 
+00073 \textcolor{keywordtype}{int} spectrum\_palette\_mono\_size = 13;
+00074 \textcolor{keywordtype}{int} spectrum\_palette\_mono[] = \{0,233,234,235,237,239,241,243,245,247,249,251,253\};
+00075 
+00076 \textcolor{comment}{/* The actual palette in use. */}
+00077 \textcolor{keywordtype}{int} *spectrum\_palette;
+00078 \textcolor{keywordtype}{int} spectrum\_palette\_size;
+00079 
+00080 \textcolor{keyword}{static} redisContext *context;
+00081 \textcolor{keyword}{static} \textcolor{keyword}{struct} config \{
+00082     \textcolor{keywordtype}{char} *hostip;
+00083     \textcolor{keywordtype}{int} hostport;
+00084     \textcolor{keywordtype}{char} *hostsocket;
+00085     \textcolor{keywordtype}{long} repeat;
+00086     \textcolor{keywordtype}{long} interval;
+00087     \textcolor{keywordtype}{int} dbnum;
+00088     \textcolor{keywordtype}{int} interactive;
+00089     \textcolor{keywordtype}{int} shutdown;
+00090     \textcolor{keywordtype}{int} monitor\_mode;
+00091     \textcolor{keywordtype}{int} pubsub\_mode;
+00092     \textcolor{keywordtype}{int} latency\_mode;
+00093     \textcolor{keywordtype}{int} latency\_dist\_mode;
+00094     \textcolor{keywordtype}{int} latency\_history;
+00095     \textcolor{keywordtype}{int} lru\_test\_mode;
+00096     \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} lru\_test\_sample\_size;
+00097     \textcolor{keywordtype}{int} cluster\_mode;
+00098     \textcolor{keywordtype}{int} cluster\_reissue\_command;
+00099     \textcolor{keywordtype}{int} slave\_mode;
+00100     \textcolor{keywordtype}{int} pipe\_mode;
+00101     \textcolor{keywordtype}{int} pipe\_timeout;
+00102     \textcolor{keywordtype}{int} getrdb\_mode;
+00103     \textcolor{keywordtype}{int} stat\_mode;
+00104     \textcolor{keywordtype}{int} scan\_mode;
+00105     \textcolor{keywordtype}{int} intrinsic\_latency\_mode;
+00106     \textcolor{keywordtype}{int} intrinsic\_latency\_duration;
+00107     \textcolor{keywordtype}{char} *pattern;
+00108     \textcolor{keywordtype}{char} *rdb\_filename;
+00109     \textcolor{keywordtype}{int} bigkeys;
+00110     \textcolor{keywordtype}{int} hotkeys;
+00111     \textcolor{keywordtype}{int} stdinarg; \textcolor{comment}{/* get last arg from stdin. (-x option) */}
+00112     \textcolor{keywordtype}{char} *auth;
+00113     \textcolor{keywordtype}{int} output; \textcolor{comment}{/* output mode, see OUTPUT\_* defines */}
+00114     sds mb\_delim;
+00115     \textcolor{keywordtype}{char} prompt[128];
+00116     \textcolor{keywordtype}{char} *eval;
+00117     \textcolor{keywordtype}{int} eval\_ldb;
+00118     \textcolor{keywordtype}{int} eval\_ldb\_sync;  \textcolor{comment}{/* Ask for synchronous mode of the Lua debugger. */}
+00119     \textcolor{keywordtype}{int} eval\_ldb\_end;   \textcolor{comment}{/* Lua debugging session ended. */}
+00120     \textcolor{keywordtype}{int} enable\_ldb\_on\_eval; \textcolor{comment}{/* Handle manual SCRIPT DEBUG + EVAL commands. */}
+00121     \textcolor{keywordtype}{int} last\_cmd\_type;
+00122 \} config;
+00123 
+00124 \textcolor{comment}{/* User preferences. */}
+00125 \textcolor{keyword}{static} \textcolor{keyword}{struct} pref \{
+00126     \textcolor{keywordtype}{int} hints;
+00127 \} pref;
+00128 
+00129 \textcolor{keyword}{static} \textcolor{keyword}{volatile} sig\_atomic\_t force\_cancel\_loop = 0;
+00130 \textcolor{keyword}{static} \textcolor{keywordtype}{void} usage(\textcolor{keywordtype}{void});
+00131 \textcolor{keyword}{static} \textcolor{keywordtype}{void} slaveMode(\textcolor{keywordtype}{void});
+00132 \textcolor{keywordtype}{char} *redisGitSHA1(\textcolor{keywordtype}{void});
+00133 \textcolor{keywordtype}{char} *redisGitDirty(\textcolor{keywordtype}{void});
+00134 \textcolor{keyword}{static} \textcolor{keywordtype}{int} cliConnect(\textcolor{keywordtype}{int} force);
+00135 
+00136 \textcolor{comment}{/*------------------------------------------------------------------------------}
+00137 \textcolor{comment}{ * Utility functions}
+00138 \textcolor{comment}{ *--------------------------------------------------------------------------- */}
+00139 
+00140 \textcolor{keyword}{static} \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} ustime(\textcolor{keywordtype}{void}) \{
+00141     \textcolor{keyword}{struct} timeval tv;
+00142     \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} ust;
+00143 
+00144     gettimeofday(&tv, NULL);
+00145     ust = ((\textcolor{keywordtype}{long} \textcolor{keywordtype}{long})tv.tv\_sec)*1000000;
+00146     ust += tv.tv\_usec;
+00147     \textcolor{keywordflow}{return} ust;
+00148 \}
+00149 
+00150 \textcolor{keyword}{static} \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} mstime(\textcolor{keywordtype}{void}) \{
+00151     \textcolor{keywordflow}{return} ustime()/1000;
+00152 \}
+00153 
+00154 \textcolor{keyword}{static} \textcolor{keywordtype}{void} cliRefreshPrompt(\textcolor{keywordtype}{void}) \{
+00155     \textcolor{keywordtype}{int} len;
+00156 
+00157     \textcolor{keywordflow}{if} (config.eval\_ldb) \textcolor{keywordflow}{return};
+00158     \textcolor{keywordflow}{if} (config.hostsocket != NULL)
+00159         len = snprintf(config.prompt,\textcolor{keyword}{sizeof}(config.prompt),\textcolor{stringliteral}{"redis %s"},
+00160                        config.hostsocket);
+00161     \textcolor{keywordflow}{else}
+00162         len = anetFormatAddr(config.prompt, \textcolor{keyword}{sizeof}(config.prompt),
+00163                            config.hostip, config.hostport);
+00164     \textcolor{comment}{/* Add [dbnum] if needed */}
+00165     \textcolor{keywordflow}{if} (config.dbnum != 0)
+00166         len += snprintf(config.prompt+len,\textcolor{keyword}{sizeof}(config.prompt)-len,\textcolor{stringliteral}{"[%d]"},
+00167             config.dbnum);
+00168     snprintf(config.prompt+len,\textcolor{keyword}{sizeof}(config.prompt)-len,\textcolor{stringliteral}{"> "});
+00169 \}
+00170 
+00171 \textcolor{comment}{/* Return the name of the dotfile for the specified 'dotfilename'.}
+00172 \textcolor{comment}{ * Normally it just concatenates user $HOME to the file specified}
+00173 \textcolor{comment}{ * in 'dotfilename'. However if the environment varialbe 'envoverride'}
+00174 \textcolor{comment}{ * is set, its value is taken as the path.}
+00175 \textcolor{comment}{ *}
+00176 \textcolor{comment}{ * The function returns NULL (if the file is /dev/null or cannot be}
+00177 \textcolor{comment}{ * obtained for some error), or an SDS string that must be freed by}
+00178 \textcolor{comment}{ * the user. */}
+00179 \textcolor{keyword}{static} sds getDotfilePath(\textcolor{keywordtype}{char} *envoverride, \textcolor{keywordtype}{char} *dotfilename) \{
+00180     \textcolor{keywordtype}{char} *path = NULL;
+00181     sds dotPath = NULL;
+00182 
+00183     \textcolor{comment}{/* Check the env for a dotfile override. */}
+00184     path = getenv(envoverride);
+00185     \textcolor{keywordflow}{if} (path != NULL && *path != \textcolor{stringliteral}{'\(\backslash\)0'}) \{
+00186         \textcolor{keywordflow}{if} (!strcmp(\textcolor{stringliteral}{"/dev/null"}, path)) \{
+00187             \textcolor{keywordflow}{return} NULL;
+00188         \}
+00189 
+00190         \textcolor{comment}{/* If the env is set, return it. */}
+00191         dotPath = sdsnew(path);
+00192     \} \textcolor{keywordflow}{else} \{
+00193         \textcolor{keywordtype}{char} *home = getenv(\textcolor{stringliteral}{"HOME"});
+00194         \textcolor{keywordflow}{if} (home != NULL && *home != \textcolor{stringliteral}{'\(\backslash\)0'}) \{
+00195             \textcolor{comment}{/* If no override is set use $HOME/<dotfilename>. */}
+00196             dotPath = sdscatprintf(sdsempty(), \textcolor{stringliteral}{"%s/%s"}, home, dotfilename);
+00197         \}
+00198     \}
+00199     \textcolor{keywordflow}{return} dotPath;
+00200 \}
+00201 
+00202 \textcolor{comment}{/* URL-style percent decoding. */}
+00203 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{isHexChar}\textcolor{preprocessor}{(}\textcolor{preprocessor}{c}\textcolor{preprocessor}{)} \textcolor{preprocessor}{(}\textcolor{preprocessor}{isdigit}\textcolor{preprocessor}{(}\textcolor{preprocessor}{c}\textcolor{preprocessor}{)} \textcolor{preprocessor}{||} \textcolor{preprocessor}{(}\textcolor{preprocessor}{c} \textcolor{preprocessor}{>=} \textcolor{stringliteral}{'a'} \textcolor{preprocessor}{&&} \textcolor{preprocessor}{c} \textcolor{preprocessor}{<=} \textcolor{stringliteral}{'f'}\textcolor{preprocessor}{)}\textcolor{preprocessor}{)}
+00204 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{decodeHexChar}\textcolor{preprocessor}{(}\textcolor{preprocessor}{c}\textcolor{preprocessor}{)} \textcolor{preprocessor}{(}\textcolor{preprocessor}{isdigit}\textcolor{preprocessor}{(}\textcolor{preprocessor}{c}\textcolor{preprocessor}{)} \textcolor{preprocessor}{?} \textcolor{preprocessor}{c} \textcolor{preprocessor}{-} \textcolor{stringliteral}{'0'} \textcolor{preprocessor}{:} \textcolor{preprocessor}{c} \textcolor{preprocessor}{-} \textcolor{stringliteral}{'a'} \textcolor{preprocessor}{+} 10\textcolor{preprocessor}{)}
+00205 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{decodeHex}\textcolor{preprocessor}{(}\textcolor{preprocessor}{h}\textcolor{preprocessor}{,} \textcolor{preprocessor}{l}\textcolor{preprocessor}{)} \textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\hyperlink{redis-cli_8c_ab610530dccdfe42adbac4677a568645a}{decodeHexChar}\textcolor{preprocessor}{(}\textcolor{preprocessor}{h}\textcolor{preprocessor}{)} \textcolor{preprocessor}{<<} 4\textcolor{preprocessor}{)} \textcolor{preprocessor}{+} 
+      \hyperlink{redis-cli_8c_ab610530dccdfe42adbac4677a568645a}{decodeHexChar}\textcolor{preprocessor}{(}\textcolor{preprocessor}{l}\textcolor{preprocessor}{)}\textcolor{preprocessor}{)}
+00206 
+00207 \textcolor{keyword}{static} sds percentDecode(\textcolor{keyword}{const} \textcolor{keywordtype}{char} *pe, size\_t len) \{
+00208     \textcolor{keyword}{const} \textcolor{keywordtype}{char} *end = pe + len;
+00209     sds ret = sdsempty();
+00210     \textcolor{keyword}{const} \textcolor{keywordtype}{char} *curr = pe;
+00211 
+00212     \textcolor{keywordflow}{while} (curr < end) \{
+00213         \textcolor{keywordflow}{if} (*curr == \textcolor{stringliteral}{'%'}) \{
+00214             \textcolor{keywordflow}{if} ((end - curr) < 2) \{
+00215                 fprintf(stderr, \textcolor{stringliteral}{"Incomplete URI encoding\(\backslash\)n"});
+00216                 exit(1);
+00217             \}
+00218 
+00219             \textcolor{keywordtype}{char} h = tolower(*(++curr));
+00220             \textcolor{keywordtype}{char} l = tolower(*(++curr));
+00221             \textcolor{keywordflow}{if} (!\hyperlink{redis-cli_8c_ab2fbc70c2119ce8e23755a86933af1f5}{isHexChar}(h) || !\hyperlink{redis-cli_8c_ab2fbc70c2119ce8e23755a86933af1f5}{isHexChar}(l)) \{
+00222                 fprintf(stderr, \textcolor{stringliteral}{"Illegal character in URI encoding\(\backslash\)n"});
+00223                 exit(1);
+00224             \}
+00225             \textcolor{keywordtype}{char} c = \hyperlink{redis-cli_8c_ae03eb95fffcdab7dfa7faeadd04ad9f4}{decodeHex}(h, l);
+00226             ret = sdscatlen(ret, &c, 1);
+00227             curr++;
+00228         \} \textcolor{keywordflow}{else} \{
+00229             ret = sdscatlen(ret, curr++, 1);
+00230         \}
+00231     \}
+00232 
+00233     \textcolor{keywordflow}{return} ret;
+00234 \}
+00235 
+00236 \textcolor{comment}{/* Parse a URI and extract the server connection information.}
+00237 \textcolor{comment}{ * URI scheme is based on the the provisional specification[1] excluding support}
+00238 \textcolor{comment}{ * for query parameters. Valid URIs are:}
+00239 \textcolor{comment}{ *   scheme:    "redis://"}
+00240 \textcolor{comment}{ *   authority: [<username> ":"] <password> "@"] [<hostname> [":" <port>]]}
+00241 \textcolor{comment}{ *   path:      ["/" [<db>]]}
+00242 \textcolor{comment}{ *}
+00243 \textcolor{comment}{ *  [1]: https://www.iana.org/assignments/uri-schemes/prov/redis */}
+00244 \textcolor{keyword}{static} \textcolor{keywordtype}{void} parseRedisUri(\textcolor{keyword}{const} \textcolor{keywordtype}{char} *uri) \{
+00245 
+00246     \textcolor{keyword}{const} \textcolor{keywordtype}{char} *scheme = \textcolor{stringliteral}{"redis://"};
+00247     \textcolor{keyword}{const} \textcolor{keywordtype}{char} *curr = uri;
+00248     \textcolor{keyword}{const} \textcolor{keywordtype}{char} *end = uri + strlen(uri);
+00249     \textcolor{keyword}{const} \textcolor{keywordtype}{char} *userinfo, *username, *port, *host, *path;
+00250 
+00251     \textcolor{comment}{/* URI must start with a valid scheme. */}
+00252     \textcolor{keywordflow}{if} (strncasecmp(scheme, curr, strlen(scheme))) \{
+00253         fprintf(stderr,\textcolor{stringliteral}{"Invalid URI scheme\(\backslash\)n"});
+00254         exit(1);
+00255     \}
+00256     curr += strlen(scheme);
+00257     \textcolor{keywordflow}{if} (curr == end) \textcolor{keywordflow}{return};
+00258 
+00259     \textcolor{comment}{/* Extract user info. */}
+00260     \textcolor{keywordflow}{if} ((userinfo = strchr(curr,\textcolor{stringliteral}{'@'}))) \{
+00261         \textcolor{keywordflow}{if} ((username = strchr(curr, \textcolor{stringliteral}{':'})) && username < userinfo) \{
+00262             \textcolor{comment}{/* If provided, username is ignored. */}
+00263             curr = username + 1;
+00264         \}
+00265 
+00266         config.auth = percentDecode(curr, userinfo - curr);
+00267         curr = userinfo + 1;
+00268     \}
+00269     \textcolor{keywordflow}{if} (curr == end) \textcolor{keywordflow}{return};
+00270 
+00271     \textcolor{comment}{/* Extract host and port. */}
+00272     path = strchr(curr, \textcolor{stringliteral}{'/'});
+00273     \textcolor{keywordflow}{if} (*curr != \textcolor{stringliteral}{'/'}) \{
+00274         host = path ? path - 1 : end;
+00275         \textcolor{keywordflow}{if} ((port = strchr(curr, \textcolor{stringliteral}{':'}))) \{
+00276             config.hostport = atoi(port + 1);
+00277             host = port - 1;
+00278         \}
+00279         config.hostip = sdsnewlen(curr, host - curr + 1);
+00280     \}
+00281     curr = path ? path + 1 : end;
+00282     \textcolor{keywordflow}{if} (curr == end) \textcolor{keywordflow}{return};
+00283 
+00284     \textcolor{comment}{/* Extract database number. */}
+00285     config.dbnum = atoi(curr);
+00286 \}
+00287 
+00288 \textcolor{comment}{/*------------------------------------------------------------------------------}
+00289 \textcolor{comment}{ * Help functions}
+00290 \textcolor{comment}{ *--------------------------------------------------------------------------- */}
+00291 
+00292 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{CLI\_HELP\_COMMAND} 1
+00293 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{CLI\_HELP\_GROUP} 2
+00294 
+\Hypertarget{redis-cli_8c_source_l00295}\hyperlink{structhelpEntry}{00295} \textcolor{keyword}{typedef} \textcolor{keyword}{struct} \{
+00296     \textcolor{keywordtype}{int} type;
+00297     \textcolor{keywordtype}{int} argc;
+00298     sds *argv;
+00299     sds full;
+00300 
+00301     \textcolor{comment}{/* Only used for help on commands */}
+00302     \textcolor{keyword}{struct} \hyperlink{structcommandHelp}{commandHelp} *org;
+00303 \} helpEntry;
+00304 
+00305 \textcolor{keyword}{static} helpEntry *helpEntries;
+00306 \textcolor{keyword}{static} \textcolor{keywordtype}{int} helpEntriesLen;
+00307 
+00308 \textcolor{keyword}{static} sds cliVersion(\textcolor{keywordtype}{void}) \{
+00309     sds version;
+00310     version = sdscatprintf(sdsempty(), \textcolor{stringliteral}{"%s"}, \hyperlink{version_8h_a357a0d302ef7fbb42bf2db0632b9f7fe}{REDIS\_VERSION});
+00311 
+00312     \textcolor{comment}{/* Add git commit and working tree status when available */}
+00313     \textcolor{keywordflow}{if} (strtoll(redisGitSHA1(),NULL,16)) \{
+00314         version = sdscatprintf(version, \textcolor{stringliteral}{" (git:%s"}, redisGitSHA1());
+00315         \textcolor{keywordflow}{if} (strtoll(redisGitDirty(),NULL,10))
+00316             version = sdscatprintf(version, \textcolor{stringliteral}{"-dirty"});
+00317         version = sdscat(version, \textcolor{stringliteral}{")"});
+00318     \}
+00319     \textcolor{keywordflow}{return} version;
+00320 \}
+00321 
+00322 \textcolor{keyword}{static} \textcolor{keywordtype}{void} cliInitHelp(\textcolor{keywordtype}{void}) \{
+00323     \textcolor{keywordtype}{int} commandslen = \textcolor{keyword}{sizeof}(commandHelp)/\textcolor{keyword}{sizeof}(\textcolor{keyword}{struct} \hyperlink{structcommandHelp}{commandHelp});
+00324     \textcolor{keywordtype}{int} groupslen = \textcolor{keyword}{sizeof}(commandGroups)/\textcolor{keyword}{sizeof}(\textcolor{keywordtype}{char}*);
+00325     \textcolor{keywordtype}{int} i, len, pos = 0;
+00326     helpEntry tmp;
+00327 
+00328     helpEntriesLen = len = commandslen+groupslen;
+00329     helpEntries = zmalloc(\textcolor{keyword}{sizeof}(helpEntry)*len);
+00330 
+00331     \textcolor{keywordflow}{for} (i = 0; i < groupslen; i++) \{
+00332         tmp.argc = 1;
+00333         tmp.argv = zmalloc(\textcolor{keyword}{sizeof}(sds));
+00334         tmp.argv[0] = sdscatprintf(sdsempty(),\textcolor{stringliteral}{"@%s"},commandGroups[i]);
+00335         tmp.full = tmp.argv[0];
+00336         tmp.type = \hyperlink{redis-cli_8c_a3cac9e62f8d124c91f892f2236135589}{CLI\_HELP\_GROUP};
+00337         tmp.org = NULL;
+00338         helpEntries[pos++] = tmp;
+00339     \}
+00340 
+00341     \textcolor{keywordflow}{for} (i = 0; i < commandslen; i++) \{
+00342         tmp.argv = sdssplitargs(commandHelp[i].name,&tmp.argc);
+00343         tmp.full = sdsnew(commandHelp[i].name);
+00344         tmp.type = \hyperlink{redis-cli_8c_ad5a18b7d635c6438f512f3c5d7f9f546}{CLI\_HELP\_COMMAND};
+00345         tmp.org = &commandHelp[i];
+00346         helpEntries[pos++] = tmp;
+00347     \}
+00348 \}
+00349 
+00350 \textcolor{comment}{/* cliInitHelp() setups the helpEntries array with the command and group}
+00351 \textcolor{comment}{ * names from the help.h file. However the Redis instance we are connecting}
+00352 \textcolor{comment}{ * to may support more commands, so this function integrates the previous}
+00353 \textcolor{comment}{ * entries with additional entries obtained using the COMMAND command}
+00354 \textcolor{comment}{ * available in recent versions of Redis. */}
+00355 \textcolor{keyword}{static} \textcolor{keywordtype}{void} cliIntegrateHelp(\textcolor{keywordtype}{void}) \{
+00356     \textcolor{keywordflow}{if} (cliConnect(0) == REDIS\_ERR) \textcolor{keywordflow}{return};
+00357 
+00358     redisReply *reply = redisCommand(context, \textcolor{stringliteral}{"COMMAND"});
+00359     \textcolor{keywordflow}{if}(reply == NULL || reply->type != REDIS\_REPLY\_ARRAY) \textcolor{keywordflow}{return};
+00360 
+00361     \textcolor{comment}{/* Scan the array reported by COMMAND and fill only the entries that}
+00362 \textcolor{comment}{     * don't already match what we have. */}
+00363     \textcolor{keywordflow}{for} (size\_t j = 0; j < reply->elements; j++) \{
+00364         redisReply *entry = reply->element[j];
+00365         \textcolor{keywordflow}{if} (entry->type != REDIS\_REPLY\_ARRAY || entry->elements < 4 ||
+00366             entry->element[0]->type != REDIS\_REPLY\_STRING ||
+00367             entry->element[1]->type != REDIS\_REPLY\_INTEGER ||
+00368             entry->element[3]->type != REDIS\_REPLY\_INTEGER) \textcolor{keywordflow}{return};
+00369         \textcolor{keywordtype}{char} *cmdname = entry->element[0]->str;
+00370         \textcolor{keywordtype}{int} i;
+00371 
+00372         \textcolor{keywordflow}{for} (i = 0; i < helpEntriesLen; i++) \{
+00373             helpEntry *he = helpEntries+i;
+00374             \textcolor{keywordflow}{if} (!strcasecmp(he->argv[0],cmdname))
+00375                 \textcolor{keywordflow}{break};
+00376         \}
+00377         \textcolor{keywordflow}{if} (i != helpEntriesLen) \textcolor{keywordflow}{continue};
+00378 
+00379         helpEntriesLen++;
+00380         helpEntries = zrealloc(helpEntries,\textcolor{keyword}{sizeof}(helpEntry)*helpEntriesLen);
+00381         helpEntry *\textcolor{keyword}{new} = helpEntries+(helpEntriesLen-1);
+00382 
+00383         \textcolor{keyword}{new}->argc = 1;
+00384         \textcolor{keyword}{new}->argv = zmalloc(\textcolor{keyword}{sizeof}(sds));
+00385         \textcolor{keyword}{new}->argv[0] = sdsnew(cmdname);
+00386         \textcolor{keyword}{new}->full = \textcolor{keyword}{new}->argv[0];
+00387         \textcolor{keyword}{new}->type = \hyperlink{redis-cli_8c_ad5a18b7d635c6438f512f3c5d7f9f546}{CLI\_HELP\_COMMAND};
+00388         sdstoupper(\textcolor{keyword}{new}->argv[0]);
+00389 
+00390         \textcolor{keyword}{struct} commandHelp *ch = zmalloc(\textcolor{keyword}{sizeof}(*ch));
+00391         ch->name = \textcolor{keyword}{new}->argv[0];
+00392         ch->params = sdsempty();
+00393         \textcolor{keywordtype}{int} args = llabs(entry->element[1]->integer);
+00394         \textcolor{keywordflow}{if} (entry->element[3]->integer == 1) \{
+00395             ch->params = sdscat(ch->params,\textcolor{stringliteral}{"key "});
+00396             args--;
+00397         \}
+00398         \textcolor{keywordflow}{while}(args--) ch->params = sdscat(ch->params,\textcolor{stringliteral}{"arg "});
+00399         \textcolor{keywordflow}{if} (entry->element[1]->integer < 0)
+00400             ch->params = sdscat(ch->params,\textcolor{stringliteral}{"...options..."});
+00401         ch->summary = \textcolor{stringliteral}{"Help not available"};
+00402         ch->group = 0;
+00403         ch->since = \textcolor{stringliteral}{"not known"};
+00404         \textcolor{keyword}{new}->org = ch;
+00405     \}
+00406     freeReplyObject(reply);
+00407 \}
+00408 
+00409 \textcolor{comment}{/* Output command help to stdout. */}
+00410 \textcolor{keyword}{static} \textcolor{keywordtype}{void} cliOutputCommandHelp(\textcolor{keyword}{struct} \hyperlink{structcommandHelp}{commandHelp} *help, \textcolor{keywordtype}{int} group) \{
+00411     printf(\textcolor{stringliteral}{"\(\backslash\)r\(\backslash\)n  \(\backslash\)x1b[1m%s\(\backslash\)x1b[0m \(\backslash\)x1b[90m%s\(\backslash\)x1b[0m\(\backslash\)r\(\backslash\)n"}, help->name, help->params);
+00412     printf(\textcolor{stringliteral}{"  \(\backslash\)x1b[33msummary:\(\backslash\)x1b[0m %s\(\backslash\)r\(\backslash\)n"}, help->summary);
+00413     printf(\textcolor{stringliteral}{"  \(\backslash\)x1b[33msince:\(\backslash\)x1b[0m %s\(\backslash\)r\(\backslash\)n"}, help->since);
+00414     \textcolor{keywordflow}{if} (group) \{
+00415         printf(\textcolor{stringliteral}{"  \(\backslash\)x1b[33mgroup:\(\backslash\)x1b[0m %s\(\backslash\)r\(\backslash\)n"}, commandGroups[help->group]);
+00416     \}
+00417 \}
+00418 
+00419 \textcolor{comment}{/* Print generic help. */}
+00420 \textcolor{keyword}{static} \textcolor{keywordtype}{void} cliOutputGenericHelp(\textcolor{keywordtype}{void}) \{
+00421     sds version = cliVersion();
+00422     printf(
+00423         \textcolor{stringliteral}{"redis-cli %s\(\backslash\)n"}
+00424         \textcolor{stringliteral}{"To get help about Redis commands type:\(\backslash\)n"}
+00425         \textcolor{stringliteral}{"      \(\backslash\)"help @<group>\(\backslash\)" to get a list of commands in <group>\(\backslash\)n"}
+00426         \textcolor{stringliteral}{"      \(\backslash\)"help <command>\(\backslash\)" for help on <command>\(\backslash\)n"}
+00427         \textcolor{stringliteral}{"      \(\backslash\)"help <tab>\(\backslash\)" to get a list of possible help topics\(\backslash\)n"}
+00428         \textcolor{stringliteral}{"      \(\backslash\)"quit\(\backslash\)" to exit\(\backslash\)n"}
+00429         \textcolor{stringliteral}{"\(\backslash\)n"}
+00430         \textcolor{stringliteral}{"To set redis-cli preferences:\(\backslash\)n"}
+00431         \textcolor{stringliteral}{"      \(\backslash\)":set hints\(\backslash\)" enable online hints\(\backslash\)n"}
+00432         \textcolor{stringliteral}{"      \(\backslash\)":set nohints\(\backslash\)" disable online hints\(\backslash\)n"}
+00433         \textcolor{stringliteral}{"Set your preferences in ~/.redisclirc\(\backslash\)n"},
+00434         version
+00435     );
+00436     sdsfree(version);
+00437 \}
+00438 
+00439 \textcolor{comment}{/* Output all command help, filtering by group or command name. */}
+00440 \textcolor{keyword}{static} \textcolor{keywordtype}{void} cliOutputHelp(\textcolor{keywordtype}{int} argc, \textcolor{keywordtype}{char} **argv) \{
+00441     \textcolor{keywordtype}{int} i, j, len;
+00442     \textcolor{keywordtype}{int} group = -1;
+00443     helpEntry *entry;
+00444     \textcolor{keyword}{struct} \hyperlink{structcommandHelp}{commandHelp} *help;
+00445 
+00446     \textcolor{keywordflow}{if} (argc == 0) \{
+00447         cliOutputGenericHelp();
+00448         \textcolor{keywordflow}{return};
+00449     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (argc > 0 && argv[0][0] == \textcolor{stringliteral}{'@'}) \{
+00450         len = \textcolor{keyword}{sizeof}(commandGroups)/\textcolor{keyword}{sizeof}(\textcolor{keywordtype}{char}*);
+00451         \textcolor{keywordflow}{for} (i = 0; i < len; i++) \{
+00452             \textcolor{keywordflow}{if} (strcasecmp(argv[0]+1,commandGroups[i]) == 0) \{
+00453                 group = i;
+00454                 \textcolor{keywordflow}{break};
+00455             \}
+00456         \}
+00457     \}
+00458 
+00459     \hyperlink{redisassert_8h_a993abaa2c168852c1592879472938781}{assert}(argc > 0);
+00460     \textcolor{keywordflow}{for} (i = 0; i < helpEntriesLen; i++) \{
+00461         entry = &helpEntries[i];
+00462         \textcolor{keywordflow}{if} (entry->type != \hyperlink{redis-cli_8c_ad5a18b7d635c6438f512f3c5d7f9f546}{CLI\_HELP\_COMMAND}) \textcolor{keywordflow}{continue};
+00463 
+00464         help = entry->org;
+00465         \textcolor{keywordflow}{if} (group == -1) \{
+00466             \textcolor{comment}{/* Compare all arguments */}
+00467             \textcolor{keywordflow}{if} (argc == entry->argc) \{
+00468                 \textcolor{keywordflow}{for} (j = 0; j < argc; j++) \{
+00469                     \textcolor{keywordflow}{if} (strcasecmp(argv[j],entry->argv[j]) != 0) \textcolor{keywordflow}{break};
+00470                 \}
+00471                 \textcolor{keywordflow}{if} (j == argc) \{
+00472                     cliOutputCommandHelp(help,1);
+00473                 \}
+00474             \}
+00475         \} \textcolor{keywordflow}{else} \{
+00476             \textcolor{keywordflow}{if} (group == help->group) \{
+00477                 cliOutputCommandHelp(help,0);
+00478             \}
+00479         \}
+00480     \}
+00481     printf(\textcolor{stringliteral}{"\(\backslash\)r\(\backslash\)n"});
+00482 \}
+00483 
+00484 \textcolor{comment}{/* Linenoise completion callback. */}
+00485 \textcolor{keyword}{static} \textcolor{keywordtype}{void} completionCallback(\textcolor{keyword}{const} \textcolor{keywordtype}{char} *buf, linenoiseCompletions *lc) \{
+00486     size\_t startpos = 0;
+00487     \textcolor{keywordtype}{int} mask;
+00488     \textcolor{keywordtype}{int} i;
+00489     size\_t matchlen;
+00490     sds tmp;
+00491 
+00492     \textcolor{keywordflow}{if} (strncasecmp(buf,\textcolor{stringliteral}{"help "},5) == 0) \{
+00493         startpos = 5;
+00494         \textcolor{keywordflow}{while} (isspace(buf[startpos])) startpos++;
+00495         mask = \hyperlink{redis-cli_8c_ad5a18b7d635c6438f512f3c5d7f9f546}{CLI\_HELP\_COMMAND} | \hyperlink{redis-cli_8c_a3cac9e62f8d124c91f892f2236135589}{CLI\_HELP\_GROUP};
+00496     \} \textcolor{keywordflow}{else} \{
+00497         mask = \hyperlink{redis-cli_8c_ad5a18b7d635c6438f512f3c5d7f9f546}{CLI\_HELP\_COMMAND};
+00498     \}
+00499 
+00500     \textcolor{keywordflow}{for} (i = 0; i < helpEntriesLen; i++) \{
+00501         \textcolor{keywordflow}{if} (!(helpEntries[i].type & mask)) \textcolor{keywordflow}{continue};
+00502 
+00503         matchlen = strlen(buf+startpos);
+00504         \textcolor{keywordflow}{if} (strncasecmp(buf+startpos,helpEntries[i].full,matchlen) == 0) \{
+00505             tmp = sdsnewlen(buf,startpos);
+00506             tmp = sdscat(tmp,helpEntries[i].full);
+00507             linenoiseAddCompletion(lc,tmp);
+00508             sdsfree(tmp);
+00509         \}
+00510     \}
+00511 \}
+00512 
+00513 \textcolor{comment}{/* Linenoise hints callback. */}
+00514 \textcolor{keyword}{static} \textcolor{keywordtype}{char} *hintsCallback(\textcolor{keyword}{const} \textcolor{keywordtype}{char} *buf, \textcolor{keywordtype}{int} *color, \textcolor{keywordtype}{int} *bold) \{
+00515     \textcolor{keywordflow}{if} (!pref.hints) \textcolor{keywordflow}{return} NULL;
+00516 
+00517     \textcolor{keywordtype}{int} i, argc, buflen = strlen(buf);
+00518     sds *argv = sdssplitargs(buf,&argc);
+00519     \textcolor{keywordtype}{int} endspace = buflen && isspace(buf[buflen-1]);
+00520 
+00521     \textcolor{comment}{/* Check if the argument list is empty and return ASAP. */}
+00522     \textcolor{keywordflow}{if} (argc == 0) \{
+00523         sdsfreesplitres(argv,argc);
+00524         \textcolor{keywordflow}{return} NULL;
+00525     \}
+00526 
+00527     \textcolor{keywordflow}{for} (i = 0; i < helpEntriesLen; i++) \{
+00528         \textcolor{keywordflow}{if} (!(helpEntries[i].type & \hyperlink{redis-cli_8c_ad5a18b7d635c6438f512f3c5d7f9f546}{CLI\_HELP\_COMMAND})) \textcolor{keywordflow}{continue};
+00529 
+00530         \textcolor{keywordflow}{if} (strcasecmp(argv[0],helpEntries[i].full) == 0)
+00531         \{
+00532             *color = 90;
+00533             *bold = 0;
+00534             sds hint = sdsnew(helpEntries[i].org->params);
+00535 
+00536             \textcolor{comment}{/* Remove arguments from the returned hint to show only the}
+00537 \textcolor{comment}{             * ones the user did not yet typed. */}
+00538             \textcolor{keywordtype}{int} toremove = argc-1;
+00539             \textcolor{keywordflow}{while}(toremove > 0 && sdslen(hint)) \{
+00540                 \textcolor{keywordflow}{if} (hint[0] == \textcolor{stringliteral}{'['}) \textcolor{keywordflow}{break};
+00541                 \textcolor{keywordflow}{if} (hint[0] == \textcolor{stringliteral}{' '}) toremove--;
+00542                 sdsrange(hint,1,-1);
+00543             \}
+00544 
+00545             \textcolor{comment}{/* Add an initial space if needed. */}
+00546             \textcolor{keywordflow}{if} (!endspace) \{
+00547                 sds newhint = sdsnewlen(\textcolor{stringliteral}{" "},1);
+00548                 newhint = sdscatsds(newhint,hint);
+00549                 sdsfree(hint);
+00550                 hint = newhint;
+00551             \}
+00552 
+00553             sdsfreesplitres(argv,argc);
+00554             \textcolor{keywordflow}{return} hint;
+00555         \}
+00556     \}
+00557     sdsfreesplitres(argv,argc);
+00558     \textcolor{keywordflow}{return} NULL;
+00559 \}
+00560 
+00561 \textcolor{keyword}{static} \textcolor{keywordtype}{void} freeHintsCallback(\textcolor{keywordtype}{void} *ptr) \{
+00562     sdsfree(ptr);
+00563 \}
+00564 
+00565 \textcolor{comment}{/*------------------------------------------------------------------------------}
+00566 \textcolor{comment}{ * Networking / parsing}
+00567 \textcolor{comment}{ *--------------------------------------------------------------------------- */}
+00568 
+00569 \textcolor{comment}{/* Send AUTH command to the server */}
+00570 \textcolor{keyword}{static} \textcolor{keywordtype}{int} cliAuth(\textcolor{keywordtype}{void}) \{
+00571     redisReply *reply;
+00572     \textcolor{keywordflow}{if} (config.auth == NULL) \textcolor{keywordflow}{return} REDIS\_OK;
+00573 
+00574     reply = redisCommand(context,\textcolor{stringliteral}{"AUTH %s"},config.auth);
+00575     \textcolor{keywordflow}{if} (reply != NULL) \{
+00576         freeReplyObject(reply);
+00577         \textcolor{keywordflow}{return} REDIS\_OK;
+00578     \}
+00579     \textcolor{keywordflow}{return} REDIS\_ERR;
+00580 \}
+00581 
+00582 \textcolor{comment}{/* Send SELECT dbnum to the server */}
+00583 \textcolor{keyword}{static} \textcolor{keywordtype}{int} cliSelect(\textcolor{keywordtype}{void}) \{
+00584     redisReply *reply;
+00585     \textcolor{keywordflow}{if} (config.dbnum == 0) \textcolor{keywordflow}{return} REDIS\_OK;
+00586 
+00587     reply = redisCommand(context,\textcolor{stringliteral}{"SELECT %d"},config.dbnum);
+00588     \textcolor{keywordflow}{if} (reply != NULL) \{
+00589         \textcolor{keywordtype}{int} result = REDIS\_OK;
+00590         \textcolor{keywordflow}{if} (reply->type == REDIS\_REPLY\_ERROR) result = REDIS\_ERR;
+00591         freeReplyObject(reply);
+00592         \textcolor{keywordflow}{return} result;
+00593     \}
+00594     \textcolor{keywordflow}{return} REDIS\_ERR;
+00595 \}
+00596 
+00597 \textcolor{comment}{/* Connect to the server. If force is not zero the connection is performed}
+00598 \textcolor{comment}{ * even if there is already a connected socket. */}
+00599 \textcolor{keyword}{static} \textcolor{keywordtype}{int} cliConnect(\textcolor{keywordtype}{int} force) \{
+00600     \textcolor{keywordflow}{if} (context == NULL || force) \{
+00601         \textcolor{keywordflow}{if} (context != NULL) \{
+00602             redisFree(context);
+00603         \}
+00604 
+00605         \textcolor{keywordflow}{if} (config.hostsocket == NULL) \{
+00606             context = redisConnect(config.hostip,config.hostport);
+00607         \} \textcolor{keywordflow}{else} \{
+00608             context = redisConnectUnix(config.hostsocket);
+00609         \}
+00610 
+00611         \textcolor{keywordflow}{if} (context->err) \{
+00612             fprintf(stderr,\textcolor{stringliteral}{"Could not connect to Redis at "});
+00613             \textcolor{keywordflow}{if} (config.hostsocket == NULL)
+00614                 fprintf(stderr,\textcolor{stringliteral}{"%s:%d: %s\(\backslash\)n"},config.hostip,config.hostport,context->errstr);
+00615             \textcolor{keywordflow}{else}
+00616                 fprintf(stderr,\textcolor{stringliteral}{"%s: %s\(\backslash\)n"},config.hostsocket,context->errstr);
+00617             redisFree(context);
+00618             context = NULL;
+00619             \textcolor{keywordflow}{return} REDIS\_ERR;
+00620         \}
+00621 
+00622         \textcolor{comment}{/* Set aggressive KEEP\_ALIVE socket option in the Redis context socket}
+00623 \textcolor{comment}{         * in order to prevent timeouts caused by the execution of long}
+00624 \textcolor{comment}{         * commands. At the same time this improves the detection of real}
+00625 \textcolor{comment}{         * errors. */}
+00626         anetKeepAlive(NULL, context->fd, \hyperlink{redis-cli_8c_a5405864d5b0d191cc176105325fab907}{REDIS\_CLI\_KEEPALIVE\_INTERVAL});
+00627 
+00628         \textcolor{comment}{/* Do AUTH and select the right DB. */}
+00629         \textcolor{keywordflow}{if} (cliAuth() != REDIS\_OK)
+00630             \textcolor{keywordflow}{return} REDIS\_ERR;
+00631         \textcolor{keywordflow}{if} (cliSelect() != REDIS\_OK)
+00632             \textcolor{keywordflow}{return} REDIS\_ERR;
+00633     \}
+00634     \textcolor{keywordflow}{return} REDIS\_OK;
+00635 \}
+00636 
+00637 \textcolor{keyword}{static} \textcolor{keywordtype}{void} cliPrintContextError(\textcolor{keywordtype}{void}) \{
+00638     \textcolor{keywordflow}{if} (context == NULL) \textcolor{keywordflow}{return};
+00639     fprintf(stderr,\textcolor{stringliteral}{"Error: %s\(\backslash\)n"},context->errstr);
+00640 \}
+00641 
+00642 \textcolor{keyword}{static} sds cliFormatReplyTTY(redisReply *r, \textcolor{keywordtype}{char} *prefix) \{
+00643     sds out = sdsempty();
+00644     \textcolor{keywordflow}{switch} (r->type) \{
+00645     \textcolor{keywordflow}{case} REDIS\_REPLY\_ERROR:
+00646         out = sdscatprintf(out,\textcolor{stringliteral}{"(error) %s\(\backslash\)n"}, r->str);
+00647     \textcolor{keywordflow}{break};
+00648     \textcolor{keywordflow}{case} REDIS\_REPLY\_STATUS:
+00649         out = sdscat(out,r->str);
+00650         out = sdscat(out,\textcolor{stringliteral}{"\(\backslash\)n"});
+00651     \textcolor{keywordflow}{break};
+00652     \textcolor{keywordflow}{case} REDIS\_REPLY\_INTEGER:
+00653         out = sdscatprintf(out,\textcolor{stringliteral}{"(integer) %lld\(\backslash\)n"},r->integer);
+00654     \textcolor{keywordflow}{break};
+00655     \textcolor{keywordflow}{case} REDIS\_REPLY\_STRING:
+00656         \textcolor{comment}{/* If you are producing output for the standard output we want}
+00657 \textcolor{comment}{        * a more interesting output with quoted characters and so forth */}
+00658         out = sdscatrepr(out,r->str,r->len);
+00659         out = sdscat(out,\textcolor{stringliteral}{"\(\backslash\)n"});
+00660     \textcolor{keywordflow}{break};
+00661     \textcolor{keywordflow}{case} REDIS\_REPLY\_NIL:
+00662         out = sdscat(out,\textcolor{stringliteral}{"(nil)\(\backslash\)n"});
+00663     \textcolor{keywordflow}{break};
+00664     \textcolor{keywordflow}{case} REDIS\_REPLY\_ARRAY:
+00665         \textcolor{keywordflow}{if} (r->elements == 0) \{
+00666             out = sdscat(out,\textcolor{stringliteral}{"(empty list or set)\(\backslash\)n"});
+00667         \} \textcolor{keywordflow}{else} \{
+00668             \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{int} i, idxlen = 0;
+00669             \textcolor{keywordtype}{char} \_prefixlen[16];
+00670             \textcolor{keywordtype}{char} \_prefixfmt[16];
+00671             sds \_prefix;
+00672             sds tmp;
+00673 
+00674             \textcolor{comment}{/* Calculate chars needed to represent the largest index */}
+00675             i = r->elements;
+00676             \textcolor{keywordflow}{do} \{
+00677                 idxlen++;
+00678                 i /= 10;
+00679             \} \textcolor{keywordflow}{while}(i);
+00680 
+00681             \textcolor{comment}{/* Prefix for nested multi bulks should grow with idxlen+2 spaces */}
+00682             memset(\_prefixlen,\textcolor{stringliteral}{' '},idxlen+2);
+00683             \_prefixlen[idxlen+2] = \textcolor{stringliteral}{'\(\backslash\)0'};
+00684             \_prefix = sdscat(sdsnew(prefix),\_prefixlen);
+00685 
+00686             \textcolor{comment}{/* Setup prefix format for every entry */}
+00687             snprintf(\_prefixfmt,\textcolor{keyword}{sizeof}(\_prefixfmt),\textcolor{stringliteral}{"%%s%%%ud) "},idxlen);
+00688 
+00689             \textcolor{keywordflow}{for} (i = 0; i < r->elements; i++) \{
+00690                 \textcolor{comment}{/* Don't use the prefix for the first element, as the parent}
+00691 \textcolor{comment}{                 * caller already prepended the index number. */}
+00692                 out = sdscatprintf(out,\_prefixfmt,i == 0 ? \textcolor{stringliteral}{""} : prefix,i+1);
+00693 
+00694                 \textcolor{comment}{/* Format the multi bulk entry */}
+00695                 tmp = cliFormatReplyTTY(r->element[i],\_prefix);
+00696                 out = sdscatlen(out,tmp,sdslen(tmp));
+00697                 sdsfree(tmp);
+00698             \}
+00699             sdsfree(\_prefix);
+00700         \}
+00701     \textcolor{keywordflow}{break};
+00702     \textcolor{keywordflow}{default}:
+00703         fprintf(stderr,\textcolor{stringliteral}{"Unknown reply type: %d\(\backslash\)n"}, r->type);
+00704         exit(1);
+00705     \}
+00706     \textcolor{keywordflow}{return} out;
+00707 \}
+00708 
+00709 \textcolor{keywordtype}{int} isColorTerm(\textcolor{keywordtype}{void}) \{
+00710     \textcolor{keywordtype}{char} *t = getenv(\textcolor{stringliteral}{"TERM"});
+00711     \textcolor{keywordflow}{return} t != NULL && strstr(t,\textcolor{stringliteral}{"xterm"}) != NULL;
+00712 \}
+00713 
+00714 \textcolor{comment}{/* Helper  function for sdsCatColorizedLdbReply() appending colorize strings}
+00715 \textcolor{comment}{ * to an SDS string. */}
+00716 sds sdscatcolor(sds o, \textcolor{keywordtype}{char} *s, size\_t len, \textcolor{keywordtype}{char} *color) \{
+00717     \textcolor{keywordflow}{if} (!isColorTerm()) \textcolor{keywordflow}{return} sdscatlen(o,s,len);
+00718 
+00719     \textcolor{keywordtype}{int} bold = strstr(color,\textcolor{stringliteral}{"bold"}) != NULL;
+00720     \textcolor{keywordtype}{int} ccode = 37; \textcolor{comment}{/* Defaults to white. */}
+00721     \textcolor{keywordflow}{if} (strstr(color,\textcolor{stringliteral}{"red"})) ccode = 31;
+00722     \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (strstr(color,\textcolor{stringliteral}{"green"})) ccode = 32;
+00723     \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (strstr(color,\textcolor{stringliteral}{"yellow"})) ccode = 33;
+00724     \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (strstr(color,\textcolor{stringliteral}{"blue"})) ccode = 34;
+00725     \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (strstr(color,\textcolor{stringliteral}{"magenta"})) ccode = 35;
+00726     \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (strstr(color,\textcolor{stringliteral}{"cyan"})) ccode = 36;
+00727     \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (strstr(color,\textcolor{stringliteral}{"white"})) ccode = 37;
+00728 
+00729     o = sdscatfmt(o,\textcolor{stringliteral}{"\(\backslash\)033[%i;%i;49m"},bold,ccode);
+00730     o = sdscatlen(o,s,len);
+00731     o = sdscat(o,\textcolor{stringliteral}{"\(\backslash\)033[0m"});
+00732     \textcolor{keywordflow}{return} o;
+00733 \}
+00734 
+00735 \textcolor{comment}{/* Colorize Lua debugger status replies according to the prefix they}
+00736 \textcolor{comment}{ * have. */}
+00737 sds sdsCatColorizedLdbReply(sds o, \textcolor{keywordtype}{char} *s, size\_t len) \{
+00738     \textcolor{keywordtype}{char} *color = \textcolor{stringliteral}{"white"};
+00739 
+00740     \textcolor{keywordflow}{if} (strstr(s,\textcolor{stringliteral}{"<debug>"})) color = \textcolor{stringliteral}{"bold"};
+00741     \textcolor{keywordflow}{if} (strstr(s,\textcolor{stringliteral}{"<redis>"})) color = \textcolor{stringliteral}{"green"};
+00742     \textcolor{keywordflow}{if} (strstr(s,\textcolor{stringliteral}{"<reply>"})) color = \textcolor{stringliteral}{"cyan"};
+00743     \textcolor{keywordflow}{if} (strstr(s,\textcolor{stringliteral}{"<error>"})) color = \textcolor{stringliteral}{"red"};
+00744     \textcolor{keywordflow}{if} (strstr(s,\textcolor{stringliteral}{"<hint>"})) color = \textcolor{stringliteral}{"bold"};
+00745     \textcolor{keywordflow}{if} (strstr(s,\textcolor{stringliteral}{"<value>"}) || strstr(s,\textcolor{stringliteral}{"<retval>"})) color = \textcolor{stringliteral}{"magenta"};
+00746     \textcolor{keywordflow}{if} (len > 4 && isdigit(s[3])) \{
+00747         \textcolor{keywordflow}{if} (s[1] == \textcolor{stringliteral}{'>'}) color = \textcolor{stringliteral}{"yellow"}; \textcolor{comment}{/* Current line. */}
+00748         \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (s[2] == \textcolor{stringliteral}{'#'}) color = \textcolor{stringliteral}{"bold"}; \textcolor{comment}{/* Break point. */}
+00749     \}
+00750     \textcolor{keywordflow}{return} sdscatcolor(o,s,len,color);
+00751 \}
+00752 
+00753 \textcolor{keyword}{static} sds cliFormatReplyRaw(redisReply *r) \{
+00754     sds out = sdsempty(), tmp;
+00755     size\_t i;
+00756 
+00757     \textcolor{keywordflow}{switch} (r->type) \{
+00758     \textcolor{keywordflow}{case} REDIS\_REPLY\_NIL:
+00759         \textcolor{comment}{/* Nothing... */}
+00760         \textcolor{keywordflow}{break};
+00761     \textcolor{keywordflow}{case} REDIS\_REPLY\_ERROR:
+00762         out = sdscatlen(out,r->str,r->len);
+00763         out = sdscatlen(out,\textcolor{stringliteral}{"\(\backslash\)n"},1);
+00764         \textcolor{keywordflow}{break};
+00765     \textcolor{keywordflow}{case} REDIS\_REPLY\_STATUS:
+00766     \textcolor{keywordflow}{case} REDIS\_REPLY\_STRING:
+00767         \textcolor{keywordflow}{if} (r->type == REDIS\_REPLY\_STATUS && config.eval\_ldb) \{
+00768             \textcolor{comment}{/* The Lua debugger replies with arrays of simple (status)}
+00769 \textcolor{comment}{             * strings. We colorize the output for more fun if this}
+00770 \textcolor{comment}{             * is a debugging session. */}
+00771 
+00772             \textcolor{comment}{/* Detect the end of a debugging session. */}
+00773             \textcolor{keywordflow}{if} (strstr(r->str,\textcolor{stringliteral}{"<endsession>"}) == r->str) \{
+00774                 config.enable\_ldb\_on\_eval = 0;
+00775                 config.eval\_ldb = 0;
+00776                 config.eval\_ldb\_end = 1; \textcolor{comment}{/* Signal the caller session ended. */}
+00777                 config.output = \hyperlink{redis-cli_8c_abf624f04f4590979c3c3944bc7f94d6e}{OUTPUT\_STANDARD};
+00778                 cliRefreshPrompt();
+00779             \} \textcolor{keywordflow}{else} \{
+00780                 out = sdsCatColorizedLdbReply(out,r->str,r->len);
+00781             \}
+00782         \} \textcolor{keywordflow}{else} \{
+00783             out = sdscatlen(out,r->str,r->len);
+00784         \}
+00785         \textcolor{keywordflow}{break};
+00786     \textcolor{keywordflow}{case} REDIS\_REPLY\_INTEGER:
+00787         out = sdscatprintf(out,\textcolor{stringliteral}{"%lld"},r->integer);
+00788         \textcolor{keywordflow}{break};
+00789     \textcolor{keywordflow}{case} REDIS\_REPLY\_ARRAY:
+00790         \textcolor{keywordflow}{for} (i = 0; i < r->elements; i++) \{
+00791             \textcolor{keywordflow}{if} (i > 0) out = sdscat(out,config.mb\_delim);
+00792             tmp = cliFormatReplyRaw(r->element[i]);
+00793             out = sdscatlen(out,tmp,sdslen(tmp));
+00794             sdsfree(tmp);
+00795         \}
+00796         \textcolor{keywordflow}{break};
+00797     \textcolor{keywordflow}{default}:
+00798         fprintf(stderr,\textcolor{stringliteral}{"Unknown reply type: %d\(\backslash\)n"}, r->type);
+00799         exit(1);
+00800     \}
+00801     \textcolor{keywordflow}{return} out;
+00802 \}
+00803 
+00804 \textcolor{keyword}{static} sds cliFormatReplyCSV(redisReply *r) \{
+00805     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{int} i;
+00806 
+00807     sds out = sdsempty();
+00808     \textcolor{keywordflow}{switch} (r->type) \{
+00809     \textcolor{keywordflow}{case} REDIS\_REPLY\_ERROR:
+00810         out = sdscat(out,\textcolor{stringliteral}{"ERROR,"});
+00811         out = sdscatrepr(out,r->str,strlen(r->str));
+00812     \textcolor{keywordflow}{break};
+00813     \textcolor{keywordflow}{case} REDIS\_REPLY\_STATUS:
+00814         out = sdscatrepr(out,r->str,r->len);
+00815     \textcolor{keywordflow}{break};
+00816     \textcolor{keywordflow}{case} REDIS\_REPLY\_INTEGER:
+00817         out = sdscatprintf(out,\textcolor{stringliteral}{"%lld"},r->integer);
+00818     \textcolor{keywordflow}{break};
+00819     \textcolor{keywordflow}{case} REDIS\_REPLY\_STRING:
+00820         out = sdscatrepr(out,r->str,r->len);
+00821     \textcolor{keywordflow}{break};
+00822     \textcolor{keywordflow}{case} REDIS\_REPLY\_NIL:
+00823         out = sdscat(out,\textcolor{stringliteral}{"NIL"});
+00824     \textcolor{keywordflow}{break};
+00825     \textcolor{keywordflow}{case} REDIS\_REPLY\_ARRAY:
+00826         \textcolor{keywordflow}{for} (i = 0; i < r->elements; i++) \{
+00827             sds tmp = cliFormatReplyCSV(r->element[i]);
+00828             out = sdscatlen(out,tmp,sdslen(tmp));
+00829             \textcolor{keywordflow}{if} (i != r->elements-1) out = sdscat(out,\textcolor{stringliteral}{","});
+00830             sdsfree(tmp);
+00831         \}
+00832     \textcolor{keywordflow}{break};
+00833     \textcolor{keywordflow}{default}:
+00834         fprintf(stderr,\textcolor{stringliteral}{"Unknown reply type: %d\(\backslash\)n"}, r->type);
+00835         exit(1);
+00836     \}
+00837     \textcolor{keywordflow}{return} out;
+00838 \}
+00839 
+00840 \textcolor{keyword}{static} \textcolor{keywordtype}{int} cliReadReply(\textcolor{keywordtype}{int} output\_raw\_strings) \{
+00841     \textcolor{keywordtype}{void} *\_reply;
+00842     redisReply *reply;
+00843     sds out = NULL;
+00844     \textcolor{keywordtype}{int} output = 1;
+00845 
+00846     \textcolor{keywordflow}{if} (redisGetReply(context,&\_reply) != REDIS\_OK) \{
+00847         \textcolor{keywordflow}{if} (config.shutdown) \{
+00848             redisFree(context);
+00849             context = NULL;
+00850             \textcolor{keywordflow}{return} REDIS\_OK;
+00851         \}
+00852         \textcolor{keywordflow}{if} (config.interactive) \{
+00853             \textcolor{comment}{/* Filter cases where we should reconnect */}
+00854             \textcolor{keywordflow}{if} (context->err == REDIS\_ERR\_IO &&
+00855                 (errno == ECONNRESET || errno == EPIPE))
+00856                 \textcolor{keywordflow}{return} REDIS\_ERR;
+00857             \textcolor{keywordflow}{if} (context->err == REDIS\_ERR\_EOF)
+00858                 \textcolor{keywordflow}{return} REDIS\_ERR;
+00859         \}
+00860         cliPrintContextError();
+00861         exit(1);
+00862         \textcolor{keywordflow}{return} REDIS\_ERR; \textcolor{comment}{/* avoid compiler warning */}
+00863     \}
+00864 
+00865     reply = (redisReply*)\_reply;
+00866 
+00867     config.last\_cmd\_type = reply->type;
+00868 
+00869     \textcolor{comment}{/* Check if we need to connect to a different node and reissue the}
+00870 \textcolor{comment}{     * request. */}
+00871     \textcolor{keywordflow}{if} (config.cluster\_mode && reply->type == REDIS\_REPLY\_ERROR &&
+00872         (!strncmp(reply->str,\textcolor{stringliteral}{"MOVED"},5) || !strcmp(reply->str,\textcolor{stringliteral}{"ASK"})))
+00873     \{
+00874         \textcolor{keywordtype}{char} *p = reply->str, *s;
+00875         \textcolor{keywordtype}{int} slot;
+00876 
+00877         output = 0;
+00878         \textcolor{comment}{/* Comments show the position of the pointer as:}
+00879 \textcolor{comment}{         *}
+00880 \textcolor{comment}{         * [S] for pointer 's'}
+00881 \textcolor{comment}{         * [P] for pointer 'p'}
+00882 \textcolor{comment}{         */}
+00883         s = strchr(p,\textcolor{stringliteral}{' '});      \textcolor{comment}{/* MOVED[S]3999 127.0.0.1:6381 */}
+00884         p = strchr(s+1,\textcolor{stringliteral}{' '});    \textcolor{comment}{/* MOVED[S]3999[P]127.0.0.1:6381 */}
+00885         *p = \textcolor{stringliteral}{'\(\backslash\)0'};
+00886         slot = atoi(s+1);
+00887         s = strrchr(p+1,\textcolor{stringliteral}{':'});    \textcolor{comment}{/* MOVED 3999[P]127.0.0.1[S]6381 */}
+00888         *s = \textcolor{stringliteral}{'\(\backslash\)0'};
+00889         sdsfree(config.hostip);
+00890         config.hostip = sdsnew(p+1);
+00891         config.hostport = atoi(s+1);
+00892         \textcolor{keywordflow}{if} (config.interactive)
+00893             printf(\textcolor{stringliteral}{"-> Redirected to slot [%d] located at %s:%d\(\backslash\)n"},
+00894                 slot, config.hostip, config.hostport);
+00895         config.cluster\_reissue\_command = 1;
+00896         cliRefreshPrompt();
+00897     \}
+00898 
+00899     \textcolor{keywordflow}{if} (output) \{
+00900         \textcolor{keywordflow}{if} (output\_raw\_strings) \{
+00901             out = cliFormatReplyRaw(reply);
+00902         \} \textcolor{keywordflow}{else} \{
+00903             \textcolor{keywordflow}{if} (config.output == \hyperlink{redis-cli_8c_a4f47017b54da140967dcbd440fae227c}{OUTPUT\_RAW}) \{
+00904                 out = cliFormatReplyRaw(reply);
+00905                 out = sdscat(out,\textcolor{stringliteral}{"\(\backslash\)n"});
+00906             \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (config.output == \hyperlink{redis-cli_8c_abf624f04f4590979c3c3944bc7f94d6e}{OUTPUT\_STANDARD}) \{
+00907                 out = cliFormatReplyTTY(reply,\textcolor{stringliteral}{""});
+00908             \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (config.output == \hyperlink{redis-cli_8c_a55fcc3cb9516c34eebf22ac9f8ebf3a2}{OUTPUT\_CSV}) \{
+00909                 out = cliFormatReplyCSV(reply);
+00910                 out = sdscat(out,\textcolor{stringliteral}{"\(\backslash\)n"});
+00911             \}
+00912         \}
+00913         fwrite(out,sdslen(out),1,stdout);
+00914         sdsfree(out);
+00915     \}
+00916     freeReplyObject(reply);
+00917     \textcolor{keywordflow}{return} REDIS\_OK;
+00918 \}
+00919 
+00920 \textcolor{keyword}{static} \textcolor{keywordtype}{int} cliSendCommand(\textcolor{keywordtype}{int} argc, \textcolor{keywordtype}{char} **argv, \textcolor{keywordtype}{int} repeat) \{
+00921     \textcolor{keywordtype}{char} *command = argv[0];
+00922     size\_t *argvlen;
+00923     \textcolor{keywordtype}{int} j, output\_raw;
+00924 
+00925     \textcolor{keywordflow}{if} (!config.eval\_ldb && \textcolor{comment}{/* In debugging mode, let's pass "help" to Redis. */}
+00926         (!strcasecmp(command,\textcolor{stringliteral}{"help"}) || !strcasecmp(command,\textcolor{stringliteral}{"?"}))) \{
+00927         cliOutputHelp(--argc, ++argv);
+00928         \textcolor{keywordflow}{return} REDIS\_OK;
+00929     \}
+00930 
+00931     \textcolor{keywordflow}{if} (context == NULL) \textcolor{keywordflow}{return} REDIS\_ERR;
+00932 
+00933     output\_raw = 0;
+00934     \textcolor{keywordflow}{if} (!strcasecmp(command,\textcolor{stringliteral}{"info"}) ||
+00935         (argc >= 2 && !strcasecmp(command,\textcolor{stringliteral}{"debug"}) &&
+00936                        !strcasecmp(argv[1],\textcolor{stringliteral}{"htstats"})) ||
+00937         (argc >= 2 && !strcasecmp(command,\textcolor{stringliteral}{"memory"}) &&
+00938                       (!strcasecmp(argv[1],\textcolor{stringliteral}{"malloc-stats"}) ||
+00939                        !strcasecmp(argv[1],\textcolor{stringliteral}{"doctor"}))) ||
+00940         (argc == 2 && !strcasecmp(command,\textcolor{stringliteral}{"cluster"}) &&
+00941                       (!strcasecmp(argv[1],\textcolor{stringliteral}{"nodes"}) ||
+00942                        !strcasecmp(argv[1],\textcolor{stringliteral}{"info"}))) ||
+00943         (argc == 2 && !strcasecmp(command,\textcolor{stringliteral}{"client"}) &&
+00944                        !strcasecmp(argv[1],\textcolor{stringliteral}{"list"})) ||
+00945         (argc == 3 && !strcasecmp(command,\textcolor{stringliteral}{"latency"}) &&
+00946                        !strcasecmp(argv[1],\textcolor{stringliteral}{"graph"})) ||
+00947         (argc == 2 && !strcasecmp(command,\textcolor{stringliteral}{"latency"}) &&
+00948                        !strcasecmp(argv[1],\textcolor{stringliteral}{"doctor"})))
+00949     \{
+00950         output\_raw = 1;
+00951     \}
+00952 
+00953     \textcolor{keywordflow}{if} (!strcasecmp(command,\textcolor{stringliteral}{"shutdown"})) config.shutdown = 1;
+00954     \textcolor{keywordflow}{if} (!strcasecmp(command,\textcolor{stringliteral}{"monitor"})) config.monitor\_mode = 1;
+00955     \textcolor{keywordflow}{if} (!strcasecmp(command,\textcolor{stringliteral}{"subscribe"}) ||
+00956         !strcasecmp(command,\textcolor{stringliteral}{"psubscribe"})) config.pubsub\_mode = 1;
+00957     \textcolor{keywordflow}{if} (!strcasecmp(command,\textcolor{stringliteral}{"sync"}) ||
+00958         !strcasecmp(command,\textcolor{stringliteral}{"psync"})) config.slave\_mode = 1;
+00959 
+00960     \textcolor{comment}{/* When the user manually calls SCRIPT DEBUG, setup the activation of}
+00961 \textcolor{comment}{     * debugging mode on the next eval if needed. */}
+00962     \textcolor{keywordflow}{if} (argc == 3 && !strcasecmp(argv[0],\textcolor{stringliteral}{"script"}) &&
+00963                      !strcasecmp(argv[1],\textcolor{stringliteral}{"debug"}))
+00964     \{
+00965         \textcolor{keywordflow}{if} (!strcasecmp(argv[2],\textcolor{stringliteral}{"yes"}) || !strcasecmp(argv[2],\textcolor{stringliteral}{"sync"})) \{
+00966             config.enable\_ldb\_on\_eval = 1;
+00967         \} \textcolor{keywordflow}{else} \{
+00968             config.enable\_ldb\_on\_eval = 0;
+00969         \}
+00970     \}
+00971 
+00972     \textcolor{comment}{/* Actually activate LDB on EVAL if needed. */}
+00973     \textcolor{keywordflow}{if} (!strcasecmp(command,\textcolor{stringliteral}{"eval"}) && config.enable\_ldb\_on\_eval) \{
+00974         config.eval\_ldb = 1;
+00975         config.output = \hyperlink{redis-cli_8c_a4f47017b54da140967dcbd440fae227c}{OUTPUT\_RAW};
+00976     \}
+00977 
+00978     \textcolor{comment}{/* Setup argument length */}
+00979     argvlen = zmalloc(argc*\textcolor{keyword}{sizeof}(size\_t));
+00980     \textcolor{keywordflow}{for} (j = 0; j < argc; j++)
+00981         argvlen[j] = sdslen(argv[j]);
+00982 
+00983     \textcolor{keywordflow}{while}(repeat--) \{
+00984         redisAppendCommandArgv(context,argc,(\textcolor{keyword}{const} \textcolor{keywordtype}{char}**)argv,argvlen);
+00985         \textcolor{keywordflow}{while} (config.monitor\_mode) \{
+00986             \textcolor{keywordflow}{if} (cliReadReply(output\_raw) != REDIS\_OK) exit(1);
+00987             fflush(stdout);
+00988         \}
+00989 
+00990         \textcolor{keywordflow}{if} (config.pubsub\_mode) \{
+00991             \textcolor{keywordflow}{if} (config.output != \hyperlink{redis-cli_8c_a4f47017b54da140967dcbd440fae227c}{OUTPUT\_RAW})
+00992                 printf(\textcolor{stringliteral}{"Reading messages... (press Ctrl-C to quit)\(\backslash\)n"});
+00993             \textcolor{keywordflow}{while} (1) \{
+00994                 \textcolor{keywordflow}{if} (cliReadReply(output\_raw) != REDIS\_OK) exit(1);
+00995             \}
+00996         \}
+00997 
+00998         \textcolor{keywordflow}{if} (config.slave\_mode) \{
+00999             printf(\textcolor{stringliteral}{"Entering slave output mode...  (press Ctrl-C to quit)\(\backslash\)n"});
+01000             slaveMode();
+01001             config.slave\_mode = 0;
+01002             zfree(argvlen);
+01003             \textcolor{keywordflow}{return} REDIS\_ERR;  \textcolor{comment}{/* Error = slaveMode lost connection to master */}
+01004         \}
+01005 
+01006         \textcolor{keywordflow}{if} (cliReadReply(output\_raw) != REDIS\_OK) \{
+01007             zfree(argvlen);
+01008             \textcolor{keywordflow}{return} REDIS\_ERR;
+01009         \} \textcolor{keywordflow}{else} \{
+01010             \textcolor{comment}{/* Store database number when SELECT was successfully executed. */}
+01011             \textcolor{keywordflow}{if} (!strcasecmp(command,\textcolor{stringliteral}{"select"}) && argc == 2 && config.last\_cmd\_type != 
+      REDIS\_REPLY\_ERROR) \{
+01012                 config.dbnum = atoi(argv[1]);
+01013                 cliRefreshPrompt();
+01014             \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcasecmp(command,\textcolor{stringliteral}{"auth"}) && argc == 2) \{
+01015                 cliSelect();
+01016             \}
+01017         \}
+01018         \textcolor{keywordflow}{if} (config.interval) usleep(config.interval);
+01019         fflush(stdout); \textcolor{comment}{/* Make it grep friendly */}
+01020     \}
+01021 
+01022     zfree(argvlen);
+01023     \textcolor{keywordflow}{return} REDIS\_OK;
+01024 \}
+01025 
+01026 \textcolor{comment}{/* Send a command reconnecting the link if needed. */}
+01027 \textcolor{keyword}{static} redisReply *reconnectingRedisCommand(redisContext *c, \textcolor{keyword}{const} \textcolor{keywordtype}{char} *fmt, ...) \{
+01028     redisReply *reply = NULL;
+01029     \textcolor{keywordtype}{int} tries = 0;
+01030     va\_list ap;
+01031 
+01032     \hyperlink{redisassert_8h_a993abaa2c168852c1592879472938781}{assert}(!c->err);
+01033     \textcolor{keywordflow}{while}(reply == NULL) \{
+01034         \textcolor{keywordflow}{while} (c->err & (REDIS\_ERR\_IO | REDIS\_ERR\_EOF)) \{
+01035             printf(\textcolor{stringliteral}{"\(\backslash\)r\(\backslash\)x1b[0K"}); \textcolor{comment}{/* Cursor to left edge + clear line. */}
+01036             printf(\textcolor{stringliteral}{"Reconnecting... %d\(\backslash\)r"}, ++tries);
+01037             fflush(stdout);
+01038 
+01039             redisFree(c);
+01040             c = redisConnect(config.hostip,config.hostport);
+01041             usleep(1000000);
+01042         \}
+01043 
+01044         va\_start(ap,fmt);
+01045         reply = redisvCommand(c,fmt,ap);
+01046         va\_end(ap);
+01047 
+01048         \textcolor{keywordflow}{if} (c->err && !(c->err & (REDIS\_ERR\_IO | REDIS\_ERR\_EOF))) \{
+01049             fprintf(stderr, \textcolor{stringliteral}{"Error: %s\(\backslash\)n"}, c->errstr);
+01050             exit(1);
+01051         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (tries > 0) \{
+01052             printf(\textcolor{stringliteral}{"\(\backslash\)r\(\backslash\)x1b[0K"}); \textcolor{comment}{/* Cursor to left edge + clear line. */}
+01053         \}
+01054     \}
+01055 
+01056     context = c;
+01057     \textcolor{keywordflow}{return} reply;
+01058 \}
+01059 
+01060 \textcolor{comment}{/*------------------------------------------------------------------------------}
+01061 \textcolor{comment}{ * User interface}
+01062 \textcolor{comment}{ *--------------------------------------------------------------------------- */}
+01063 
+01064 \textcolor{keyword}{static} \textcolor{keywordtype}{int} parseOptions(\textcolor{keywordtype}{int} argc, \textcolor{keywordtype}{char} **argv) \{
+01065     \textcolor{keywordtype}{int} i;
+01066 
+01067     \textcolor{keywordflow}{for} (i = 1; i < argc; i++) \{
+01068         \textcolor{keywordtype}{int} lastarg = i==argc-1;
+01069 
+01070         \textcolor{keywordflow}{if} (!strcmp(argv[i],\textcolor{stringliteral}{"-h"}) && !lastarg) \{
+01071             sdsfree(config.hostip);
+01072             config.hostip = sdsnew(argv[++i]);
+01073         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcmp(argv[i],\textcolor{stringliteral}{"-h"}) && lastarg) \{
+01074             usage();
+01075         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcmp(argv[i],\textcolor{stringliteral}{"--help"})) \{
+01076             usage();
+01077         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcmp(argv[i],\textcolor{stringliteral}{"-x"})) \{
+01078             config.stdinarg = 1;
+01079         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcmp(argv[i],\textcolor{stringliteral}{"-p"}) && !lastarg) \{
+01080             config.hostport = atoi(argv[++i]);
+01081         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcmp(argv[i],\textcolor{stringliteral}{"-s"}) && !lastarg) \{
+01082             config.hostsocket = argv[++i];
+01083         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcmp(argv[i],\textcolor{stringliteral}{"-r"}) && !lastarg) \{
+01084             config.repeat = strtoll(argv[++i],NULL,10);
+01085         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcmp(argv[i],\textcolor{stringliteral}{"-i"}) && !lastarg) \{
+01086             \textcolor{keywordtype}{double} seconds = atof(argv[++i]);
+01087             config.interval = seconds*1000000;
+01088         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcmp(argv[i],\textcolor{stringliteral}{"-n"}) && !lastarg) \{
+01089             config.dbnum = atoi(argv[++i]);
+01090         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcmp(argv[i],\textcolor{stringliteral}{"-a"}) && !lastarg) \{
+01091             config.auth = argv[++i];
+01092         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcmp(argv[i],\textcolor{stringliteral}{"-u"}) && !lastarg) \{
+01093             parseRedisUri(argv[++i]);
+01094         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcmp(argv[i],\textcolor{stringliteral}{"--raw"})) \{
+01095             config.output = \hyperlink{redis-cli_8c_a4f47017b54da140967dcbd440fae227c}{OUTPUT\_RAW};
+01096         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcmp(argv[i],\textcolor{stringliteral}{"--no-raw"})) \{
+01097             config.output = \hyperlink{redis-cli_8c_abf624f04f4590979c3c3944bc7f94d6e}{OUTPUT\_STANDARD};
+01098         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcmp(argv[i],\textcolor{stringliteral}{"--csv"})) \{
+01099             config.output = \hyperlink{redis-cli_8c_a55fcc3cb9516c34eebf22ac9f8ebf3a2}{OUTPUT\_CSV};
+01100         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcmp(argv[i],\textcolor{stringliteral}{"--latency"})) \{
+01101             config.latency\_mode = 1;
+01102         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcmp(argv[i],\textcolor{stringliteral}{"--latency-dist"})) \{
+01103             config.latency\_dist\_mode = 1;
+01104         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcmp(argv[i],\textcolor{stringliteral}{"--mono"})) \{
+01105             spectrum\_palette = spectrum\_palette\_mono;
+01106             spectrum\_palette\_size = spectrum\_palette\_mono\_size;
+01107         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcmp(argv[i],\textcolor{stringliteral}{"--latency-history"})) \{
+01108             config.latency\_mode = 1;
+01109             config.latency\_history = 1;
+01110         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcmp(argv[i],\textcolor{stringliteral}{"--lru-test"}) && !lastarg) \{
+01111             config.lru\_test\_mode = 1;
+01112             config.lru\_test\_sample\_size = strtoll(argv[++i],NULL,10);
+01113         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcmp(argv[i],\textcolor{stringliteral}{"--slave"})) \{
+01114             config.slave\_mode = 1;
+01115         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcmp(argv[i],\textcolor{stringliteral}{"--stat"})) \{
+01116             config.stat\_mode = 1;
+01117         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcmp(argv[i],\textcolor{stringliteral}{"--scan"})) \{
+01118             config.scan\_mode = 1;
+01119         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcmp(argv[i],\textcolor{stringliteral}{"--pattern"}) && !lastarg) \{
+01120             config.pattern = argv[++i];
+01121         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcmp(argv[i],\textcolor{stringliteral}{"--intrinsic-latency"}) && !lastarg) \{
+01122             config.intrinsic\_latency\_mode = 1;
+01123             config.intrinsic\_latency\_duration = atoi(argv[++i]);
+01124         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcmp(argv[i],\textcolor{stringliteral}{"--rdb"}) && !lastarg) \{
+01125             config.getrdb\_mode = 1;
+01126             config.rdb\_filename = argv[++i];
+01127         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcmp(argv[i],\textcolor{stringliteral}{"--pipe"})) \{
+01128             config.pipe\_mode = 1;
+01129         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcmp(argv[i],\textcolor{stringliteral}{"--pipe-timeout"}) && !lastarg) \{
+01130             config.pipe\_timeout = atoi(argv[++i]);
+01131         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcmp(argv[i],\textcolor{stringliteral}{"--bigkeys"})) \{
+01132             config.bigkeys = 1;
+01133         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcmp(argv[i],\textcolor{stringliteral}{"--hotkeys"})) \{
+01134             config.hotkeys = 1;
+01135         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcmp(argv[i],\textcolor{stringliteral}{"--eval"}) && !lastarg) \{
+01136             config.eval = argv[++i];
+01137         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcmp(argv[i],\textcolor{stringliteral}{"--ldb"})) \{
+01138             config.eval\_ldb = 1;
+01139             config.output = \hyperlink{redis-cli_8c_a4f47017b54da140967dcbd440fae227c}{OUTPUT\_RAW};
+01140         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcmp(argv[i],\textcolor{stringliteral}{"--ldb-sync-mode"})) \{
+01141             config.eval\_ldb = 1;
+01142             config.eval\_ldb\_sync = 1;
+01143             config.output = \hyperlink{redis-cli_8c_a4f47017b54da140967dcbd440fae227c}{OUTPUT\_RAW};
+01144         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcmp(argv[i],\textcolor{stringliteral}{"-c"})) \{
+01145             config.cluster\_mode = 1;
+01146         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcmp(argv[i],\textcolor{stringliteral}{"-d"}) && !lastarg) \{
+01147             sdsfree(config.mb\_delim);
+01148             config.mb\_delim = sdsnew(argv[++i]);
+01149         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcmp(argv[i],\textcolor{stringliteral}{"-v"}) || !strcmp(argv[i], \textcolor{stringliteral}{"--version"})) \{
+01150             sds version = cliVersion();
+01151             printf(\textcolor{stringliteral}{"redis-cli %s\(\backslash\)n"}, version);
+01152             sdsfree(version);
+01153             exit(0);
+01154         \} \textcolor{keywordflow}{else} \{
+01155             \textcolor{keywordflow}{if} (argv[i][0] == \textcolor{stringliteral}{'-'}) \{
+01156                 fprintf(stderr,
+01157                     \textcolor{stringliteral}{"Unrecognized option or bad number of args for: '%s'\(\backslash\)n"},
+01158                     argv[i]);
+01159                 exit(1);
+01160             \} \textcolor{keywordflow}{else} \{
+01161                 \textcolor{comment}{/* Likely the command name, stop here. */}
+01162                 \textcolor{keywordflow}{break};
+01163             \}
+01164         \}
+01165     \}
+01166 
+01167     \textcolor{comment}{/* --ldb requires --eval. */}
+01168     \textcolor{keywordflow}{if} (config.eval\_ldb && config.eval == NULL) \{
+01169         fprintf(stderr,\textcolor{stringliteral}{"Options --ldb and --ldb-sync-mode require --eval.\(\backslash\)n"});
+01170         fprintf(stderr,\textcolor{stringliteral}{"Try %s --help for more information.\(\backslash\)n"}, argv[0]);
+01171         exit(1);
+01172     \}
+01173     \textcolor{keywordflow}{return} i;
+01174 \}
+01175 
+01176 \textcolor{keyword}{static} sds readArgFromStdin(\textcolor{keywordtype}{void}) \{
+01177     \textcolor{keywordtype}{char} buf[1024];
+01178     sds arg = sdsempty();
+01179 
+01180     \textcolor{keywordflow}{while}(1) \{
+01181         \textcolor{keywordtype}{int} nread = read(fileno(stdin),buf,1024);
+01182 
+01183         \textcolor{keywordflow}{if} (nread == 0) \textcolor{keywordflow}{break};
+01184         \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (nread == -1) \{
+01185             perror(\textcolor{stringliteral}{"Reading from standard input"});
+01186             exit(1);
+01187         \}
+01188         arg = sdscatlen(arg,buf,nread);
+01189     \}
+01190     \textcolor{keywordflow}{return} arg;
+01191 \}
+01192 
+01193 \textcolor{keyword}{static} \textcolor{keywordtype}{void} usage(\textcolor{keywordtype}{void}) \{
+01194     sds version = cliVersion();
+01195     fprintf(stderr,
+01196 \textcolor{stringliteral}{"redis-cli %s\(\backslash\)n"}
+01197 \textcolor{stringliteral}{"\(\backslash\)n"}
+01198 \textcolor{stringliteral}{"Usage: redis-cli [OPTIONS] [cmd [arg [arg ...]]]\(\backslash\)n"}
+01199 \textcolor{stringliteral}{"  -h <hostname>      Server hostname (default: 127.0.0.1).\(\backslash\)n"}
+01200 \textcolor{stringliteral}{"  -p <port>          Server port (default: 6379).\(\backslash\)n"}
+01201 \textcolor{stringliteral}{"  -s <socket>        Server socket (overrides hostname and port).\(\backslash\)n"}
+01202 \textcolor{stringliteral}{"  -a <password>      Password to use when connecting to the server.\(\backslash\)n"}
+01203 \textcolor{stringliteral}{"  -u <uri>           Server URI.\(\backslash\)n"}
+01204 \textcolor{stringliteral}{"  -r <repeat>        Execute specified command N times.\(\backslash\)n"}
+01205 \textcolor{stringliteral}{"  -i <interval>      When -r is used, waits <interval> seconds per command.\(\backslash\)n"}
+01206 \textcolor{stringliteral}{"                     It is possible to specify sub-second times like -i 0.1.\(\backslash\)n"}
+01207 \textcolor{stringliteral}{"  -n <db>            Database number.\(\backslash\)n"}
+01208 \textcolor{stringliteral}{"  -x                 Read last argument from STDIN.\(\backslash\)n"}
+01209 \textcolor{stringliteral}{"  -d <delimiter>     Multi-bulk delimiter in for raw formatting (default: \(\backslash\)\(\backslash\)n).\(\backslash\)n"}
+01210 \textcolor{stringliteral}{"  -c                 Enable cluster mode (follow -ASK and -MOVED redirections).\(\backslash\)n"}
+01211 \textcolor{stringliteral}{"  --raw              Use raw formatting for replies (default when STDOUT is\(\backslash\)n"}
+01212 \textcolor{stringliteral}{"                     not a tty).\(\backslash\)n"}
+01213 \textcolor{stringliteral}{"  --no-raw           Force formatted output even when STDOUT is not a tty.\(\backslash\)n"}
+01214 \textcolor{stringliteral}{"  --csv              Output in CSV format.\(\backslash\)n"}
+01215 \textcolor{stringliteral}{"  --stat             Print rolling stats about server: mem, clients, ...\(\backslash\)n"}
+01216 \textcolor{stringliteral}{"  --latency          Enter a special mode continuously sampling latency.\(\backslash\)n"}
+01217 \textcolor{stringliteral}{"                     If you use this mode in an interactive session it runs\(\backslash\)n"}
+01218 \textcolor{stringliteral}{"                     forever displaying real-time stats. Otherwise if --raw or\(\backslash\)n"}
+01219 \textcolor{stringliteral}{"                     --csv is specified, or if you redirect the output to a non\(\backslash\)n"}
+01220 \textcolor{stringliteral}{"                     TTY, it samples the latency for 1 second (you can use\(\backslash\)n"}
+01221 \textcolor{stringliteral}{"                     -i to change the interval), then produces a single output\(\backslash\)n"}
+01222 \textcolor{stringliteral}{"                     and exits.\(\backslash\)n"}
+01223 \textcolor{stringliteral}{"  --latency-history  Like --latency but tracking latency changes over time.\(\backslash\)n"}
+01224 \textcolor{stringliteral}{"                     Default time interval is 15 sec. Change it using -i.\(\backslash\)n"}
+01225 \textcolor{stringliteral}{"  --latency-dist     Shows latency as a spectrum, requires xterm 256 colors.\(\backslash\)n"}
+01226 \textcolor{stringliteral}{"                     Default time interval is 1 sec. Change it using -i.\(\backslash\)n"}
+01227 \textcolor{stringliteral}{"  --lru-test <keys>  Simulate a cache workload with an 80-20 distribution.\(\backslash\)n"}
+01228 \textcolor{stringliteral}{"  --slave            Simulate a slave showing commands received from the master.\(\backslash\)n"}
+01229 \textcolor{stringliteral}{"  --rdb <filename>   Transfer an RDB dump from remote server to local file.\(\backslash\)n"}
+01230 \textcolor{stringliteral}{"  --pipe             Transfer raw Redis protocol from stdin to server.\(\backslash\)n"}
+01231 \textcolor{stringliteral}{"  --pipe-timeout <n> In --pipe mode, abort with error if after sending all data.\(\backslash\)n"}
+01232 \textcolor{stringliteral}{"                     no reply is received within <n> seconds.\(\backslash\)n"}
+01233 \textcolor{stringliteral}{"                     Default timeout: %d. Use 0 to wait forever.\(\backslash\)n"}
+01234 \textcolor{stringliteral}{"  --bigkeys          Sample Redis keys looking for big keys.\(\backslash\)n"}
+01235 \textcolor{stringliteral}{"  --hotkeys          Sample Redis keys looking for hot keys.\(\backslash\)n"}
+01236 \textcolor{stringliteral}{"                     only works when maxmemory-policy is *lfu.\(\backslash\)n"}
+01237 \textcolor{stringliteral}{"  --scan             List all keys using the SCAN command.\(\backslash\)n"}
+01238 \textcolor{stringliteral}{"  --pattern <pat>    Useful with --scan to specify a SCAN pattern.\(\backslash\)n"}
+01239 \textcolor{stringliteral}{"  --intrinsic-latency <sec> Run a test to measure intrinsic system latency.\(\backslash\)n"}
+01240 \textcolor{stringliteral}{"                     The test will run for the specified amount of seconds.\(\backslash\)n"}
+01241 \textcolor{stringliteral}{"  --eval <file>      Send an EVAL command using the Lua script at <file>.\(\backslash\)n"}
+01242 \textcolor{stringliteral}{"  --ldb              Used with --eval enable the Redis Lua debugger.\(\backslash\)n"}
+01243 \textcolor{stringliteral}{"  --ldb-sync-mode    Like --ldb but uses the synchronous Lua debugger, in\(\backslash\)n"}
+01244 \textcolor{stringliteral}{"                     this mode the server is blocked and script changes are\(\backslash\)n"}
+01245 \textcolor{stringliteral}{"                     are not rolled back from the server memory.\(\backslash\)n"}
+01246 \textcolor{stringliteral}{"  --help             Output this help and exit.\(\backslash\)n"}
+01247 \textcolor{stringliteral}{"  --version          Output version and exit.\(\backslash\)n"}
+01248 \textcolor{stringliteral}{"\(\backslash\)n"}
+01249 \textcolor{stringliteral}{"Examples:\(\backslash\)n"}
+01250 \textcolor{stringliteral}{"  cat /etc/passwd | redis-cli -x set mypasswd\(\backslash\)n"}
+01251 \textcolor{stringliteral}{"  redis-cli get mypasswd\(\backslash\)n"}
+01252 \textcolor{stringliteral}{"  redis-cli -r 100 lpush mylist x\(\backslash\)n"}
+01253 \textcolor{stringliteral}{"  redis-cli -r 100 -i 1 info | grep used\_memory\_human:\(\backslash\)n"}
+01254 \textcolor{stringliteral}{"  redis-cli --eval myscript.lua key1 key2 , arg1 arg2 arg3\(\backslash\)n"}
+01255 \textcolor{stringliteral}{"  redis-cli --scan --pattern '*:12345*'\(\backslash\)n"}
+01256 \textcolor{stringliteral}{"\(\backslash\)n"}
+01257 \textcolor{stringliteral}{"  (Note: when using --eval the comma separates KEYS[] from ARGV[] items)\(\backslash\)n"}
+01258 \textcolor{stringliteral}{"\(\backslash\)n"}
+01259 \textcolor{stringliteral}{"When no command is given, redis-cli starts in interactive mode.\(\backslash\)n"}
+01260 \textcolor{stringliteral}{"Type \(\backslash\)"help\(\backslash\)" in interactive mode for information on available commands\(\backslash\)n"}
+01261 \textcolor{stringliteral}{"and settings.\(\backslash\)n"}
+01262 \textcolor{stringliteral}{"\(\backslash\)n"},
+01263         version, \hyperlink{redis-cli_8c_aa509dd2ea6ba533a33b1537622c215da}{REDIS\_CLI\_DEFAULT\_PIPE\_TIMEOUT});
+01264     sdsfree(version);
+01265     exit(1);
+01266 \}
+01267 
+01268 \textcolor{comment}{/* Turn the plain C strings into Sds strings */}
+01269 \textcolor{keyword}{static} \textcolor{keywordtype}{char} **convertToSds(\textcolor{keywordtype}{int} count, \textcolor{keywordtype}{char}** args) \{
+01270   \textcolor{keywordtype}{int} j;
+01271   \textcolor{keywordtype}{char} **sds = zmalloc(\textcolor{keyword}{sizeof}(\textcolor{keywordtype}{char}*)*count);
+01272 
+01273   \textcolor{keywordflow}{for}(j = 0; j < count; j++)
+01274     sds[j] = sdsnew(args[j]);
+01275 
+01276   \textcolor{keywordflow}{return} sds;
+01277 \}
+01278 
+01279 \textcolor{keyword}{static} \textcolor{keywordtype}{int} issueCommandRepeat(\textcolor{keywordtype}{int} argc, \textcolor{keywordtype}{char} **argv, \textcolor{keywordtype}{long} repeat) \{
+01280     \textcolor{keywordflow}{while} (1) \{
+01281         config.cluster\_reissue\_command = 0;
+01282         \textcolor{keywordflow}{if} (cliSendCommand(argc,argv,repeat) != REDIS\_OK) \{
+01283             cliConnect(1);
+01284 
+01285             \textcolor{comment}{/* If we still cannot send the command print error.}
+01286 \textcolor{comment}{             * We'll try to reconnect the next time. */}
+01287             \textcolor{keywordflow}{if} (cliSendCommand(argc,argv,repeat) != REDIS\_OK) \{
+01288                 cliPrintContextError();
+01289                 \textcolor{keywordflow}{return} REDIS\_ERR;
+01290             \}
+01291          \}
+01292          \textcolor{comment}{/* Issue the command again if we got redirected in cluster mode */}
+01293          \textcolor{keywordflow}{if} (config.cluster\_mode && config.cluster\_reissue\_command) \{
+01294             cliConnect(1);
+01295          \} \textcolor{keywordflow}{else} \{
+01296              \textcolor{keywordflow}{break};
+01297         \}
+01298     \}
+01299     \textcolor{keywordflow}{return} REDIS\_OK;
+01300 \}
+01301 
+01302 \textcolor{keyword}{static} \textcolor{keywordtype}{int} issueCommand(\textcolor{keywordtype}{int} argc, \textcolor{keywordtype}{char} **argv) \{
+01303     \textcolor{keywordflow}{return} issueCommandRepeat(argc, argv, config.repeat);
+01304 \}
+01305 
+01306 \textcolor{comment}{/* Split the user provided command into multiple SDS arguments.}
+01307 \textcolor{comment}{ * This function normally uses sdssplitargs() from sds.c which is able}
+01308 \textcolor{comment}{ * to understand "quoted strings", escapes and so forth. However when}
+01309 \textcolor{comment}{ * we are in Lua debugging mode and the "eval" command is used, we want}
+01310 \textcolor{comment}{ * the remaining Lua script (after "e " or "eval ") to be passed verbatim}
+01311 \textcolor{comment}{ * as a single big argument. */}
+01312 \textcolor{keyword}{static} sds *cliSplitArgs(\textcolor{keywordtype}{char} *line, \textcolor{keywordtype}{int} *argc) \{
+01313     \textcolor{keywordflow}{if} (config.eval\_ldb && (strstr(line,\textcolor{stringliteral}{"eval "}) == line ||
+01314                             strstr(line,\textcolor{stringliteral}{"e "}) == line))
+01315     \{
+01316         sds *argv = sds\_malloc(\textcolor{keyword}{sizeof}(sds)*2);
+01317         *argc = 2;
+01318         \textcolor{keywordtype}{int} len = strlen(line);
+01319         \textcolor{keywordtype}{int} elen = line[1] == \textcolor{stringliteral}{' '} ? 2 : 5; \textcolor{comment}{/* "e " or "eval "? */}
+01320         argv[0] = sdsnewlen(line,elen-1);
+01321         argv[1] = sdsnewlen(line+elen,len-elen);
+01322         \textcolor{keywordflow}{return} argv;
+01323     \} \textcolor{keywordflow}{else} \{
+01324         \textcolor{keywordflow}{return} sdssplitargs(line,argc);
+01325     \}
+01326 \}
+01327 
+01328 \textcolor{comment}{/* Set the CLI preferences. This function is invoked when an interactive}
+01329 \textcolor{comment}{ * ":command" is called, or when reading ~/.redisclirc file, in order to}
+01330 \textcolor{comment}{ * set user preferences. */}
+01331 \textcolor{keywordtype}{void} cliSetPreferences(\textcolor{keywordtype}{char} **argv, \textcolor{keywordtype}{int} argc, \textcolor{keywordtype}{int} interactive) \{
+01332     \textcolor{keywordflow}{if} (!strcasecmp(argv[0],\textcolor{stringliteral}{":set"}) && argc >= 2) \{
+01333         \textcolor{keywordflow}{if} (!strcasecmp(argv[1],\textcolor{stringliteral}{"hints"})) pref.hints = 1;
+01334         \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcasecmp(argv[1],\textcolor{stringliteral}{"nohints"})) pref.hints = 0;
+01335         \textcolor{keywordflow}{else} \{
+01336             printf(\textcolor{stringliteral}{"%sunknown redis-cli preference '%s'\(\backslash\)n"},
+01337                 interactive ? \textcolor{stringliteral}{""} : \textcolor{stringliteral}{".redisclirc: "},
+01338                 argv[1]);
+01339         \}
+01340     \} \textcolor{keywordflow}{else} \{
+01341         printf(\textcolor{stringliteral}{"%sunknown redis-cli internal command '%s'\(\backslash\)n"},
+01342             interactive ? \textcolor{stringliteral}{""} : \textcolor{stringliteral}{".redisclirc: "},
+01343             argv[0]);
+01344     \}
+01345 \}
+01346 
+01347 \textcolor{comment}{/* Load the ~/.redisclirc file if any. */}
+01348 \textcolor{keywordtype}{void} cliLoadPreferences(\textcolor{keywordtype}{void}) \{
+01349     sds rcfile = getDotfilePath(\hyperlink{redis-cli_8c_abb8e34d308514b1e024e39d127046df0}{REDIS\_CLI\_RCFILE\_ENV},
+      \hyperlink{redis-cli_8c_a0764031c702054d021e64f66271b56e3}{REDIS\_CLI\_RCFILE\_DEFAULT});
+01350     \textcolor{keywordflow}{if} (rcfile == NULL) \textcolor{keywordflow}{return};
+01351     FILE *fp = fopen(rcfile,\textcolor{stringliteral}{"r"});
+01352     \textcolor{keywordtype}{char} buf[1024];
+01353 
+01354     \textcolor{keywordflow}{if} (fp) \{
+01355         \textcolor{keywordflow}{while}(fgets(buf,\textcolor{keyword}{sizeof}(buf),fp) != NULL) \{
+01356             sds *argv;
+01357             \textcolor{keywordtype}{int} argc;
+01358 
+01359             argv = sdssplitargs(buf,&argc);
+01360             \textcolor{keywordflow}{if} (argc > 0) cliSetPreferences(argv,argc,0);
+01361             sdsfreesplitres(argv,argc);
+01362         \}
+01363         fclose(fp);
+01364     \}
+01365     sdsfree(rcfile);
+01366 \}
+01367 
+01368 \textcolor{keyword}{static} \textcolor{keywordtype}{void} repl(\textcolor{keywordtype}{void}) \{
+01369     sds historyfile = NULL;
+01370     \textcolor{keywordtype}{int} history = 0;
+01371     \textcolor{keywordtype}{char} *line;
+01372     \textcolor{keywordtype}{int} argc;
+01373     sds *argv;
+01374 
+01375     \textcolor{comment}{/* Initialize the help and, if possible, use the COMMAND command in order}
+01376 \textcolor{comment}{     * to retrieve missing entries. */}
+01377     cliInitHelp();
+01378     cliIntegrateHelp();
+01379 
+01380     config.interactive = 1;
+01381     linenoiseSetMultiLine(1);
+01382     linenoiseSetCompletionCallback(completionCallback);
+01383     linenoiseSetHintsCallback(hintsCallback);
+01384     linenoiseSetFreeHintsCallback(freeHintsCallback);
+01385 
+01386     \textcolor{comment}{/* Only use history and load the rc file when stdin is a tty. */}
+01387     \textcolor{keywordflow}{if} (isatty(fileno(stdin))) \{
+01388         historyfile = getDotfilePath(\hyperlink{redis-cli_8c_a4aaf4b657b3305064e3da87ac88a95f9}{REDIS\_CLI\_HISTFILE\_ENV},
+      \hyperlink{redis-cli_8c_ab1ba16fc9e98d602260f42a49de9a61c}{REDIS\_CLI\_HISTFILE\_DEFAULT});
+01389         \textcolor{comment}{//keep in-memory history always regardless if history file can be determined}
+01390         history = 1;
+01391         \textcolor{keywordflow}{if} (historyfile != NULL) \{
+01392             linenoiseHistoryLoad(historyfile);
+01393         \}
+01394         cliLoadPreferences();
+01395     \}
+01396 
+01397     cliRefreshPrompt();
+01398     \textcolor{keywordflow}{while}((line = linenoise(context ? config.prompt : \textcolor{stringliteral}{"not connected> "})) != NULL) \{
+01399         \textcolor{keywordflow}{if} (line[0] != \textcolor{stringliteral}{'\(\backslash\)0'}) \{
+01400             argv = cliSplitArgs(line,&argc);
+01401             \textcolor{keywordflow}{if} (history) linenoiseHistoryAdd(line);
+01402             \textcolor{keywordflow}{if} (historyfile) linenoiseHistorySave(historyfile);
+01403 
+01404             \textcolor{keywordflow}{if} (argv == NULL) \{
+01405                 printf(\textcolor{stringliteral}{"Invalid argument(s)\(\backslash\)n"});
+01406                 linenoiseFree(line);
+01407                 \textcolor{keywordflow}{continue};
+01408             \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (argc > 0) \{
+01409                 \textcolor{keywordflow}{if} (strcasecmp(argv[0],\textcolor{stringliteral}{"quit"}) == 0 ||
+01410                     strcasecmp(argv[0],\textcolor{stringliteral}{"exit"}) == 0)
+01411                 \{
+01412                     exit(0);
+01413                 \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (argv[0][0] == \textcolor{stringliteral}{':'}) \{
+01414                     cliSetPreferences(argv,argc,1);
+01415                     \textcolor{keywordflow}{continue};
+01416                 \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (strcasecmp(argv[0],\textcolor{stringliteral}{"restart"}) == 0) \{
+01417                     \textcolor{keywordflow}{if} (config.eval) \{
+01418                         config.eval\_ldb = 1;
+01419                         config.output = \hyperlink{redis-cli_8c_a4f47017b54da140967dcbd440fae227c}{OUTPUT\_RAW};
+01420                         \textcolor{keywordflow}{return}; \textcolor{comment}{/* Return to evalMode to restart the session. */}
+01421                     \} \textcolor{keywordflow}{else} \{
+01422                         printf(\textcolor{stringliteral}{"Use 'restart' only in Lua debugging mode."});
+01423                     \}
+01424                 \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (argc == 3 && !strcasecmp(argv[0],\textcolor{stringliteral}{"connect"})) \{
+01425                     sdsfree(config.hostip);
+01426                     config.hostip = sdsnew(argv[1]);
+01427                     config.hostport = atoi(argv[2]);
+01428                     cliRefreshPrompt();
+01429                     cliConnect(1);
+01430                 \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (argc == 1 && !strcasecmp(argv[0],\textcolor{stringliteral}{"clear"})) \{
+01431                     linenoiseClearScreen();
+01432                 \} \textcolor{keywordflow}{else} \{
+01433                     \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} start\_time = mstime(), elapsed;
+01434                     \textcolor{keywordtype}{int} repeat, skipargs = 0;
+01435                     \textcolor{keywordtype}{char} *endptr;
+01436 
+01437                     repeat = strtol(argv[0], &endptr, 10);
+01438                     \textcolor{keywordflow}{if} (argc > 1 && *endptr == \textcolor{stringliteral}{'\(\backslash\)0'} && repeat) \{
+01439                         skipargs = 1;
+01440                     \} \textcolor{keywordflow}{else} \{
+01441                         repeat = 1;
+01442                     \}
+01443 
+01444                     issueCommandRepeat(argc-skipargs, argv+skipargs, repeat);
+01445 
+01446                     \textcolor{comment}{/* If our debugging session ended, show the EVAL final}
+01447 \textcolor{comment}{                     * reply. */}
+01448                     \textcolor{keywordflow}{if} (config.eval\_ldb\_end) \{
+01449                         config.eval\_ldb\_end = 0;
+01450                         cliReadReply(0);
+01451                         printf(\textcolor{stringliteral}{"\(\backslash\)n(Lua debugging session ended%s)\(\backslash\)n\(\backslash\)n"},
+01452                             config.eval\_ldb\_sync ? \textcolor{stringliteral}{""} :
+01453                             \textcolor{stringliteral}{" -- dataset changes rolled back"});
+01454                     \}
+01455 
+01456                     elapsed = mstime()-start\_time;
+01457                     \textcolor{keywordflow}{if} (elapsed >= 500 &&
+01458                         config.output == \hyperlink{redis-cli_8c_abf624f04f4590979c3c3944bc7f94d6e}{OUTPUT\_STANDARD})
+01459                     \{
+01460                         printf(\textcolor{stringliteral}{"(%.2fs)\(\backslash\)n"},(\textcolor{keywordtype}{double})elapsed/1000);
+01461                     \}
+01462                 \}
+01463             \}
+01464             \textcolor{comment}{/* Free the argument vector */}
+01465             sdsfreesplitres(argv,argc);
+01466         \}
+01467         \textcolor{comment}{/* linenoise() returns malloc-ed lines like readline() */}
+01468         linenoiseFree(line);
+01469     \}
+01470     exit(0);
+01471 \}
+01472 
+01473 \textcolor{keyword}{static} \textcolor{keywordtype}{int} noninteractive(\textcolor{keywordtype}{int} argc, \textcolor{keywordtype}{char} **argv) \{
+01474     \textcolor{keywordtype}{int} retval = 0;
+01475     \textcolor{keywordflow}{if} (config.stdinarg) \{
+01476         argv = zrealloc(argv, (argc+1)*\textcolor{keyword}{sizeof}(\textcolor{keywordtype}{char}*));
+01477         argv[argc] = readArgFromStdin();
+01478         retval = issueCommand(argc+1, argv);
+01479     \} \textcolor{keywordflow}{else} \{
+01480         retval = issueCommand(argc, argv);
+01481     \}
+01482     \textcolor{keywordflow}{return} retval;
+01483 \}
+01484 
+01485 \textcolor{comment}{/*------------------------------------------------------------------------------}
+01486 \textcolor{comment}{ * Eval mode}
+01487 \textcolor{comment}{ *--------------------------------------------------------------------------- */}
+01488 
+01489 \textcolor{keyword}{static} \textcolor{keywordtype}{int} evalMode(\textcolor{keywordtype}{int} argc, \textcolor{keywordtype}{char} **argv) \{
+01490     sds script = NULL;
+01491     FILE *fp;
+01492     \textcolor{keywordtype}{char} buf[1024];
+01493     size\_t nread;
+01494     \textcolor{keywordtype}{char} **argv2;
+01495     \textcolor{keywordtype}{int} j, got\_comma, keys;
+01496     \textcolor{keywordtype}{int} retval = REDIS\_OK;
+01497 
+01498     \textcolor{keywordflow}{while}(1) \{
+01499         \textcolor{keywordflow}{if} (config.eval\_ldb) \{
+01500             printf(
+01501             \textcolor{stringliteral}{"Lua debugging session started, please use:\(\backslash\)n"}
+01502             \textcolor{stringliteral}{"quit    -- End the session.\(\backslash\)n"}
+01503             \textcolor{stringliteral}{"restart -- Restart the script in debug mode again.\(\backslash\)n"}
+01504             \textcolor{stringliteral}{"help    -- Show Lua script debugging commands.\(\backslash\)n\(\backslash\)n"}
+01505             );
+01506         \}
+01507 
+01508         sdsfree(script);
+01509         script = sdsempty();
+01510         got\_comma = 0;
+01511         keys = 0;
+01512 
+01513         \textcolor{comment}{/* Load the script from the file, as an sds string. */}
+01514         fp = fopen(config.eval,\textcolor{stringliteral}{"r"});
+01515         \textcolor{keywordflow}{if} (!fp) \{
+01516             fprintf(stderr,
+01517                 \textcolor{stringliteral}{"Can't open file '%s': %s\(\backslash\)n"}, config.eval, strerror(errno));
+01518             exit(1);
+01519         \}
+01520         \textcolor{keywordflow}{while}((nread = fread(buf,1,\textcolor{keyword}{sizeof}(buf),fp)) != 0) \{
+01521             script = sdscatlen(script,buf,nread);
+01522         \}
+01523         fclose(fp);
+01524 
+01525         \textcolor{comment}{/* If we are debugging a script, enable the Lua debugger. */}
+01526         \textcolor{keywordflow}{if} (config.eval\_ldb) \{
+01527             redisReply *reply = redisCommand(context,
+01528                     config.eval\_ldb\_sync ?
+01529                     \textcolor{stringliteral}{"SCRIPT DEBUG sync"}: \textcolor{stringliteral}{"SCRIPT DEBUG yes"});
+01530             \textcolor{keywordflow}{if} (reply) freeReplyObject(reply);
+01531         \}
+01532 
+01533         \textcolor{comment}{/* Create our argument vector */}
+01534         argv2 = zmalloc(\textcolor{keyword}{sizeof}(sds)*(argc+3));
+01535         argv2[0] = sdsnew(\textcolor{stringliteral}{"EVAL"});
+01536         argv2[1] = script;
+01537         \textcolor{keywordflow}{for} (j = 0; j < argc; j++) \{
+01538             \textcolor{keywordflow}{if} (!got\_comma && argv[j][0] == \textcolor{stringliteral}{','} && argv[j][1] == 0) \{
+01539                 got\_comma = 1;
+01540                 \textcolor{keywordflow}{continue};
+01541             \}
+01542             argv2[j+3-got\_comma] = sdsnew(argv[j]);
+01543             \textcolor{keywordflow}{if} (!got\_comma) keys++;
+01544         \}
+01545         argv2[2] = sdscatprintf(sdsempty(),\textcolor{stringliteral}{"%d"},keys);
+01546 
+01547         \textcolor{comment}{/* Call it */}
+01548         \textcolor{keywordtype}{int} eval\_ldb = config.eval\_ldb; \textcolor{comment}{/* Save it, may be reverteed. */}
+01549         retval = issueCommand(argc+3-got\_comma, argv2);
+01550         \textcolor{keywordflow}{if} (eval\_ldb) \{
+01551             \textcolor{keywordflow}{if} (!config.eval\_ldb) \{
+01552                 \textcolor{comment}{/* If the debugging session ended immediately, there was an}
+01553 \textcolor{comment}{                 * error compiling the script. Show it and don't enter}
+01554 \textcolor{comment}{                 * the REPL at all. */}
+01555                 printf(\textcolor{stringliteral}{"Eval debugging session can't start:\(\backslash\)n"});
+01556                 cliReadReply(0);
+01557                 \textcolor{keywordflow}{break}; \textcolor{comment}{/* Return to the caller. */}
+01558             \} \textcolor{keywordflow}{else} \{
+01559                 strncpy(config.prompt,\textcolor{stringliteral}{"lua debugger> "},\textcolor{keyword}{sizeof}(config.prompt));
+01560                 repl();
+01561                 \textcolor{comment}{/* Restart the session if repl() returned. */}
+01562                 cliConnect(1);
+01563                 printf(\textcolor{stringliteral}{"\(\backslash\)n"});
+01564             \}
+01565         \} \textcolor{keywordflow}{else} \{
+01566             \textcolor{keywordflow}{break}; \textcolor{comment}{/* Return to the caller. */}
+01567         \}
+01568     \}
+01569     \textcolor{keywordflow}{return} retval;
+01570 \}
+01571 
+01572 \textcolor{comment}{/*------------------------------------------------------------------------------}
+01573 \textcolor{comment}{ * Latency and latency history modes}
+01574 \textcolor{comment}{ *--------------------------------------------------------------------------- */}
+01575 
+01576 \textcolor{keyword}{static} \textcolor{keywordtype}{void} latencyModePrint(\textcolor{keywordtype}{long} \textcolor{keywordtype}{long} min, \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} max, \textcolor{keywordtype}{double} avg, \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} count) \{
+01577     \textcolor{keywordflow}{if} (config.output == \hyperlink{redis-cli_8c_abf624f04f4590979c3c3944bc7f94d6e}{OUTPUT\_STANDARD}) \{
+01578         printf(\textcolor{stringliteral}{"min: %lld, max: %lld, avg: %.2f (%lld samples)"},
+01579                 min, max, avg, count);
+01580         fflush(stdout);
+01581     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (config.output == \hyperlink{redis-cli_8c_a55fcc3cb9516c34eebf22ac9f8ebf3a2}{OUTPUT\_CSV}) \{
+01582         printf(\textcolor{stringliteral}{"%lld,%lld,%.2f,%lld\(\backslash\)n"}, min, max, avg, count);
+01583     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (config.output == \hyperlink{redis-cli_8c_a4f47017b54da140967dcbd440fae227c}{OUTPUT\_RAW}) \{
+01584         printf(\textcolor{stringliteral}{"%lld %lld %.2f %lld\(\backslash\)n"}, min, max, avg, count);
+01585     \}
+01586 \}
+01587 
+01588 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{LATENCY\_SAMPLE\_RATE} 10 \textcolor{comment}{/* milliseconds. */}
+01589 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{LATENCY\_HISTORY\_DEFAULT\_INTERVAL} 15000 \textcolor{comment}{/* milliseconds. */}
+01590 \textcolor{keyword}{static} \textcolor{keywordtype}{void} latencyMode(\textcolor{keywordtype}{void}) \{
+01591     redisReply *reply;
+01592     \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} start, latency, min = 0, max = 0, tot = 0, count = 0;
+01593     \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} history\_interval =
+01594         config.interval ? config.interval/1000 :
+01595                           \hyperlink{redis-cli_8c_a372f614f9e206b8f110cab48214252d5}{LATENCY\_HISTORY\_DEFAULT\_INTERVAL};
+01596     \textcolor{keywordtype}{double} avg;
+01597     \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} history\_start = mstime();
+01598 
+01599     \textcolor{comment}{/* Set a default for the interval in case of --latency option}
+01600 \textcolor{comment}{     * with --raw, --csv or when it is redirected to non tty. */}
+01601     \textcolor{keywordflow}{if} (config.interval == 0) \{
+01602         config.interval = 1000;
+01603     \} \textcolor{keywordflow}{else} \{
+01604         config.interval /= 1000; \textcolor{comment}{/* We need to convert to milliseconds. */}
+01605     \}
+01606 
+01607     \textcolor{keywordflow}{if} (!context) exit(1);
+01608     \textcolor{keywordflow}{while}(1) \{
+01609         start = mstime();
+01610         reply = reconnectingRedisCommand(context,\textcolor{stringliteral}{"PING"});
+01611         \textcolor{keywordflow}{if} (reply == NULL) \{
+01612             fprintf(stderr,\textcolor{stringliteral}{"\(\backslash\)nI/O error\(\backslash\)n"});
+01613             exit(1);
+01614         \}
+01615         latency = mstime()-start;
+01616         freeReplyObject(reply);
+01617         count++;
+01618         \textcolor{keywordflow}{if} (count == 1) \{
+01619             min = max = tot = latency;
+01620             avg = (\textcolor{keywordtype}{double}) latency;
+01621         \} \textcolor{keywordflow}{else} \{
+01622             \textcolor{keywordflow}{if} (latency < min) min = latency;
+01623             \textcolor{keywordflow}{if} (latency > max) max = latency;
+01624             tot += latency;
+01625             avg = (\textcolor{keywordtype}{double}) tot/count;
+01626         \}
+01627 
+01628         \textcolor{keywordflow}{if} (config.output == \hyperlink{redis-cli_8c_abf624f04f4590979c3c3944bc7f94d6e}{OUTPUT\_STANDARD}) \{
+01629             printf(\textcolor{stringliteral}{"\(\backslash\)x1b[0G\(\backslash\)x1b[2K"}); \textcolor{comment}{/* Clear the line. */}
+01630             latencyModePrint(min,max,avg,count);
+01631         \} \textcolor{keywordflow}{else} \{
+01632             \textcolor{keywordflow}{if} (config.latency\_history) \{
+01633                 latencyModePrint(min,max,avg,count);
+01634             \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (mstime()-history\_start > config.interval) \{
+01635                 latencyModePrint(min,max,avg,count);
+01636                 exit(0);
+01637             \}
+01638         \}
+01639 
+01640         \textcolor{keywordflow}{if} (config.latency\_history && mstime()-history\_start > history\_interval)
+01641         \{
+01642             printf(\textcolor{stringliteral}{" -- %.2f seconds range\(\backslash\)n"}, (\textcolor{keywordtype}{float})(mstime()-history\_start)/1000);
+01643             history\_start = mstime();
+01644             min = max = tot = count = 0;
+01645         \}
+01646         usleep(\hyperlink{redis-cli_8c_a76987a88882cfc750afde2c219a0bbab}{LATENCY\_SAMPLE\_RATE} * 1000);
+01647     \}
+01648 \}
+01649 
+01650 \textcolor{comment}{/*------------------------------------------------------------------------------}
+01651 \textcolor{comment}{ * Latency distribution mode -- requires 256 colors xterm}
+01652 \textcolor{comment}{ *--------------------------------------------------------------------------- */}
+01653 
+01654 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{LATENCY\_DIST\_DEFAULT\_INTERVAL} 1000 \textcolor{comment}{/* milliseconds. */}
+01655 
+01656 \textcolor{comment}{/* Structure to store samples distribution. */}
+\Hypertarget{redis-cli_8c_source_l01657}\hyperlink{structdistsamples}{01657} \textcolor{keyword}{struct} \hyperlink{structdistsamples}{distsamples} \{
+01658     \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} max;   \textcolor{comment}{/* Max latency to fit into this interval (usec). */}
+01659     \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} count; \textcolor{comment}{/* Number of samples in this interval. */}
+01660     \textcolor{keywordtype}{int} character;   \textcolor{comment}{/* Associated character in visualization. */}
+01661 \};
+01662 
+01663 \textcolor{comment}{/* Helper function for latencyDistMode(). Performs the spectrum visualization}
+01664 \textcolor{comment}{ * of the collected samples targeting an xterm 256 terminal.}
+01665 \textcolor{comment}{ *}
+01666 \textcolor{comment}{ * Takes an array of distsamples structures, ordered from smaller to bigger}
+01667 \textcolor{comment}{ * 'max' value. Last sample max must be 0, to mean that it olds all the}
+01668 \textcolor{comment}{ * samples greater than the previous one, and is also the stop sentinel.}
+01669 \textcolor{comment}{ *}
+01670 \textcolor{comment}{ * "tot' is the total number of samples in the different buckets, so it}
+01671 \textcolor{comment}{ * is the SUM(samples[i].conut) for i to 0 up to the max sample.}
+01672 \textcolor{comment}{ *}
+01673 \textcolor{comment}{ * As a side effect the function sets all the buckets count to 0. */}
+01674 \textcolor{keywordtype}{void} showLatencyDistSamples(\textcolor{keyword}{struct} \hyperlink{structdistsamples}{distsamples} *samples, \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} tot) \{
+01675     \textcolor{keywordtype}{int} j;
+01676 
+01677      \textcolor{comment}{/* We convert samples into a index inside the palette}
+01678 \textcolor{comment}{     * proportional to the percentage a given bucket represents.}
+01679 \textcolor{comment}{     * This way intensity of the different parts of the spectrum}
+01680 \textcolor{comment}{     * don't change relative to the number of requests, which avoids to}
+01681 \textcolor{comment}{     * pollute the visualization with non-latency related info. */}
+01682     printf(\textcolor{stringliteral}{"\(\backslash\)033[38;5;0m"}); \textcolor{comment}{/* Set foreground color to black. */}
+01683     \textcolor{keywordflow}{for} (j = 0; ; j++) \{
+01684         \textcolor{keywordtype}{int} coloridx =
+01685             ceil((\textcolor{keywordtype}{float}) samples[j].count / tot * (spectrum\_palette\_size-1));
+01686         \textcolor{keywordtype}{int} color = spectrum\_palette[coloridx];
+01687         printf(\textcolor{stringliteral}{"\(\backslash\)033[48;5;%dm%c"}, (\textcolor{keywordtype}{int})color, samples[j].character);
+01688         samples[j].count = 0;
+01689         \textcolor{keywordflow}{if} (samples[j].max == 0) \textcolor{keywordflow}{break}; \textcolor{comment}{/* Last sample. */}
+01690     \}
+01691     printf(\textcolor{stringliteral}{"\(\backslash\)033[0m\(\backslash\)n"});
+01692     fflush(stdout);
+01693 \}
+01694 
+01695 \textcolor{comment}{/* Show the legend: different buckets values and colors meaning, so}
+01696 \textcolor{comment}{ * that the spectrum is more easily readable. */}
+01697 \textcolor{keywordtype}{void} showLatencyDistLegend(\textcolor{keywordtype}{void}) \{
+01698     \textcolor{keywordtype}{int} j;
+01699 
+01700     printf(\textcolor{stringliteral}{"---------------------------------------------\(\backslash\)n"});
+01701     printf(\textcolor{stringliteral}{". - * #          .01 .125 .25 .5 milliseconds\(\backslash\)n"});
+01702     printf(\textcolor{stringliteral}{"1,2,3,...,9      from 1 to 9     milliseconds\(\backslash\)n"});
+01703     printf(\textcolor{stringliteral}{"A,B,C,D,E        10,20,30,40,50  milliseconds\(\backslash\)n"});
+01704     printf(\textcolor{stringliteral}{"F,G,H,I,J        .1,.2,.3,.4,.5       seconds\(\backslash\)n"});
+01705     printf(\textcolor{stringliteral}{"K,L,M,N,O,P,Q,?  1,2,4,8,16,30,60,>60 seconds\(\backslash\)n"});
+01706     printf(\textcolor{stringliteral}{"From 0 to 100%%: "});
+01707     \textcolor{keywordflow}{for} (j = 0; j < spectrum\_palette\_size; j++) \{
+01708         printf(\textcolor{stringliteral}{"\(\backslash\)033[48;5;%dm "}, spectrum\_palette[j]);
+01709     \}
+01710     printf(\textcolor{stringliteral}{"\(\backslash\)033[0m\(\backslash\)n"});
+01711     printf(\textcolor{stringliteral}{"---------------------------------------------\(\backslash\)n"});
+01712 \}
+01713 
+01714 \textcolor{keyword}{static} \textcolor{keywordtype}{void} latencyDistMode(\textcolor{keywordtype}{void}) \{
+01715     redisReply *reply;
+01716     \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} start, latency, count = 0;
+01717     \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} history\_interval =
+01718         config.interval ? config.interval/1000 :
+01719                           \hyperlink{redis-cli_8c_a6441de268c4b35721ec39471428d836f}{LATENCY\_DIST\_DEFAULT\_INTERVAL};
+01720     \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} history\_start = ustime();
+01721     \textcolor{keywordtype}{int} j, outputs = 0;
+01722 
+01723     \textcolor{keyword}{struct} \hyperlink{structdistsamples}{distsamples} samples[] = \{
+01724         \textcolor{comment}{/* We use a mostly logarithmic scale, with certain linear intervals}
+01725 \textcolor{comment}{         * which are more interesting than others, like 1-10 milliseconds}
+01726 \textcolor{comment}{         * range. */}
+01727         \{10,0,\textcolor{stringliteral}{'.'}\},         \textcolor{comment}{/* 0.01 ms */}
+01728         \{125,0,\textcolor{stringliteral}{'-'}\},        \textcolor{comment}{/* 0.125 ms */}
+01729         \{250,0,\textcolor{stringliteral}{'*'}\},        \textcolor{comment}{/* 0.25 ms */}
+01730         \{500,0,\textcolor{stringliteral}{'#'}\},        \textcolor{comment}{/* 0.5 ms */}
+01731         \{1000,0,\textcolor{stringliteral}{'1'}\},       \textcolor{comment}{/* 1 ms */}
+01732         \{2000,0,\textcolor{stringliteral}{'2'}\},       \textcolor{comment}{/* 2 ms */}
+01733         \{3000,0,\textcolor{stringliteral}{'3'}\},       \textcolor{comment}{/* 3 ms */}
+01734         \{4000,0,\textcolor{stringliteral}{'4'}\},       \textcolor{comment}{/* 4 ms */}
+01735         \{5000,0,\textcolor{stringliteral}{'5'}\},       \textcolor{comment}{/* 5 ms */}
+01736         \{6000,0,\textcolor{stringliteral}{'6'}\},       \textcolor{comment}{/* 6 ms */}
+01737         \{7000,0,\textcolor{stringliteral}{'7'}\},       \textcolor{comment}{/* 7 ms */}
+01738         \{8000,0,\textcolor{stringliteral}{'8'}\},       \textcolor{comment}{/* 8 ms */}
+01739         \{9000,0,\textcolor{stringliteral}{'9'}\},       \textcolor{comment}{/* 9 ms */}
+01740         \{10000,0,\textcolor{stringliteral}{'A'}\},      \textcolor{comment}{/* 10 ms */}
+01741         \{20000,0,\textcolor{stringliteral}{'B'}\},      \textcolor{comment}{/* 20 ms */}
+01742         \{30000,0,\textcolor{stringliteral}{'C'}\},      \textcolor{comment}{/* 30 ms */}
+01743         \{40000,0,\textcolor{stringliteral}{'D'}\},      \textcolor{comment}{/* 40 ms */}
+01744         \{50000,0,\textcolor{stringliteral}{'E'}\},      \textcolor{comment}{/* 50 ms */}
+01745         \{100000,0,\textcolor{stringliteral}{'F'}\},     \textcolor{comment}{/* 0.1 s */}
+01746         \{200000,0,\textcolor{stringliteral}{'G'}\},     \textcolor{comment}{/* 0.2 s */}
+01747         \{300000,0,\textcolor{stringliteral}{'H'}\},     \textcolor{comment}{/* 0.3 s */}
+01748         \{400000,0,\textcolor{stringliteral}{'I'}\},     \textcolor{comment}{/* 0.4 s */}
+01749         \{500000,0,\textcolor{stringliteral}{'J'}\},     \textcolor{comment}{/* 0.5 s */}
+01750         \{1000000,0,\textcolor{stringliteral}{'K'}\},    \textcolor{comment}{/* 1 s */}
+01751         \{2000000,0,\textcolor{stringliteral}{'L'}\},    \textcolor{comment}{/* 2 s */}
+01752         \{4000000,0,\textcolor{stringliteral}{'M'}\},    \textcolor{comment}{/* 4 s */}
+01753         \{8000000,0,\textcolor{stringliteral}{'N'}\},    \textcolor{comment}{/* 8 s */}
+01754         \{16000000,0,\textcolor{stringliteral}{'O'}\},   \textcolor{comment}{/* 16 s */}
+01755         \{30000000,0,\textcolor{stringliteral}{'P'}\},   \textcolor{comment}{/* 30 s */}
+01756         \{60000000,0,\textcolor{stringliteral}{'Q'}\},   \textcolor{comment}{/* 1 minute */}
+01757         \{0,0,\textcolor{stringliteral}{'?'}\},          \textcolor{comment}{/* > 1 minute */}
+01758     \};
+01759 
+01760     \textcolor{keywordflow}{if} (!context) exit(1);
+01761     \textcolor{keywordflow}{while}(1) \{
+01762         start = ustime();
+01763         reply = reconnectingRedisCommand(context,\textcolor{stringliteral}{"PING"});
+01764         \textcolor{keywordflow}{if} (reply == NULL) \{
+01765             fprintf(stderr,\textcolor{stringliteral}{"\(\backslash\)nI/O error\(\backslash\)n"});
+01766             exit(1);
+01767         \}
+01768         latency = ustime()-start;
+01769         freeReplyObject(reply);
+01770         count++;
+01771 
+01772         \textcolor{comment}{/* Populate the relevant bucket. */}
+01773         \textcolor{keywordflow}{for} (j = 0; ; j++) \{
+01774             \textcolor{keywordflow}{if} (samples[j].max == 0 || latency <= samples[j].max) \{
+01775                 samples[j].count++;
+01776                 \textcolor{keywordflow}{break};
+01777             \}
+01778         \}
+01779 
+01780         \textcolor{comment}{/* From time to time show the spectrum. */}
+01781         \textcolor{keywordflow}{if} (count && (ustime()-history\_start)/1000 > history\_interval) \{
+01782             \textcolor{keywordflow}{if} ((outputs++ % 20) == 0)
+01783                 showLatencyDistLegend();
+01784             showLatencyDistSamples(samples,count);
+01785             history\_start = ustime();
+01786             count = 0;
+01787         \}
+01788         usleep(\hyperlink{redis-cli_8c_a76987a88882cfc750afde2c219a0bbab}{LATENCY\_SAMPLE\_RATE} * 1000);
+01789     \}
+01790 \}
+01791 
+01792 \textcolor{comment}{/*------------------------------------------------------------------------------}
+01793 \textcolor{comment}{ * Slave mode}
+01794 \textcolor{comment}{ *--------------------------------------------------------------------------- */}
+01795 
+01796 \textcolor{comment}{/* Sends SYNC and reads the number of bytes in the payload. Used both by}
+01797 \textcolor{comment}{ * slaveMode() and getRDB(). */}
+01798 \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} sendSync(\textcolor{keywordtype}{int} fd) \{
+01799     \textcolor{comment}{/* To start we need to send the SYNC command and return the payload.}
+01800 \textcolor{comment}{     * The hiredis client lib does not understand this part of the protocol}
+01801 \textcolor{comment}{     * and we don't want to mess with its buffers, so everything is performed}
+01802 \textcolor{comment}{     * using direct low-level I/O. */}
+01803     \textcolor{keywordtype}{char} buf[4096], *p;
+01804     ssize\_t nread;
+01805 
+01806     \textcolor{comment}{/* Send the SYNC command. */}
+01807     \textcolor{keywordflow}{if} (write(fd,\textcolor{stringliteral}{"SYNC\(\backslash\)r\(\backslash\)n"},6) != 6) \{
+01808         fprintf(stderr,\textcolor{stringliteral}{"Error writing to master\(\backslash\)n"});
+01809         exit(1);
+01810     \}
+01811 
+01812     \textcolor{comment}{/* Read $<payload>\(\backslash\)r\(\backslash\)n, making sure to read just up to "\(\backslash\)n" */}
+01813     p = buf;
+01814     \textcolor{keywordflow}{while}(1) \{
+01815         nread = read(fd,p,1);
+01816         \textcolor{keywordflow}{if} (nread <= 0) \{
+01817             fprintf(stderr,\textcolor{stringliteral}{"Error reading bulk length while SYNCing\(\backslash\)n"});
+01818             exit(1);
+01819         \}
+01820         \textcolor{keywordflow}{if} (*p == \textcolor{stringliteral}{'\(\backslash\)n'} && p != buf) \textcolor{keywordflow}{break};
+01821         \textcolor{keywordflow}{if} (*p != \textcolor{stringliteral}{'\(\backslash\)n'}) p++;
+01822     \}
+01823     *p = \textcolor{stringliteral}{'\(\backslash\)0'};
+01824     \textcolor{keywordflow}{if} (buf[0] == \textcolor{stringliteral}{'-'}) \{
+01825         printf(\textcolor{stringliteral}{"SYNC with master failed: %s\(\backslash\)n"}, buf);
+01826         exit(1);
+01827     \}
+01828     \textcolor{keywordflow}{return} strtoull(buf+1,NULL,10);
+01829 \}
+01830 
+01831 \textcolor{keyword}{static} \textcolor{keywordtype}{void} slaveMode(\textcolor{keywordtype}{void}) \{
+01832     \textcolor{keywordtype}{int} fd = context->fd;
+01833     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} payload = sendSync(fd);
+01834     \textcolor{keywordtype}{char} buf[1024];
+01835     \textcolor{keywordtype}{int} original\_output = config.output;
+01836 
+01837     fprintf(stderr,\textcolor{stringliteral}{"SYNC with master, discarding %llu "}
+01838                    \textcolor{stringliteral}{"bytes of bulk transfer...\(\backslash\)n"}, payload);
+01839 
+01840     \textcolor{comment}{/* Discard the payload. */}
+01841     \textcolor{keywordflow}{while}(payload) \{
+01842         ssize\_t nread;
+01843 
+01844         nread = read(fd,buf,(payload > \textcolor{keyword}{sizeof}(buf)) ? \textcolor{keyword}{sizeof}(buf) : payload);
+01845         \textcolor{keywordflow}{if} (nread <= 0) \{
+01846             fprintf(stderr,\textcolor{stringliteral}{"Error reading RDB payload while SYNCing\(\backslash\)n"});
+01847             exit(1);
+01848         \}
+01849         payload -= nread;
+01850     \}
+01851     fprintf(stderr,\textcolor{stringliteral}{"SYNC done. Logging commands from master.\(\backslash\)n"});
+01852 
+01853     \textcolor{comment}{/* Now we can use hiredis to read the incoming protocol. */}
+01854     config.output = \hyperlink{redis-cli_8c_a55fcc3cb9516c34eebf22ac9f8ebf3a2}{OUTPUT\_CSV};
+01855     \textcolor{keywordflow}{while} (cliReadReply(0) == REDIS\_OK);
+01856     config.output = original\_output;
+01857 \}
+01858 
+01859 \textcolor{comment}{/*------------------------------------------------------------------------------}
+01860 \textcolor{comment}{ * RDB transfer mode}
+01861 \textcolor{comment}{ *--------------------------------------------------------------------------- */}
+01862 
+01863 \textcolor{comment}{/* This function implements --rdb, so it uses the replication protocol in order}
+01864 \textcolor{comment}{ * to fetch the RDB file from a remote server. */}
+01865 \textcolor{keyword}{static} \textcolor{keywordtype}{void} getRDB(\textcolor{keywordtype}{void}) \{
+01866     \textcolor{keywordtype}{int} s = context->fd;
+01867     \textcolor{keywordtype}{int} fd;
+01868     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} payload = sendSync(s);
+01869     \textcolor{keywordtype}{char} buf[4096];
+01870 
+01871     fprintf(stderr,\textcolor{stringliteral}{"SYNC sent to master, writing %llu bytes to '%s'\(\backslash\)n"},
+01872         payload, config.rdb\_filename);
+01873 
+01874     \textcolor{comment}{/* Write to file. */}
+01875     \textcolor{keywordflow}{if} (!strcmp(config.rdb\_filename,\textcolor{stringliteral}{"-"})) \{
+01876         fd = STDOUT\_FILENO;
+01877     \} \textcolor{keywordflow}{else} \{
+01878         fd = open(config.rdb\_filename, O\_CREAT|O\_WRONLY, 0644);
+01879         \textcolor{keywordflow}{if} (fd == -1) \{
+01880             fprintf(stderr, \textcolor{stringliteral}{"Error opening '%s': %s\(\backslash\)n"}, config.rdb\_filename,
+01881                 strerror(errno));
+01882             exit(1);
+01883         \}
+01884     \}
+01885 
+01886     \textcolor{keywordflow}{while}(payload) \{
+01887         ssize\_t nread, nwritten;
+01888 
+01889         nread = read(s,buf,(payload > \textcolor{keyword}{sizeof}(buf)) ? \textcolor{keyword}{sizeof}(buf) : payload);
+01890         \textcolor{keywordflow}{if} (nread <= 0) \{
+01891             fprintf(stderr,\textcolor{stringliteral}{"I/O Error reading RDB payload from socket\(\backslash\)n"});
+01892             exit(1);
+01893         \}
+01894         nwritten = write(fd, buf, nread);
+01895         \textcolor{keywordflow}{if} (nwritten != nread) \{
+01896             fprintf(stderr,\textcolor{stringliteral}{"Error writing data to file: %s\(\backslash\)n"},
+01897                 strerror(errno));
+01898             exit(1);
+01899         \}
+01900         payload -= nread;
+01901     \}
+01902     close(s); \textcolor{comment}{/* Close the file descriptor ASAP as fsync() may take time. */}
+01903     fsync(fd);
+01904     close(fd);
+01905     fprintf(stderr,\textcolor{stringliteral}{"Transfer finished with success.\(\backslash\)n"});
+01906     exit(0);
+01907 \}
+01908 
+01909 \textcolor{comment}{/*------------------------------------------------------------------------------}
+01910 \textcolor{comment}{ * Bulk import (pipe) mode}
+01911 \textcolor{comment}{ *--------------------------------------------------------------------------- */}
+01912 
+01913 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{PIPEMODE\_WRITE\_LOOP\_MAX\_BYTES} \textcolor{preprocessor}{(}128\textcolor{preprocessor}{*}1024\textcolor{preprocessor}{)}
+01914 \textcolor{keyword}{static} \textcolor{keywordtype}{void} pipeMode(\textcolor{keywordtype}{void}) \{
+01915     \textcolor{keywordtype}{int} fd = context->fd;
+01916     \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} errors = 0, replies = 0, obuf\_len = 0, obuf\_pos = 0;
+01917     \textcolor{keywordtype}{char} ibuf[1024*16], obuf[1024*16]; \textcolor{comment}{/* Input and output buffers */}
+01918     \textcolor{keywordtype}{char} aneterr[\hyperlink{anet_8h_a92d565f421c133e9fac9dbbe8c88922b}{ANET\_ERR\_LEN}];
+01919     redisReader *reader = redisReaderCreate();
+01920     redisReply *reply;
+01921     \textcolor{keywordtype}{int} eof = 0; \textcolor{comment}{/* True once we consumed all the standard input. */}
+01922     \textcolor{keywordtype}{int} done = 0;
+01923     \textcolor{keywordtype}{char} magic[20]; \textcolor{comment}{/* Special reply we recognize. */}
+01924     time\_t last\_read\_time = time(NULL);
+01925 
+01926     srand(time(NULL));
+01927 
+01928     \textcolor{comment}{/* Use non blocking I/O. */}
+01929     \textcolor{keywordflow}{if} (anetNonBlock(aneterr,fd) == \hyperlink{anet_8h_a0697b7774a7e0f4ef141839fe93536fe}{ANET\_ERR}) \{
+01930         fprintf(stderr, \textcolor{stringliteral}{"Can't set the socket in non blocking mode: %s\(\backslash\)n"},
+01931             aneterr);
+01932         exit(1);
+01933     \}
+01934 
+01935     \textcolor{comment}{/* Transfer raw protocol and read replies from the server at the same}
+01936 \textcolor{comment}{     * time. */}
+01937     \textcolor{keywordflow}{while}(!done) \{
+01938         \textcolor{keywordtype}{int} mask = \hyperlink{ae_8h_a7a9a2162d007d09739955b4e55c65bf3}{AE\_READABLE};
+01939 
+01940         \textcolor{keywordflow}{if} (!eof || obuf\_len != 0) mask |= \hyperlink{ae_8h_ab6bfb0366ccb6277112d132c2a2bf500}{AE\_WRITABLE};
+01941         mask = aeWait(fd,mask,1000);
+01942 
+01943         \textcolor{comment}{/* Handle the readable state: we can read replies from the server. */}
+01944         \textcolor{keywordflow}{if} (mask & \hyperlink{ae_8h_a7a9a2162d007d09739955b4e55c65bf3}{AE\_READABLE}) \{
+01945             ssize\_t nread;
+01946 
+01947             \textcolor{comment}{/* Read from socket and feed the hiredis reader. */}
+01948             \textcolor{keywordflow}{do} \{
+01949                 nread = read(fd,ibuf,\textcolor{keyword}{sizeof}(ibuf));
+01950                 \textcolor{keywordflow}{if} (nread == -1 && errno != EAGAIN && errno != EINTR) \{
+01951                     fprintf(stderr, \textcolor{stringliteral}{"Error reading from the server: %s\(\backslash\)n"},
+01952                         strerror(errno));
+01953                     exit(1);
+01954                 \}
+01955                 \textcolor{keywordflow}{if} (nread > 0) \{
+01956                     redisReaderFeed(reader,ibuf,nread);
+01957                     last\_read\_time = time(NULL);
+01958                 \}
+01959             \} \textcolor{keywordflow}{while}(nread > 0);
+01960 
+01961             \textcolor{comment}{/* Consume replies. */}
+01962             \textcolor{keywordflow}{do} \{
+01963                 \textcolor{keywordflow}{if} (redisReaderGetReply(reader,(\textcolor{keywordtype}{void}**)&reply) == REDIS\_ERR) \{
+01964                     fprintf(stderr, \textcolor{stringliteral}{"Error reading replies from server\(\backslash\)n"});
+01965                     exit(1);
+01966                 \}
+01967                 \textcolor{keywordflow}{if} (reply) \{
+01968                     \textcolor{keywordflow}{if} (reply->type == REDIS\_REPLY\_ERROR) \{
+01969                         fprintf(stderr,\textcolor{stringliteral}{"%s\(\backslash\)n"}, reply->str);
+01970                         errors++;
+01971                     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (eof && reply->type == REDIS\_REPLY\_STRING &&
+01972                                       reply->len == 20) \{
+01973                         \textcolor{comment}{/* Check if this is the reply to our final ECHO}
+01974 \textcolor{comment}{                         * command. If so everything was received}
+01975 \textcolor{comment}{                         * from the server. */}
+01976                         \textcolor{keywordflow}{if} (memcmp(reply->str,magic,20) == 0) \{
+01977                             printf(\textcolor{stringliteral}{"Last reply received from server.\(\backslash\)n"});
+01978                             done = 1;
+01979                             replies--;
+01980                         \}
+01981                     \}
+01982                     replies++;
+01983                     freeReplyObject(reply);
+01984                 \}
+01985             \} \textcolor{keywordflow}{while}(reply);
+01986         \}
+01987 
+01988         \textcolor{comment}{/* Handle the writable state: we can send protocol to the server. */}
+01989         \textcolor{keywordflow}{if} (mask & \hyperlink{ae_8h_ab6bfb0366ccb6277112d132c2a2bf500}{AE\_WRITABLE}) \{
+01990             ssize\_t loop\_nwritten = 0;
+01991 
+01992             \textcolor{keywordflow}{while}(1) \{
+01993                 \textcolor{comment}{/* Transfer current buffer to server. */}
+01994                 \textcolor{keywordflow}{if} (obuf\_len != 0) \{
+01995                     ssize\_t nwritten = write(fd,obuf+obuf\_pos,obuf\_len);
+01996 
+01997                     \textcolor{keywordflow}{if} (nwritten == -1) \{
+01998                         \textcolor{keywordflow}{if} (errno != EAGAIN && errno != EINTR) \{
+01999                             fprintf(stderr, \textcolor{stringliteral}{"Error writing to the server: %s\(\backslash\)n"},
+02000                                 strerror(errno));
+02001                             exit(1);
+02002                         \} \textcolor{keywordflow}{else} \{
+02003                             nwritten = 0;
+02004                         \}
+02005                     \}
+02006                     obuf\_len -= nwritten;
+02007                     obuf\_pos += nwritten;
+02008                     loop\_nwritten += nwritten;
+02009                     \textcolor{keywordflow}{if} (obuf\_len != 0) \textcolor{keywordflow}{break}; \textcolor{comment}{/* Can't accept more data. */}
+02010                 \}
+02011                 \textcolor{comment}{/* If buffer is empty, load from stdin. */}
+02012                 \textcolor{keywordflow}{if} (obuf\_len == 0 && !eof) \{
+02013                     ssize\_t nread = read(STDIN\_FILENO,obuf,\textcolor{keyword}{sizeof}(obuf));
+02014 
+02015                     \textcolor{keywordflow}{if} (nread == 0) \{
+02016                         \textcolor{comment}{/* The ECHO sequence starts with a "\(\backslash\)r\(\backslash\)n" so that if there}
+02017 \textcolor{comment}{                         * is garbage in the protocol we read from stdin, the ECHO}
+02018 \textcolor{comment}{                         * will likely still be properly formatted.}
+02019 \textcolor{comment}{                         * CRLF is ignored by Redis, so it has no effects. */}
+02020                         \textcolor{keywordtype}{char} echo[] =
+02021                         \textcolor{stringliteral}{"\(\backslash\)r\(\backslash\)n*2\(\backslash\)r\(\backslash\)n$4\(\backslash\)r\(\backslash\)nECHO\(\backslash\)r\(\backslash\)n$20\(\backslash\)r\(\backslash\)n01234567890123456789\(\backslash\)r\(\backslash\)n"};
+02022                         \textcolor{keywordtype}{int} j;
+02023 
+02024                         eof = 1;
+02025                         \textcolor{comment}{/* Everything transferred, so we queue a special}
+02026 \textcolor{comment}{                         * ECHO command that we can match in the replies}
+02027 \textcolor{comment}{                         * to make sure everything was read from the server. */}
+02028                         \textcolor{keywordflow}{for} (j = 0; j < 20; j++)
+02029                             magic[j] = rand() & 0xff;
+02030                         memcpy(echo+21,magic,20);
+02031                         memcpy(obuf,echo,\textcolor{keyword}{sizeof}(echo)-1);
+02032                         obuf\_len = \textcolor{keyword}{sizeof}(echo)-1;
+02033                         obuf\_pos = 0;
+02034                         printf(\textcolor{stringliteral}{"All data transferred. Waiting for the last reply...\(\backslash\)n"});
+02035                     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (nread == -1) \{
+02036                         fprintf(stderr, \textcolor{stringliteral}{"Error reading from stdin: %s\(\backslash\)n"},
+02037                             strerror(errno));
+02038                         exit(1);
+02039                     \} \textcolor{keywordflow}{else} \{
+02040                         obuf\_len = nread;
+02041                         obuf\_pos = 0;
+02042                     \}
+02043                 \}
+02044                 \textcolor{keywordflow}{if} ((obuf\_len == 0 && eof) ||
+02045                     loop\_nwritten > \hyperlink{redis-cli_8c_aaefb577451e0f5fc0ff993bda43044b6}{PIPEMODE\_WRITE\_LOOP\_MAX\_BYTES}) \textcolor{keywordflow}{break};
+02046             \}
+02047         \}
+02048 
+02049         \textcolor{comment}{/* Handle timeout, that is, we reached EOF, and we are not getting}
+02050 \textcolor{comment}{         * replies from the server for a few seconds, nor the final ECHO is}
+02051 \textcolor{comment}{         * received. */}
+02052         \textcolor{keywordflow}{if} (eof && config.pipe\_timeout > 0 &&
+02053             time(NULL)-last\_read\_time > config.pipe\_timeout)
+02054         \{
+02055             fprintf(stderr,\textcolor{stringliteral}{"No replies for %d seconds: exiting.\(\backslash\)n"},
+02056                 config.pipe\_timeout);
+02057             errors++;
+02058             \textcolor{keywordflow}{break};
+02059         \}
+02060     \}
+02061     redisReaderFree(reader);
+02062     printf(\textcolor{stringliteral}{"errors: %lld, replies: %lld\(\backslash\)n"}, errors, replies);
+02063     \textcolor{keywordflow}{if} (errors)
+02064         exit(1);
+02065     \textcolor{keywordflow}{else}
+02066         exit(0);
+02067 \}
+02068 
+02069 \textcolor{comment}{/*------------------------------------------------------------------------------}
+02070 \textcolor{comment}{ * Find big keys}
+02071 \textcolor{comment}{ *--------------------------------------------------------------------------- */}
+02072 
+02073 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{TYPE\_STRING} 0
+02074 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{TYPE\_LIST}   1
+02075 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{TYPE\_SET}    2
+02076 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{TYPE\_HASH}   3
+02077 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{TYPE\_ZSET}   4
+02078 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{TYPE\_STREAM} 5
+02079 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{TYPE\_NONE}   6
+02080 
+02081 \textcolor{keyword}{static} redisReply *sendScan(\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} *it) \{
+02082     redisReply *reply = redisCommand(context, \textcolor{stringliteral}{"SCAN %llu"}, *it);
+02083 
+02084     \textcolor{comment}{/* Handle any error conditions */}
+02085     \textcolor{keywordflow}{if}(reply == NULL) \{
+02086         fprintf(stderr, \textcolor{stringliteral}{"\(\backslash\)nI/O error\(\backslash\)n"});
+02087         exit(1);
+02088     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if}(reply->type == REDIS\_REPLY\_ERROR) \{
+02089         fprintf(stderr, \textcolor{stringliteral}{"SCAN error: %s\(\backslash\)n"}, reply->str);
+02090         exit(1);
+02091     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if}(reply->type != REDIS\_REPLY\_ARRAY) \{
+02092         fprintf(stderr, \textcolor{stringliteral}{"Non ARRAY response from SCAN!\(\backslash\)n"});
+02093         exit(1);
+02094     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if}(reply->elements != 2) \{
+02095         fprintf(stderr, \textcolor{stringliteral}{"Invalid element count from SCAN!\(\backslash\)n"});
+02096         exit(1);
+02097     \}
+02098 
+02099     \textcolor{comment}{/* Validate our types are correct */}
+02100     \hyperlink{redisassert_8h_a993abaa2c168852c1592879472938781}{assert}(reply->element[0]->type == REDIS\_REPLY\_STRING);
+02101     \hyperlink{redisassert_8h_a993abaa2c168852c1592879472938781}{assert}(reply->element[1]->type == REDIS\_REPLY\_ARRAY);
+02102 
+02103     \textcolor{comment}{/* Update iterator */}
+02104     *it = strtoull(reply->element[0]->str, NULL, 10);
+02105 
+02106     \textcolor{keywordflow}{return} reply;
+02107 \}
+02108 
+02109 \textcolor{keyword}{static} \textcolor{keywordtype}{int} getDbSize(\textcolor{keywordtype}{void}) \{
+02110     redisReply *reply;
+02111     \textcolor{keywordtype}{int} size;
+02112 
+02113     reply = redisCommand(context, \textcolor{stringliteral}{"DBSIZE"});
+02114 
+02115     \textcolor{keywordflow}{if}(reply == NULL || reply->type != REDIS\_REPLY\_INTEGER) \{
+02116         fprintf(stderr, \textcolor{stringliteral}{"Couldn't determine DBSIZE!\(\backslash\)n"});
+02117         exit(1);
+02118     \}
+02119 
+02120     \textcolor{comment}{/* Grab the number of keys and free our reply */}
+02121     size = reply->integer;
+02122     freeReplyObject(reply);
+02123 
+02124     \textcolor{keywordflow}{return} size;
+02125 \}
+02126 
+02127 \textcolor{keyword}{static} \textcolor{keywordtype}{int} toIntType(\textcolor{keywordtype}{char} *key, \textcolor{keywordtype}{char} *type) \{
+02128     \textcolor{keywordflow}{if}(!strcmp(type, \textcolor{stringliteral}{"string"})) \{
+02129         \textcolor{keywordflow}{return} \hyperlink{redis-cli_8c_a4e4e428e3a6a191834e3ff63bd301866}{TYPE\_STRING};
+02130     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if}(!strcmp(type, \textcolor{stringliteral}{"list"})) \{
+02131         \textcolor{keywordflow}{return} \hyperlink{redis-cli_8c_a12d33da3418cfc67c9076ef7353ca50b}{TYPE\_LIST};
+02132     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if}(!strcmp(type, \textcolor{stringliteral}{"set"})) \{
+02133         \textcolor{keywordflow}{return} \hyperlink{redis-cli_8c_a216111b323b4b6e3168596e69c72671b}{TYPE\_SET};
+02134     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if}(!strcmp(type, \textcolor{stringliteral}{"hash"})) \{
+02135         \textcolor{keywordflow}{return} \hyperlink{redis-cli_8c_a2ee0b296ab2dd19e14df6f097d07981e}{TYPE\_HASH};
+02136     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if}(!strcmp(type, \textcolor{stringliteral}{"zset"})) \{
+02137         \textcolor{keywordflow}{return} \hyperlink{redis-cli_8c_a9ffc96cc0a980403dc1df5cea83fb138}{TYPE\_ZSET};
+02138     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if}(!strcmp(type, \textcolor{stringliteral}{"stream"})) \{
+02139         \textcolor{keywordflow}{return} \hyperlink{redis-cli_8c_a78458977895c28f708af92554a64a8ff}{TYPE\_STREAM};
+02140     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if}(!strcmp(type, \textcolor{stringliteral}{"none"})) \{
+02141         \textcolor{keywordflow}{return} \hyperlink{redis-cli_8c_aa47d3c2fa05e95455d76cf052f9cca68}{TYPE\_NONE};
+02142     \} \textcolor{keywordflow}{else} \{
+02143         fprintf(stderr, \textcolor{stringliteral}{"Unknown type '%s' for key '%s'\(\backslash\)n"}, type, key);
+02144         exit(1);
+02145     \}
+02146 \}
+02147 
+02148 \textcolor{keyword}{static} \textcolor{keywordtype}{void} getKeyTypes(redisReply *keys, \textcolor{keywordtype}{int} *types) \{
+02149     redisReply *reply;
+02150     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{int} i;
+02151 
+02152     \textcolor{comment}{/* Pipeline TYPE commands */}
+02153     \textcolor{keywordflow}{for}(i=0;i<keys->elements;i++) \{
+02154         redisAppendCommand(context, \textcolor{stringliteral}{"TYPE %s"}, keys->element[i]->str);
+02155     \}
+02156 
+02157     \textcolor{comment}{/* Retrieve types */}
+02158     \textcolor{keywordflow}{for}(i=0;i<keys->elements;i++) \{
+02159         \textcolor{keywordflow}{if}(redisGetReply(context, (\textcolor{keywordtype}{void}**)&reply)!=REDIS\_OK) \{
+02160             fprintf(stderr, \textcolor{stringliteral}{"Error getting type for key '%s' (%d: %s)\(\backslash\)n"},
+02161                 keys->element[i]->str, context->err, context->errstr);
+02162             exit(1);
+02163         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if}(reply->type != REDIS\_REPLY\_STATUS) \{
+02164             \textcolor{keywordflow}{if}(reply->type == REDIS\_REPLY\_ERROR) \{
+02165                 fprintf(stderr, \textcolor{stringliteral}{"TYPE returned an error: %s\(\backslash\)n"}, reply->str);
+02166             \} \textcolor{keywordflow}{else} \{
+02167                 fprintf(stderr,
+02168                     \textcolor{stringliteral}{"Invalid reply type (%d) for TYPE on key '%s'!\(\backslash\)n"},
+02169                     reply->type, keys->element[i]->str);
+02170             \}
+02171             exit(1);
+02172         \}
+02173 
+02174         types[i] = toIntType(keys->element[i]->str, reply->str);
+02175         freeReplyObject(reply);
+02176     \}
+02177 \}
+02178 
+02179 \textcolor{keyword}{static} \textcolor{keywordtype}{void} getKeySizes(redisReply *keys, \textcolor{keywordtype}{int} *types,
+02180                         \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} *sizes)
+02181 \{
+02182     redisReply *reply;
+02183     \textcolor{keywordtype}{char} *sizecmds[] = \{\textcolor{stringliteral}{"STRLEN"},\textcolor{stringliteral}{"LLEN"},\textcolor{stringliteral}{"SCARD"},\textcolor{stringliteral}{"HLEN"},\textcolor{stringliteral}{"ZCARD"}\};
+02184     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{int} i;
+02185 
+02186     \textcolor{comment}{/* Pipeline size commands */}
+02187     \textcolor{keywordflow}{for}(i=0;i<keys->elements;i++) \{
+02188         \textcolor{comment}{/* Skip keys that were deleted */}
+02189         \textcolor{keywordflow}{if}(types[i]==\hyperlink{redis-cli_8c_aa47d3c2fa05e95455d76cf052f9cca68}{TYPE\_NONE})
+02190             \textcolor{keywordflow}{continue};
+02191 
+02192         redisAppendCommand(context, \textcolor{stringliteral}{"%s %s"}, sizecmds[types[i]],
+02193             keys->element[i]->str);
+02194     \}
+02195 
+02196     \textcolor{comment}{/* Retreive sizes */}
+02197     \textcolor{keywordflow}{for}(i=0;i<keys->elements;i++) \{
+02198         \textcolor{comment}{/* Skip keys that dissapeared between SCAN and TYPE */}
+02199         \textcolor{keywordflow}{if}(types[i] == \hyperlink{redis-cli_8c_aa47d3c2fa05e95455d76cf052f9cca68}{TYPE\_NONE}) \{
+02200             sizes[i] = 0;
+02201             \textcolor{keywordflow}{continue};
+02202         \}
+02203 
+02204         \textcolor{comment}{/* Retreive size */}
+02205         \textcolor{keywordflow}{if}(redisGetReply(context, (\textcolor{keywordtype}{void}**)&reply)!=REDIS\_OK) \{
+02206             fprintf(stderr, \textcolor{stringliteral}{"Error getting size for key '%s' (%d: %s)\(\backslash\)n"},
+02207                 keys->element[i]->str, context->err, context->errstr);
+02208             exit(1);
+02209         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if}(reply->type != REDIS\_REPLY\_INTEGER) \{
+02210             \textcolor{comment}{/* Theoretically the key could have been removed and}
+02211 \textcolor{comment}{             * added as a different type between TYPE and SIZE */}
+02212             fprintf(stderr,
+02213                 \textcolor{stringliteral}{"Warning:  %s on '%s' failed (may have changed type)\(\backslash\)n"},
+02214                  sizecmds[types[i]], keys->element[i]->str);
+02215             sizes[i] = 0;
+02216         \} \textcolor{keywordflow}{else} \{
+02217             sizes[i] = reply->integer;
+02218         \}
+02219 
+02220         freeReplyObject(reply);
+02221     \}
+02222 \}
+02223 
+02224 \textcolor{keyword}{static} \textcolor{keywordtype}{void} findBigKeys(\textcolor{keywordtype}{void}) \{
+02225     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} biggest[5] = \{0\}, counts[5] = \{0\}, totalsize[5] = \{0\};
+02226     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} sampled = 0, total\_keys, totlen=0, *sizes=NULL, it=0;
+02227     sds maxkeys[5] = \{0\};
+02228     \textcolor{keywordtype}{char} *\textcolor{keyword}{typename}[] = \{\textcolor{stringliteral}{"string"},\textcolor{stringliteral}{"list"},\textcolor{stringliteral}{"set"},\textcolor{stringliteral}{"hash"},\textcolor{stringliteral}{"zset"},\textcolor{stringliteral}{"stream"}\};
+02229     \textcolor{keywordtype}{char} *typeunit[] = \{\textcolor{stringliteral}{"bytes"},\textcolor{stringliteral}{"items"},\textcolor{stringliteral}{"members"},\textcolor{stringliteral}{"fields"},\textcolor{stringliteral}{"members"}\};
+02230     redisReply *reply, *keys;
+02231     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{int} arrsize=0, i;
+02232     \textcolor{keywordtype}{int} type, *types=NULL;
+02233     \textcolor{keywordtype}{double} pct;
+02234 
+02235     \textcolor{comment}{/* Total keys pre scanning */}
+02236     total\_keys = getDbSize();
+02237 
+02238     \textcolor{comment}{/* Status message */}
+02239     printf(\textcolor{stringliteral}{"\(\backslash\)n# Scanning the entire keyspace to find biggest keys as well as\(\backslash\)n"});
+02240     printf(\textcolor{stringliteral}{"# average sizes per key type.  You can use -i 0.1 to sleep 0.1 sec\(\backslash\)n"});
+02241     printf(\textcolor{stringliteral}{"# per 100 SCAN commands (not usually needed).\(\backslash\)n\(\backslash\)n"});
+02242 
+02243     \textcolor{comment}{/* New up sds strings to keep track of overall biggest per type */}
+02244     \textcolor{keywordflow}{for}(i=0;i<\hyperlink{redis-cli_8c_aa47d3c2fa05e95455d76cf052f9cca68}{TYPE\_NONE}; i++) \{
+02245         maxkeys[i] = sdsempty();
+02246         \textcolor{keywordflow}{if}(!maxkeys[i]) \{
+02247             fprintf(stderr, \textcolor{stringliteral}{"Failed to allocate memory for largest key names!\(\backslash\)n"});
+02248             exit(1);
+02249         \}
+02250     \}
+02251 
+02252     \textcolor{comment}{/* SCAN loop */}
+02253     \textcolor{keywordflow}{do} \{
+02254         \textcolor{comment}{/* Calculate approximate percentage completion */}
+02255         pct = 100 * (\textcolor{keywordtype}{double})sampled/total\_keys;
+02256 
+02257         \textcolor{comment}{/* Grab some keys and point to the keys array */}
+02258         reply = sendScan(&it);
+02259         keys  = reply->element[1];
+02260 
+02261         \textcolor{comment}{/* Reallocate our type and size array if we need to */}
+02262         \textcolor{keywordflow}{if}(keys->elements > arrsize) \{
+02263             types = zrealloc(types, \textcolor{keyword}{sizeof}(\textcolor{keywordtype}{int})*keys->elements);
+02264             sizes = zrealloc(sizes, \textcolor{keyword}{sizeof}(\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} \textcolor{keywordtype}{long})*keys->elements);
+02265 
+02266             \textcolor{keywordflow}{if}(!types || !sizes) \{
+02267                 fprintf(stderr, \textcolor{stringliteral}{"Failed to allocate storage for keys!\(\backslash\)n"});
+02268                 exit(1);
+02269             \}
+02270 
+02271             arrsize = keys->elements;
+02272         \}
+02273 
+02274         \textcolor{comment}{/* Retreive types and then sizes */}
+02275         getKeyTypes(keys, types);
+02276         getKeySizes(keys, types, sizes);
+02277 
+02278         \textcolor{comment}{/* Now update our stats */}
+02279         \textcolor{keywordflow}{for}(i=0;i<keys->elements;i++) \{
+02280             \textcolor{keywordflow}{if}((type = types[i]) == \hyperlink{redis-cli_8c_aa47d3c2fa05e95455d76cf052f9cca68}{TYPE\_NONE})
+02281                 \textcolor{keywordflow}{continue};
+02282 
+02283             totalsize[type] += sizes[i];
+02284             counts[type]++;
+02285             totlen += keys->element[i]->len;
+02286             sampled++;
+02287 
+02288             \textcolor{keywordflow}{if}(biggest[type]<sizes[i]) \{
+02289                 printf(
+02290                    \textcolor{stringliteral}{"[%05.2f%%] Biggest %-6s found so far '%s' with %llu %s\(\backslash\)n"},
+02291                    pct, \textcolor{keyword}{typename}[type], keys->element[i]->str, sizes[i],
+02292                    typeunit[type]);
+02293 
+02294                 \textcolor{comment}{/* Keep track of biggest key name for this type */}
+02295                 maxkeys[type] = sdscpy(maxkeys[type], keys->element[i]->str);
+02296                 \textcolor{keywordflow}{if}(!maxkeys[type]) \{
+02297                     fprintf(stderr, \textcolor{stringliteral}{"Failed to allocate memory for key!\(\backslash\)n"});
+02298                     exit(1);
+02299                 \}
+02300 
+02301                 \textcolor{comment}{/* Keep track of the biggest size for this type */}
+02302                 biggest[type] = sizes[i];
+02303             \}
+02304 
+02305             \textcolor{comment}{/* Update overall progress */}
+02306             \textcolor{keywordflow}{if}(sampled % 1000000 == 0) \{
+02307                 printf(\textcolor{stringliteral}{"[%05.2f%%] Sampled %llu keys so far\(\backslash\)n"}, pct, sampled);
+02308             \}
+02309         \}
+02310 
+02311         \textcolor{comment}{/* Sleep if we've been directed to do so */}
+02312         \textcolor{keywordflow}{if}(sampled && (sampled %100) == 0 && config.interval) \{
+02313             usleep(config.interval);
+02314         \}
+02315 
+02316         freeReplyObject(reply);
+02317     \} \textcolor{keywordflow}{while}(it != 0);
+02318 
+02319     \textcolor{keywordflow}{if}(types) zfree(types);
+02320     \textcolor{keywordflow}{if}(sizes) zfree(sizes);
+02321 
+02322     \textcolor{comment}{/* We're done */}
+02323     printf(\textcolor{stringliteral}{"\(\backslash\)n-------- summary -------\(\backslash\)n\(\backslash\)n"});
+02324 
+02325     printf(\textcolor{stringliteral}{"Sampled %llu keys in the keyspace!\(\backslash\)n"}, sampled);
+02326     printf(\textcolor{stringliteral}{"Total key length in bytes is %llu (avg len %.2f)\(\backslash\)n\(\backslash\)n"},
+02327        totlen, totlen ? (\textcolor{keywordtype}{double})totlen/sampled : 0);
+02328 
+02329     \textcolor{comment}{/* Output the biggest keys we found, for types we did find */}
+02330     \textcolor{keywordflow}{for}(i=0;i<\hyperlink{redis-cli_8c_aa47d3c2fa05e95455d76cf052f9cca68}{TYPE\_NONE};i++) \{
+02331         \textcolor{keywordflow}{if}(sdslen(maxkeys[i])>0) \{
+02332             printf(\textcolor{stringliteral}{"Biggest %6s found '%s' has %llu %s\(\backslash\)n"}, \textcolor{keyword}{typename}[i], maxkeys[i],
+02333                biggest[i], typeunit[i]);
+02334         \}
+02335     \}
+02336 
+02337     printf(\textcolor{stringliteral}{"\(\backslash\)n"});
+02338 
+02339     \textcolor{keywordflow}{for}(i=0;i<\hyperlink{redis-cli_8c_aa47d3c2fa05e95455d76cf052f9cca68}{TYPE\_NONE};i++) \{
+02340         printf(\textcolor{stringliteral}{"%llu %ss with %llu %s (%05.2f%% of keys, avg size %.2f)\(\backslash\)n"},
+02341            counts[i], \textcolor{keyword}{typename}[i], totalsize[i], typeunit[i],
+02342            sampled ? 100 * (\textcolor{keywordtype}{double})counts[i]/sampled : 0,
+02343            counts[i] ? (\textcolor{keywordtype}{double})totalsize[i]/counts[i] : 0);
+02344     \}
+02345 
+02346     \textcolor{comment}{/* Free sds strings containing max keys */}
+02347     \textcolor{keywordflow}{for}(i=0;i<\hyperlink{redis-cli_8c_aa47d3c2fa05e95455d76cf052f9cca68}{TYPE\_NONE};i++) \{
+02348         sdsfree(maxkeys[i]);
+02349     \}
+02350 
+02351     \textcolor{comment}{/* Success! */}
+02352     exit(0);
+02353 \}
+02354 
+02355 \textcolor{keyword}{static} \textcolor{keywordtype}{void} getKeyFreqs(redisReply *keys, \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} *freqs) \{
+02356     redisReply *reply;
+02357     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{int} i;
+02358 
+02359     \textcolor{comment}{/* Pipeline OBJECT freq commands */}
+02360     \textcolor{keywordflow}{for}(i=0;i<keys->elements;i++) \{
+02361         redisAppendCommand(context, \textcolor{stringliteral}{"OBJECT freq %s"}, keys->element[i]->str);
+02362     \}
+02363 
+02364     \textcolor{comment}{/* Retrieve freqs */}
+02365     \textcolor{keywordflow}{for}(i=0;i<keys->elements;i++) \{
+02366         \textcolor{keywordflow}{if}(redisGetReply(context, (\textcolor{keywordtype}{void}**)&reply)!=REDIS\_OK) \{
+02367             fprintf(stderr, \textcolor{stringliteral}{"Error getting freq for key '%s' (%d: %s)\(\backslash\)n"},
+02368                 keys->element[i]->str, context->err, context->errstr);
+02369             exit(1);
+02370         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if}(reply->type != REDIS\_REPLY\_INTEGER) \{
+02371             \textcolor{keywordflow}{if}(reply->type == REDIS\_REPLY\_ERROR) \{
+02372                 fprintf(stderr, \textcolor{stringliteral}{"Error: %s\(\backslash\)n"}, reply->str);
+02373                 exit(1);
+02374             \} \textcolor{keywordflow}{else} \{
+02375                 fprintf(stderr, \textcolor{stringliteral}{"Warning: OBJECT freq on '%s' failed (may have been deleted)\(\backslash\)n"}, keys
+      ->element[i]->str);
+02376                 freqs[i] = 0;
+02377             \}
+02378         \} \textcolor{keywordflow}{else} \{
+02379             freqs[i] = reply->integer;
+02380         \}
+02381         freeReplyObject(reply);
+02382     \}
+02383 \}
+02384 
+02385 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{HOTKEYS\_SAMPLE} 16
+02386 \textcolor{keyword}{static} \textcolor{keywordtype}{void} findHotKeys(\textcolor{keywordtype}{void}) \{
+02387     redisReply *keys, *reply;
+02388     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} counters[\hyperlink{redis-cli_8c_a0f10197c353b6fcaf73df928885167ca}{HOTKEYS\_SAMPLE}] = \{0\};
+02389     sds hotkeys[\hyperlink{redis-cli_8c_a0f10197c353b6fcaf73df928885167ca}{HOTKEYS\_SAMPLE}] = \{NULL\};
+02390     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} sampled = 0, total\_keys, *freqs = NULL, it = 0;
+02391     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{int} arrsize = 0, i, k;
+02392     \textcolor{keywordtype}{double} pct;
+02393 
+02394     \textcolor{comment}{/* Total keys pre scanning */}
+02395     total\_keys = getDbSize();
+02396 
+02397     \textcolor{comment}{/* Status message */}
+02398     printf(\textcolor{stringliteral}{"\(\backslash\)n# Scanning the entire keyspace to find hot keys as well as\(\backslash\)n"});
+02399     printf(\textcolor{stringliteral}{"# average sizes per key type.  You can use -i 0.1 to sleep 0.1 sec\(\backslash\)n"});
+02400     printf(\textcolor{stringliteral}{"# per 100 SCAN commands (not usually needed).\(\backslash\)n\(\backslash\)n"});
+02401 
+02402     \textcolor{comment}{/* SCAN loop */}
+02403     \textcolor{keywordflow}{do} \{
+02404         \textcolor{comment}{/* Calculate approximate percentage completion */}
+02405         pct = 100 * (\textcolor{keywordtype}{double})sampled/total\_keys;
+02406 
+02407         \textcolor{comment}{/* Grab some keys and point to the keys array */}
+02408         reply = sendScan(&it);
+02409         keys  = reply->element[1];
+02410 
+02411         \textcolor{comment}{/* Reallocate our freqs array if we need to */}
+02412         \textcolor{keywordflow}{if}(keys->elements > arrsize) \{
+02413             freqs = zrealloc(freqs, \textcolor{keyword}{sizeof}(\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} \textcolor{keywordtype}{long})*keys->elements);
+02414 
+02415             \textcolor{keywordflow}{if}(!freqs) \{
+02416                 fprintf(stderr, \textcolor{stringliteral}{"Failed to allocate storage for keys!\(\backslash\)n"});
+02417                 exit(1);
+02418             \}
+02419 
+02420             arrsize = keys->elements;
+02421         \}
+02422 
+02423         getKeyFreqs(keys, freqs);
+02424 
+02425         \textcolor{comment}{/* Now update our stats */}
+02426         \textcolor{keywordflow}{for}(i=0;i<keys->elements;i++) \{
+02427             sampled++;
+02428             \textcolor{comment}{/* Update overall progress */}
+02429             \textcolor{keywordflow}{if}(sampled % 1000000 == 0) \{
+02430                 printf(\textcolor{stringliteral}{"[%05.2f%%] Sampled %llu keys so far\(\backslash\)n"}, pct, sampled);
+02431             \}
+02432 
+02433             \textcolor{comment}{/* Use eviction pool here */}
+02434             k = 0;
+02435             \textcolor{keywordflow}{while} (k < \hyperlink{redis-cli_8c_a0f10197c353b6fcaf73df928885167ca}{HOTKEYS\_SAMPLE} && freqs[i] > counters[k]) k++;
+02436             \textcolor{keywordflow}{if} (k == 0) \textcolor{keywordflow}{continue};
+02437             k--;
+02438             \textcolor{keywordflow}{if} (k == 0 || counters[k] == 0) \{
+02439                 sdsfree(hotkeys[k]);
+02440             \} \textcolor{keywordflow}{else} \{
+02441                 sdsfree(hotkeys[0]);
+02442                 memmove(counters,counters+1,\textcolor{keyword}{sizeof}(counters[0])*k);
+02443                 memmove(hotkeys,hotkeys+1,\textcolor{keyword}{sizeof}(hotkeys[0])*k);
+02444             \}
+02445             counters[k] = freqs[i];
+02446             hotkeys[k] = sdsnew(keys->element[i]->str);
+02447             printf(
+02448                \textcolor{stringliteral}{"[%05.2f%%] Hot key '%s' found so far with counter %llu\(\backslash\)n"},
+02449                pct, keys->element[i]->str, freqs[i]);
+02450         \}
+02451 
+02452         \textcolor{comment}{/* Sleep if we've been directed to do so */}
+02453         \textcolor{keywordflow}{if}(sampled && (sampled %100) == 0 && config.interval) \{
+02454             usleep(config.interval);
+02455         \}
+02456 
+02457         freeReplyObject(reply);
+02458     \} \textcolor{keywordflow}{while}(it != 0);
+02459 
+02460     \textcolor{keywordflow}{if} (freqs) zfree(freqs);
+02461 
+02462     \textcolor{comment}{/* We're done */}
+02463     printf(\textcolor{stringliteral}{"\(\backslash\)n-------- summary -------\(\backslash\)n\(\backslash\)n"});
+02464 
+02465     printf(\textcolor{stringliteral}{"Sampled %llu keys in the keyspace!\(\backslash\)n"}, sampled);
+02466 
+02467     \textcolor{keywordflow}{for} (i=1; i<= \hyperlink{redis-cli_8c_a0f10197c353b6fcaf73df928885167ca}{HOTKEYS\_SAMPLE}; i++) \{
+02468         k = \hyperlink{redis-cli_8c_a0f10197c353b6fcaf73df928885167ca}{HOTKEYS\_SAMPLE} - i;
+02469         \textcolor{keywordflow}{if}(counters[k]>0) \{
+02470             printf(\textcolor{stringliteral}{"hot key found with counter: %llu\(\backslash\)tkeyname: %s\(\backslash\)n"}, counters[k], hotkeys[k]);
+02471             sdsfree(hotkeys[k]);
+02472         \}
+02473     \}
+02474 
+02475     exit(0);
+02476 \}
+02477 
+02478 \textcolor{comment}{/*------------------------------------------------------------------------------}
+02479 \textcolor{comment}{ * Stats mode}
+02480 \textcolor{comment}{ *--------------------------------------------------------------------------- */}
+02481 
+02482 \textcolor{comment}{/* Return the specified INFO field from the INFO command output "info".}
+02483 \textcolor{comment}{ * A new buffer is allocated for the result, that needs to be free'd.}
+02484 \textcolor{comment}{ * If the field is not found NULL is returned. */}
+02485 \textcolor{keyword}{static} \textcolor{keywordtype}{char} *getInfoField(\textcolor{keywordtype}{char} *info, \textcolor{keywordtype}{char} *field) \{
+02486     \textcolor{keywordtype}{char} *p = strstr(info,field);
+02487     \textcolor{keywordtype}{char} *n1, *n2;
+02488     \textcolor{keywordtype}{char} *result;
+02489 
+02490     \textcolor{keywordflow}{if} (!p) \textcolor{keywordflow}{return} NULL;
+02491     p += strlen(field)+1;
+02492     n1 = strchr(p,\textcolor{stringliteral}{'\(\backslash\)r'});
+02493     n2 = strchr(p,\textcolor{stringliteral}{','});
+02494     \textcolor{keywordflow}{if} (n2 && n2 < n1) n1 = n2;
+02495     result = zmalloc(\textcolor{keyword}{sizeof}(\textcolor{keywordtype}{char})*(n1-p)+1);
+02496     memcpy(result,p,(n1-p));
+02497     result[n1-p] = \textcolor{stringliteral}{'\(\backslash\)0'};
+02498     \textcolor{keywordflow}{return} result;
+02499 \}
+02500 
+02501 \textcolor{comment}{/* Like the above function but automatically convert the result into}
+02502 \textcolor{comment}{ * a long. On error (missing field) LONG\_MIN is returned. */}
+02503 \textcolor{keyword}{static} \textcolor{keywordtype}{long} getLongInfoField(\textcolor{keywordtype}{char} *info, \textcolor{keywordtype}{char} *field) \{
+02504     \textcolor{keywordtype}{char} *value = getInfoField(info,field);
+02505     \textcolor{keywordtype}{long} l;
+02506 
+02507     \textcolor{keywordflow}{if} (!value) \textcolor{keywordflow}{return} LONG\_MIN;
+02508     l = strtol(value,NULL,10);
+02509     zfree(value);
+02510     \textcolor{keywordflow}{return} l;
+02511 \}
+02512 
+02513 \textcolor{comment}{/* Convert number of bytes into a human readable string of the form:}
+02514 \textcolor{comment}{ * 100B, 2G, 100M, 4K, and so forth. */}
+02515 \textcolor{keywordtype}{void} bytesToHuman(\textcolor{keywordtype}{char} *s, \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} n) \{
+02516     \textcolor{keywordtype}{double} d;
+02517 
+02518     \textcolor{keywordflow}{if} (n < 0) \{
+02519         *s = \textcolor{stringliteral}{'-'};
+02520         s++;
+02521         n = -n;
+02522     \}
+02523     \textcolor{keywordflow}{if} (n < 1024) \{
+02524         \textcolor{comment}{/* Bytes */}
+02525         sprintf(s,\textcolor{stringliteral}{"%lldB"},n);
+02526         \textcolor{keywordflow}{return};
+02527     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (n < (1024*1024)) \{
+02528         d = (\textcolor{keywordtype}{double})n/(1024);
+02529         sprintf(s,\textcolor{stringliteral}{"%.2fK"},d);
+02530     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (n < (1024LL*1024*1024)) \{
+02531         d = (\textcolor{keywordtype}{double})n/(1024*1024);
+02532         sprintf(s,\textcolor{stringliteral}{"%.2fM"},d);
+02533     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (n < (1024LL*1024*1024*1024)) \{
+02534         d = (\textcolor{keywordtype}{double})n/(1024LL*1024*1024);
+02535         sprintf(s,\textcolor{stringliteral}{"%.2fG"},d);
+02536     \}
+02537 \}
+02538 
+02539 \textcolor{keyword}{static} \textcolor{keywordtype}{void} statMode(\textcolor{keywordtype}{void}) \{
+02540     redisReply *reply;
+02541     \textcolor{keywordtype}{long} aux, requests = 0;
+02542     \textcolor{keywordtype}{int} i = 0;
+02543 
+02544     \textcolor{keywordflow}{while}(1) \{
+02545         \textcolor{keywordtype}{char} buf[64];
+02546         \textcolor{keywordtype}{int} j;
+02547 
+02548         reply = reconnectingRedisCommand(context,\textcolor{stringliteral}{"INFO"});
+02549         \textcolor{keywordflow}{if} (reply->type == REDIS\_REPLY\_ERROR) \{
+02550             printf(\textcolor{stringliteral}{"ERROR: %s\(\backslash\)n"}, reply->str);
+02551             exit(1);
+02552         \}
+02553 
+02554         \textcolor{keywordflow}{if} ((i++ % 20) == 0) \{
+02555             printf(
+02556 \textcolor{stringliteral}{"------- data ------ --------------------- load -------------------- - child -\(\backslash\)n"}
+02557 \textcolor{stringliteral}{"keys       mem      clients blocked requests            connections          \(\backslash\)n"});
+02558         \}
+02559 
+02560         \textcolor{comment}{/* Keys */}
+02561         aux = 0;
+02562         \textcolor{keywordflow}{for} (j = 0; j < 20; j++) \{
+02563             \textcolor{keywordtype}{long} k;
+02564 
+02565             sprintf(buf,\textcolor{stringliteral}{"db%d:keys"},j);
+02566             k = getLongInfoField(reply->str,buf);
+02567             \textcolor{keywordflow}{if} (k == LONG\_MIN) \textcolor{keywordflow}{continue};
+02568             aux += k;
+02569         \}
+02570         sprintf(buf,\textcolor{stringliteral}{"%ld"},aux);
+02571         printf(\textcolor{stringliteral}{"%-11s"},buf);
+02572 
+02573         \textcolor{comment}{/* Used memory */}
+02574         aux = getLongInfoField(reply->str,\textcolor{stringliteral}{"used\_memory"});
+02575         bytesToHuman(buf,aux);
+02576         printf(\textcolor{stringliteral}{"%-8s"},buf);
+02577 
+02578         \textcolor{comment}{/* Clients */}
+02579         aux = getLongInfoField(reply->str,\textcolor{stringliteral}{"connected\_clients"});
+02580         sprintf(buf,\textcolor{stringliteral}{"%ld"},aux);
+02581         printf(\textcolor{stringliteral}{" %-8s"},buf);
+02582 
+02583         \textcolor{comment}{/* Blocked (BLPOPPING) Clients */}
+02584         aux = getLongInfoField(reply->str,\textcolor{stringliteral}{"blocked\_clients"});
+02585         sprintf(buf,\textcolor{stringliteral}{"%ld"},aux);
+02586         printf(\textcolor{stringliteral}{"%-8s"},buf);
+02587 
+02588         \textcolor{comment}{/* Requests */}
+02589         aux = getLongInfoField(reply->str,\textcolor{stringliteral}{"total\_commands\_processed"});
+02590         sprintf(buf,\textcolor{stringliteral}{"%ld (+%ld)"},aux,requests == 0 ? 0 : aux-requests);
+02591         printf(\textcolor{stringliteral}{"%-19s"},buf);
+02592         requests = aux;
+02593 
+02594         \textcolor{comment}{/* Connections */}
+02595         aux = getLongInfoField(reply->str,\textcolor{stringliteral}{"total\_connections\_received"});
+02596         sprintf(buf,\textcolor{stringliteral}{"%ld"},aux);
+02597         printf(\textcolor{stringliteral}{" %-12s"},buf);
+02598 
+02599         \textcolor{comment}{/* Children */}
+02600         aux = getLongInfoField(reply->str,\textcolor{stringliteral}{"bgsave\_in\_progress"});
+02601         aux |= getLongInfoField(reply->str,\textcolor{stringliteral}{"aof\_rewrite\_in\_progress"}) << 1;
+02602         aux |= getLongInfoField(reply->str,\textcolor{stringliteral}{"loading"}) << 2;
+02603         \textcolor{keywordflow}{switch}(aux) \{
+02604         \textcolor{keywordflow}{case} 0: \textcolor{keywordflow}{break};
+02605         \textcolor{keywordflow}{case} 1:
+02606             printf(\textcolor{stringliteral}{"SAVE"});
+02607             \textcolor{keywordflow}{break};
+02608         \textcolor{keywordflow}{case} 2:
+02609             printf(\textcolor{stringliteral}{"AOF"});
+02610             \textcolor{keywordflow}{break};
+02611         \textcolor{keywordflow}{case} 3:
+02612             printf(\textcolor{stringliteral}{"SAVE+AOF"});
+02613             \textcolor{keywordflow}{break};
+02614         \textcolor{keywordflow}{case} 4:
+02615             printf(\textcolor{stringliteral}{"LOAD"});
+02616             \textcolor{keywordflow}{break};
+02617         \}
+02618 
+02619         printf(\textcolor{stringliteral}{"\(\backslash\)n"});
+02620         freeReplyObject(reply);
+02621         usleep(config.interval);
+02622     \}
+02623 \}
+02624 
+02625 \textcolor{comment}{/*------------------------------------------------------------------------------}
+02626 \textcolor{comment}{ * Scan mode}
+02627 \textcolor{comment}{ *--------------------------------------------------------------------------- */}
+02628 
+02629 \textcolor{keyword}{static} \textcolor{keywordtype}{void} scanMode(\textcolor{keywordtype}{void}) \{
+02630     redisReply *reply;
+02631     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} cur = 0;
+02632 
+02633     \textcolor{keywordflow}{do} \{
+02634         \textcolor{keywordflow}{if} (config.pattern)
+02635             reply = redisCommand(context,\textcolor{stringliteral}{"SCAN %llu MATCH %s"},
+02636                 cur,config.pattern);
+02637         \textcolor{keywordflow}{else}
+02638             reply = redisCommand(context,\textcolor{stringliteral}{"SCAN %llu"},cur);
+02639         \textcolor{keywordflow}{if} (reply == NULL) \{
+02640             printf(\textcolor{stringliteral}{"I/O error\(\backslash\)n"});
+02641             exit(1);
+02642         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (reply->type == REDIS\_REPLY\_ERROR) \{
+02643             printf(\textcolor{stringliteral}{"ERROR: %s\(\backslash\)n"}, reply->str);
+02644             exit(1);
+02645         \} \textcolor{keywordflow}{else} \{
+02646             \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{int} j;
+02647 
+02648             cur = strtoull(reply->element[0]->str,NULL,10);
+02649             \textcolor{keywordflow}{for} (j = 0; j < reply->element[1]->elements; j++)
+02650                 printf(\textcolor{stringliteral}{"%s\(\backslash\)n"}, reply->element[1]->element[j]->str);
+02651         \}
+02652         freeReplyObject(reply);
+02653     \} \textcolor{keywordflow}{while}(cur != 0);
+02654 
+02655     exit(0);
+02656 \}
+02657 
+02658 \textcolor{comment}{/*------------------------------------------------------------------------------}
+02659 \textcolor{comment}{ * LRU test mode}
+02660 \textcolor{comment}{ *--------------------------------------------------------------------------- */}
+02661 
+02662 \textcolor{comment}{/* Return an integer from min to max (both inclusive) using a power-law}
+02663 \textcolor{comment}{ * distribution, depending on the value of alpha: the greater the alpha}
+02664 \textcolor{comment}{ * the more bias towards lower values.}
+02665 \textcolor{comment}{ *}
+02666 \textcolor{comment}{ * With alpha = 6.2 the output follows the 80-20 rule where 20% of}
+02667 \textcolor{comment}{ * the returned numbers will account for 80% of the frequency. */}
+02668 \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} powerLawRand(\textcolor{keywordtype}{long} \textcolor{keywordtype}{long} min, \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} max, \textcolor{keywordtype}{double} alpha) \{
+02669     \textcolor{keywordtype}{double} pl, r;
+02670 
+02671     max += 1;
+02672     r = ((\textcolor{keywordtype}{double})rand()) / RAND\_MAX;
+02673     pl = pow(
+02674         ((pow(max,alpha+1) - pow(min,alpha+1))*r + pow(min,alpha+1)),
+02675         (1.0/(alpha+1)));
+02676     \textcolor{keywordflow}{return} (max-1-(\textcolor{keywordtype}{long} \textcolor{keywordtype}{long})pl)+min;
+02677 \}
+02678 
+02679 \textcolor{comment}{/* Generates a key name among a set of lru\_test\_sample\_size keys, using}
+02680 \textcolor{comment}{ * an 80-20 distribution. */}
+02681 \textcolor{keywordtype}{void} LRUTestGenKey(\textcolor{keywordtype}{char} *buf, size\_t buflen) \{
+02682     snprintf(buf, buflen, \textcolor{stringliteral}{"lru:%lld"},
+02683         powerLawRand(1, config.lru\_test\_sample\_size, 6.2));
+02684 \}
+02685 
+02686 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{LRU\_CYCLE\_PERIOD} 1000 \textcolor{comment}{/* 1000 milliseconds. */}
+02687 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{LRU\_CYCLE\_PIPELINE\_SIZE} 250
+02688 \textcolor{keyword}{static} \textcolor{keywordtype}{void} LRUTestMode(\textcolor{keywordtype}{void}) \{
+02689     redisReply *reply;
+02690     \textcolor{keywordtype}{char} key[128];
+02691     \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} start\_cycle;
+02692     \textcolor{keywordtype}{int} j;
+02693 
+02694     srand(time(NULL)^getpid());
+02695     \textcolor{keywordflow}{while}(1) \{
+02696         \textcolor{comment}{/* Perform cycles of 1 second with 50% writes and 50% reads.}
+02697 \textcolor{comment}{         * We use pipelining batching writes / reads N times per cycle in order}
+02698 \textcolor{comment}{         * to fill the target instance easily. */}
+02699         start\_cycle = mstime();
+02700         \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} hits = 0, misses = 0;
+02701         \textcolor{keywordflow}{while}(mstime() - start\_cycle < 1000) \{
+02702             \textcolor{comment}{/* Write cycle. */}
+02703             \textcolor{keywordflow}{for} (j = 0; j < \hyperlink{redis-cli_8c_ae524234b44cd0249095699ac9f377254}{LRU\_CYCLE\_PIPELINE\_SIZE}; j++) \{
+02704                 \textcolor{keywordtype}{char} val[6];
+02705                 val[5] = \textcolor{stringliteral}{'\(\backslash\)0'};
+02706                 \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} i = 0; i < 5; i++) val[i] = \textcolor{stringliteral}{'A'}+rand()%(\textcolor{stringliteral}{'z'}-\textcolor{stringliteral}{'A'});
+02707                 LRUTestGenKey(key,\textcolor{keyword}{sizeof}(key));
+02708                 redisAppendCommand(context, \textcolor{stringliteral}{"SET %s %s"},key,val);
+02709             \}
+02710             \textcolor{keywordflow}{for} (j = 0; j < \hyperlink{redis-cli_8c_ae524234b44cd0249095699ac9f377254}{LRU\_CYCLE\_PIPELINE\_SIZE}; j++)
+02711                 redisGetReply(context, (\textcolor{keywordtype}{void}**)&reply);
+02712 
+02713             \textcolor{comment}{/* Read cycle. */}
+02714             \textcolor{keywordflow}{for} (j = 0; j < \hyperlink{redis-cli_8c_ae524234b44cd0249095699ac9f377254}{LRU\_CYCLE\_PIPELINE\_SIZE}; j++) \{
+02715                 LRUTestGenKey(key,\textcolor{keyword}{sizeof}(key));
+02716                 redisAppendCommand(context, \textcolor{stringliteral}{"GET %s"},key);
+02717             \}
+02718             \textcolor{keywordflow}{for} (j = 0; j < \hyperlink{redis-cli_8c_ae524234b44cd0249095699ac9f377254}{LRU\_CYCLE\_PIPELINE\_SIZE}; j++) \{
+02719                 \textcolor{keywordflow}{if} (redisGetReply(context, (\textcolor{keywordtype}{void}**)&reply) == REDIS\_OK) \{
+02720                     \textcolor{keywordflow}{switch}(reply->type) \{
+02721                         \textcolor{keywordflow}{case} REDIS\_REPLY\_ERROR:
+02722                             printf(\textcolor{stringliteral}{"%s\(\backslash\)n"}, reply->str);
+02723                             \textcolor{keywordflow}{break};
+02724                         \textcolor{keywordflow}{case} REDIS\_REPLY\_NIL:
+02725                             misses++;
+02726                             \textcolor{keywordflow}{break};
+02727                         \textcolor{keywordflow}{default}:
+02728                             hits++;
+02729                             \textcolor{keywordflow}{break};
+02730                     \}
+02731                 \}
+02732             \}
+02733 
+02734             \textcolor{keywordflow}{if} (context->err) \{
+02735                 fprintf(stderr,\textcolor{stringliteral}{"I/O error during LRU test\(\backslash\)n"});
+02736                 exit(1);
+02737             \}
+02738         \}
+02739         \textcolor{comment}{/* Print stats. */}
+02740         printf(
+02741             \textcolor{stringliteral}{"%lld Gets/sec | Hits: %lld (%.2f%%) | Misses: %lld (%.2f%%)\(\backslash\)n"},
+02742             hits+misses,
+02743             hits, (\textcolor{keywordtype}{double})hits/(hits+misses)*100,
+02744             misses, (\textcolor{keywordtype}{double})misses/(hits+misses)*100);
+02745     \}
+02746     exit(0);
+02747 \}
+02748 
+02749 \textcolor{comment}{/*------------------------------------------------------------------------------}
+02750 \textcolor{comment}{ * Intrisic latency mode.}
+02751 \textcolor{comment}{ *}
+02752 \textcolor{comment}{ * Measure max latency of a running process that does not result from}
+02753 \textcolor{comment}{ * syscalls. Basically this software should provide an hint about how much}
+02754 \textcolor{comment}{ * time the kernel leaves the process without a chance to run.}
+02755 \textcolor{comment}{ *--------------------------------------------------------------------------- */}
+02756 
+02757 \textcolor{comment}{/* This is just some computation the compiler can't optimize out.}
+02758 \textcolor{comment}{ * Should run in less than 100-200 microseconds even using very}
+02759 \textcolor{comment}{ * slow hardware. Runs in less than 10 microseconds in modern HW. */}
+02760 \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} compute\_something\_fast(\textcolor{keywordtype}{void}) \{
+02761     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} s[256], i, j, t;
+02762     \textcolor{keywordtype}{int} count = 1000, k;
+02763     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} output = 0;
+02764 
+02765     \textcolor{keywordflow}{for} (k = 0; k < 256; k++) s[k] = k;
+02766 
+02767     i = 0;
+02768     j = 0;
+02769     \textcolor{keywordflow}{while}(count--) \{
+02770         i++;
+02771         j = j + s[i];
+02772         t = s[i];
+02773         s[i] = s[j];
+02774         s[j] = t;
+02775         output += s[(s[i]+s[j])&255];
+02776     \}
+02777     \textcolor{keywordflow}{return} output;
+02778 \}
+02779 
+02780 \textcolor{keyword}{static} \textcolor{keywordtype}{void} intrinsicLatencyModeStop(\textcolor{keywordtype}{int} s) \{
+02781     \hyperlink{server_8h_ae7c9dc8f13568a9c856573751f1ee1ec}{UNUSED}(s);
+02782     force\_cancel\_loop = 1;
+02783 \}
+02784 
+02785 \textcolor{keyword}{static} \textcolor{keywordtype}{void} intrinsicLatencyMode(\textcolor{keywordtype}{void}) \{
+02786     \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} test\_end, run\_time, max\_latency = 0, runs = 0;
+02787 
+02788     run\_time = config.intrinsic\_latency\_duration*1000000;
+02789     test\_end = ustime() + run\_time;
+02790     signal(SIGINT, intrinsicLatencyModeStop);
+02791 
+02792     \textcolor{keywordflow}{while}(1) \{
+02793         \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} start, end, latency;
+02794 
+02795         start = ustime();
+02796         compute\_something\_fast();
+02797         end = ustime();
+02798         latency = end-start;
+02799         runs++;
+02800         \textcolor{keywordflow}{if} (latency <= 0) \textcolor{keywordflow}{continue};
+02801 
+02802         \textcolor{comment}{/* Reporting */}
+02803         \textcolor{keywordflow}{if} (latency > max\_latency) \{
+02804             max\_latency = latency;
+02805             printf(\textcolor{stringliteral}{"Max latency so far: %lld microseconds.\(\backslash\)n"}, max\_latency);
+02806         \}
+02807 
+02808         \textcolor{keywordtype}{double} avg\_us = (\textcolor{keywordtype}{double})run\_time/runs;
+02809         \textcolor{keywordtype}{double} avg\_ns = avg\_us * 1e3;
+02810         \textcolor{keywordflow}{if} (force\_cancel\_loop || end > test\_end) \{
+02811             printf(\textcolor{stringliteral}{"\(\backslash\)n%lld total runs "}
+02812                 \textcolor{stringliteral}{"(avg latency: "}
+02813                 \textcolor{stringliteral}{"%.4f microseconds / %.2f nanoseconds per run).\(\backslash\)n"},
+02814                 runs, avg\_us, avg\_ns);
+02815             printf(\textcolor{stringliteral}{"Worst run took %.0fx longer than the average latency.\(\backslash\)n"},
+02816                 max\_latency / avg\_us);
+02817             exit(0);
+02818         \}
+02819     \}
+02820 \}
+02821 
+02822 \textcolor{comment}{/*------------------------------------------------------------------------------}
+02823 \textcolor{comment}{ * Program main()}
+02824 \textcolor{comment}{ *--------------------------------------------------------------------------- */}
+02825 
+02826 \textcolor{keywordtype}{int} main(\textcolor{keywordtype}{int} argc, \textcolor{keywordtype}{char} **argv) \{
+02827     \textcolor{keywordtype}{int} firstarg;
+02828 
+02829     config.hostip = sdsnew(\textcolor{stringliteral}{"127.0.0.1"});
+02830     config.hostport = 6379;
+02831     config.hostsocket = NULL;
+02832     config.repeat = 1;
+02833     config.interval = 0;
+02834     config.dbnum = 0;
+02835     config.interactive = 0;
+02836     config.shutdown = 0;
+02837     config.monitor\_mode = 0;
+02838     config.pubsub\_mode = 0;
+02839     config.latency\_mode = 0;
+02840     config.latency\_dist\_mode = 0;
+02841     config.latency\_history = 0;
+02842     config.lru\_test\_mode = 0;
+02843     config.lru\_test\_sample\_size = 0;
+02844     config.cluster\_mode = 0;
+02845     config.slave\_mode = 0;
+02846     config.getrdb\_mode = 0;
+02847     config.stat\_mode = 0;
+02848     config.scan\_mode = 0;
+02849     config.intrinsic\_latency\_mode = 0;
+02850     config.pattern = NULL;
+02851     config.rdb\_filename = NULL;
+02852     config.pipe\_mode = 0;
+02853     config.pipe\_timeout = \hyperlink{redis-cli_8c_aa509dd2ea6ba533a33b1537622c215da}{REDIS\_CLI\_DEFAULT\_PIPE\_TIMEOUT};
+02854     config.bigkeys = 0;
+02855     config.hotkeys = 0;
+02856     config.stdinarg = 0;
+02857     config.auth = NULL;
+02858     config.eval = NULL;
+02859     config.eval\_ldb = 0;
+02860     config.eval\_ldb\_end = 0;
+02861     config.eval\_ldb\_sync = 0;
+02862     config.enable\_ldb\_on\_eval = 0;
+02863     config.last\_cmd\_type = -1;
+02864 
+02865     pref.hints = 1;
+02866 
+02867     spectrum\_palette = spectrum\_palette\_color;
+02868     spectrum\_palette\_size = spectrum\_palette\_color\_size;
+02869 
+02870     \textcolor{keywordflow}{if} (!isatty(fileno(stdout)) && (getenv(\textcolor{stringliteral}{"FAKETTY"}) == NULL))
+02871         config.output = \hyperlink{redis-cli_8c_a4f47017b54da140967dcbd440fae227c}{OUTPUT\_RAW};
+02872     \textcolor{keywordflow}{else}
+02873         config.output = \hyperlink{redis-cli_8c_abf624f04f4590979c3c3944bc7f94d6e}{OUTPUT\_STANDARD};
+02874     config.mb\_delim = sdsnew(\textcolor{stringliteral}{"\(\backslash\)n"});
+02875 
+02876     firstarg = parseOptions(argc,argv);
+02877     argc -= firstarg;
+02878     argv += firstarg;
+02879 
+02880     \textcolor{comment}{/* Latency mode */}
+02881     \textcolor{keywordflow}{if} (config.latency\_mode) \{
+02882         \textcolor{keywordflow}{if} (cliConnect(0) == REDIS\_ERR) exit(1);
+02883         latencyMode();
+02884     \}
+02885 
+02886     \textcolor{comment}{/* Latency distribution mode */}
+02887     \textcolor{keywordflow}{if} (config.latency\_dist\_mode) \{
+02888         \textcolor{keywordflow}{if} (cliConnect(0) == REDIS\_ERR) exit(1);
+02889         latencyDistMode();
+02890     \}
+02891 
+02892     \textcolor{comment}{/* Slave mode */}
+02893     \textcolor{keywordflow}{if} (config.slave\_mode) \{
+02894         \textcolor{keywordflow}{if} (cliConnect(0) == REDIS\_ERR) exit(1);
+02895         slaveMode();
+02896     \}
+02897 
+02898     \textcolor{comment}{/* Get RDB mode. */}
+02899     \textcolor{keywordflow}{if} (config.getrdb\_mode) \{
+02900         \textcolor{keywordflow}{if} (cliConnect(0) == REDIS\_ERR) exit(1);
+02901         getRDB();
+02902     \}
+02903 
+02904     \textcolor{comment}{/* Pipe mode */}
+02905     \textcolor{keywordflow}{if} (config.pipe\_mode) \{
+02906         \textcolor{keywordflow}{if} (cliConnect(0) == REDIS\_ERR) exit(1);
+02907         pipeMode();
+02908     \}
+02909 
+02910     \textcolor{comment}{/* Find big keys */}
+02911     \textcolor{keywordflow}{if} (config.bigkeys) \{
+02912         \textcolor{keywordflow}{if} (cliConnect(0) == REDIS\_ERR) exit(1);
+02913         findBigKeys();
+02914     \}
+02915 
+02916     \textcolor{comment}{/* Find hot keys */}
+02917     \textcolor{keywordflow}{if} (config.hotkeys) \{
+02918         \textcolor{keywordflow}{if} (cliConnect(0) == REDIS\_ERR) exit(1);
+02919         findHotKeys();
+02920     \}
+02921 
+02922     \textcolor{comment}{/* Stat mode */}
+02923     \textcolor{keywordflow}{if} (config.stat\_mode) \{
+02924         \textcolor{keywordflow}{if} (cliConnect(0) == REDIS\_ERR) exit(1);
+02925         \textcolor{keywordflow}{if} (config.interval == 0) config.interval = 1000000;
+02926         statMode();
+02927     \}
+02928 
+02929     \textcolor{comment}{/* Scan mode */}
+02930     \textcolor{keywordflow}{if} (config.scan\_mode) \{
+02931         \textcolor{keywordflow}{if} (cliConnect(0) == REDIS\_ERR) exit(1);
+02932         scanMode();
+02933     \}
+02934 
+02935     \textcolor{comment}{/* LRU test mode */}
+02936     \textcolor{keywordflow}{if} (config.lru\_test\_mode) \{
+02937         \textcolor{keywordflow}{if} (cliConnect(0) == REDIS\_ERR) exit(1);
+02938         LRUTestMode();
+02939     \}
+02940 
+02941     \textcolor{comment}{/* Intrinsic latency mode */}
+02942     \textcolor{keywordflow}{if} (config.intrinsic\_latency\_mode) intrinsicLatencyMode();
+02943 
+02944     \textcolor{comment}{/* Start interactive mode when no command is provided */}
+02945     \textcolor{keywordflow}{if} (argc == 0 && !config.eval) \{
+02946         \textcolor{comment}{/* Ignore SIGPIPE in interactive mode to force a reconnect */}
+02947         signal(SIGPIPE, SIG\_IGN);
+02948 
+02949         \textcolor{comment}{/* Note that in repl mode we don't abort on connection error.}
+02950 \textcolor{comment}{         * A new attempt will be performed for every command send. */}
+02951         cliConnect(0);
+02952         repl();
+02953     \}
+02954 
+02955     \textcolor{comment}{/* Otherwise, we have some arguments to execute */}
+02956     \textcolor{keywordflow}{if} (cliConnect(0) != REDIS\_OK) exit(1);
+02957     \textcolor{keywordflow}{if} (config.eval) \{
+02958         \textcolor{keywordflow}{return} evalMode(argc,argv);
+02959     \} \textcolor{keywordflow}{else} \{
+02960         \textcolor{keywordflow}{return} noninteractive(argc,convertToSds(argc,argv));
+02961     \}
+02962 \}
+\end{DoxyCode}

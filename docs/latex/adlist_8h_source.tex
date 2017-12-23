@@ -1,0 +1,100 @@
+\hypertarget{adlist_8h_source}{}\section{adlist.\+h}
+\label{adlist_8h_source}\index{src/adlist.\+h@{src/adlist.\+h}}
+
+\begin{DoxyCode}
+00001 \textcolor{comment}{/* adlist.h - A generic doubly linked list implementation}
+00002 \textcolor{comment}{ *}
+00003 \textcolor{comment}{ * Copyright (c) 2006-2012, Salvatore Sanfilippo <antirez at gmail dot com>}
+00004 \textcolor{comment}{ * All rights reserved.}
+00005 \textcolor{comment}{ *}
+00006 \textcolor{comment}{ * Redistribution and use in source and binary forms, with or without}
+00007 \textcolor{comment}{ * modification, are permitted provided that the following conditions are met:}
+00008 \textcolor{comment}{ *}
+00009 \textcolor{comment}{ *   * Redistributions of source code must retain the above copyright notice,}
+00010 \textcolor{comment}{ *     this list of conditions and the following disclaimer.}
+00011 \textcolor{comment}{ *   * Redistributions in binary form must reproduce the above copyright}
+00012 \textcolor{comment}{ *     notice, this list of conditions and the following disclaimer in the}
+00013 \textcolor{comment}{ *     documentation and/or other materials provided with the distribution.}
+00014 \textcolor{comment}{ *   * Neither the name of Redis nor the names of its contributors may be used}
+00015 \textcolor{comment}{ *     to endorse or promote products derived from this software without}
+00016 \textcolor{comment}{ *     specific prior written permission.}
+00017 \textcolor{comment}{ *}
+00018 \textcolor{comment}{ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"}
+00019 \textcolor{comment}{ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE}
+00020 \textcolor{comment}{ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE}
+00021 \textcolor{comment}{ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE}
+00022 \textcolor{comment}{ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR}
+00023 \textcolor{comment}{ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF}
+00024 \textcolor{comment}{ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS}
+00025 \textcolor{comment}{ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN}
+00026 \textcolor{comment}{ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)}
+00027 \textcolor{comment}{ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE}
+00028 \textcolor{comment}{ * POSSIBILITY OF SUCH DAMAGE.}
+00029 \textcolor{comment}{ */}
+00030 
+00031 \textcolor{preprocessor}{#}\textcolor{preprocessor}{ifndef} \textcolor{preprocessor}{\_\_ADLIST\_H\_\_}
+00032 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{\_\_ADLIST\_H\_\_}
+00033 
+00034 \textcolor{comment}{/* Node, List, and Iterator are the only data structures used currently. */}
+00035 
+\Hypertarget{adlist_8h_source_l00036}\hyperlink{structlistNode}{00036} \textcolor{keyword}{typedef} \textcolor{keyword}{struct} \hyperlink{structlistNode}{listNode} \{
+00037     \textcolor{keyword}{struct} \hyperlink{structlistNode}{listNode} *prev;
+00038     \textcolor{keyword}{struct} \hyperlink{structlistNode}{listNode} *next;
+00039     \textcolor{keywordtype}{void} *value;
+00040 \} listNode;
+00041 
+\Hypertarget{adlist_8h_source_l00042}\hyperlink{structlistIter}{00042} \textcolor{keyword}{typedef} \textcolor{keyword}{struct} \hyperlink{structlistIter}{listIter} \{
+00043     listNode *next;
+00044     \textcolor{keywordtype}{int} direction;
+00045 \} listIter;
+00046 
+\Hypertarget{adlist_8h_source_l00047}\hyperlink{structlist}{00047} \textcolor{keyword}{typedef} \textcolor{keyword}{struct} \hyperlink{structlist}{list} \{
+00048     listNode *head;
+00049     listNode *tail;
+00050     \textcolor{keywordtype}{void} *(*dup)(\textcolor{keywordtype}{void} *ptr);
+00051     \textcolor{keywordtype}{void} (*free)(\textcolor{keywordtype}{void} *ptr);
+00052     \textcolor{keywordtype}{int} (*match)(\textcolor{keywordtype}{void} *ptr, \textcolor{keywordtype}{void} *key);
+00053     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} len;
+00054 \} list;
+00055 
+00056 \textcolor{comment}{/* Functions implemented as macros */}
+00057 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{listLength}\textcolor{preprocessor}{(}\textcolor{preprocessor}{l}\textcolor{preprocessor}{)} \textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{l}\textcolor{preprocessor}{)}\textcolor{preprocessor}{->}\textcolor{preprocessor}{len}\textcolor{preprocessor}{)}
+00058 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{listFirst}\textcolor{preprocessor}{(}\textcolor{preprocessor}{l}\textcolor{preprocessor}{)} \textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{l}\textcolor{preprocessor}{)}\textcolor{preprocessor}{->}\textcolor{preprocessor}{head}\textcolor{preprocessor}{)}
+00059 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{listLast}\textcolor{preprocessor}{(}\textcolor{preprocessor}{l}\textcolor{preprocessor}{)} \textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{l}\textcolor{preprocessor}{)}\textcolor{preprocessor}{->}\textcolor{preprocessor}{tail}\textcolor{preprocessor}{)}
+00060 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{listPrevNode}\textcolor{preprocessor}{(}\textcolor{preprocessor}{n}\textcolor{preprocessor}{)} \textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{n}\textcolor{preprocessor}{)}\textcolor{preprocessor}{->}\textcolor{preprocessor}{prev}\textcolor{preprocessor}{)}
+00061 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{listNextNode}\textcolor{preprocessor}{(}\textcolor{preprocessor}{n}\textcolor{preprocessor}{)} \textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{n}\textcolor{preprocessor}{)}\textcolor{preprocessor}{->}\textcolor{preprocessor}{next}\textcolor{preprocessor}{)}
+00062 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{listNodeValue}\textcolor{preprocessor}{(}\textcolor{preprocessor}{n}\textcolor{preprocessor}{)} \textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{n}\textcolor{preprocessor}{)}\textcolor{preprocessor}{->}\textcolor{preprocessor}{value}\textcolor{preprocessor}{)}
+00063 
+00064 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{listSetDupMethod}\textcolor{preprocessor}{(}\textcolor{preprocessor}{l}\textcolor{preprocessor}{,}\textcolor{preprocessor}{m}\textcolor{preprocessor}{)} \textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{l}\textcolor{preprocessor}{)}\textcolor{preprocessor}{->}\textcolor{preprocessor}{dup} \textcolor{preprocessor}{=} \textcolor{preprocessor}{(}\textcolor{preprocessor}{m}\textcolor{preprocessor}{)}\textcolor{preprocessor}{)}
+00065 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{listSetFreeMethod}\textcolor{preprocessor}{(}\textcolor{preprocessor}{l}\textcolor{preprocessor}{,}\textcolor{preprocessor}{m}\textcolor{preprocessor}{)} \textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{l}\textcolor{preprocessor}{)}\textcolor{preprocessor}{->}\textcolor{preprocessor}{free} \textcolor{preprocessor}{=} \textcolor{preprocessor}{(}\textcolor{preprocessor}{m}\textcolor{preprocessor}{)}\textcolor{preprocessor}{)}
+00066 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{listSetMatchMethod}\textcolor{preprocessor}{(}\textcolor{preprocessor}{l}\textcolor{preprocessor}{,}\textcolor{preprocessor}{m}\textcolor{preprocessor}{)} \textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{l}\textcolor{preprocessor}{)}\textcolor{preprocessor}{->}\textcolor{preprocessor}{match} \textcolor{preprocessor}{=} \textcolor{preprocessor}{(}\textcolor{preprocessor}{m}\textcolor{preprocessor}{)}\textcolor{preprocessor}{)}
+00067 
+00068 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{listGetDupMethod}\textcolor{preprocessor}{(}\textcolor{preprocessor}{l}\textcolor{preprocessor}{)} \textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{l}\textcolor{preprocessor}{)}\textcolor{preprocessor}{->}\textcolor{preprocessor}{dup}\textcolor{preprocessor}{)}
+00069 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{listGetFree}\textcolor{preprocessor}{(}\textcolor{preprocessor}{l}\textcolor{preprocessor}{)} \textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{l}\textcolor{preprocessor}{)}\textcolor{preprocessor}{->}\textcolor{preprocessor}{free}\textcolor{preprocessor}{)}
+00070 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{listGetMatchMethod}\textcolor{preprocessor}{(}\textcolor{preprocessor}{l}\textcolor{preprocessor}{)} \textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{l}\textcolor{preprocessor}{)}\textcolor{preprocessor}{->}\textcolor{preprocessor}{match}\textcolor{preprocessor}{)}
+00071 
+00072 \textcolor{comment}{/* Prototypes */}
+00073 list *listCreate(\textcolor{keywordtype}{void});
+00074 \textcolor{keywordtype}{void} listRelease(list *list);
+00075 \textcolor{keywordtype}{void} listEmpty(list *list);
+00076 list *listAddNodeHead(list *list, \textcolor{keywordtype}{void} *value);
+00077 list *listAddNodeTail(list *list, \textcolor{keywordtype}{void} *value);
+00078 list *listInsertNode(list *list, listNode *old\_node, \textcolor{keywordtype}{void} *value, \textcolor{keywordtype}{int} after);
+00079 \textcolor{keywordtype}{void} listDelNode(list *list, listNode *node);
+00080 listIter *listGetIterator(list *list, \textcolor{keywordtype}{int} direction);
+00081 listNode *listNext(listIter *iter);
+00082 \textcolor{keywordtype}{void} listReleaseIterator(listIter *iter);
+00083 list *listDup(list *orig);
+00084 listNode *listSearchKey(list *list, \textcolor{keywordtype}{void} *key);
+00085 listNode *listIndex(list *list, \textcolor{keywordtype}{long} index);
+00086 \textcolor{keywordtype}{void} listRewind(list *list, listIter *li);
+00087 \textcolor{keywordtype}{void} listRewindTail(list *list, listIter *li);
+00088 \textcolor{keywordtype}{void} listRotate(list *list);
+00089 \textcolor{keywordtype}{void} listJoin(list *l, list *o);
+00090 
+00091 \textcolor{comment}{/* Directions for iterators */}
+00092 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{AL\_START\_HEAD} 0
+00093 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{AL\_START\_TAIL} 1
+00094 
+00095 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif} \textcolor{comment}{/* \_\_ADLIST\_H\_\_ */}
+\end{DoxyCode}

@@ -1,0 +1,159 @@
+\hypertarget{rdb_8h_source}{}\section{rdb.\+h}
+\label{rdb_8h_source}\index{src/rdb.\+h@{src/rdb.\+h}}
+
+\begin{DoxyCode}
+00001 \textcolor{comment}{/*}
+00002 \textcolor{comment}{ * Copyright (c) 2009-2012, Salvatore Sanfilippo <antirez at gmail dot com>}
+00003 \textcolor{comment}{ * All rights reserved.}
+00004 \textcolor{comment}{ *}
+00005 \textcolor{comment}{ * Redistribution and use in source and binary forms, with or without}
+00006 \textcolor{comment}{ * modification, are permitted provided that the following conditions are met:}
+00007 \textcolor{comment}{ *}
+00008 \textcolor{comment}{ *   * Redistributions of source code must retain the above copyright notice,}
+00009 \textcolor{comment}{ *     this list of conditions and the following disclaimer.}
+00010 \textcolor{comment}{ *   * Redistributions in binary form must reproduce the above copyright}
+00011 \textcolor{comment}{ *     notice, this list of conditions and the following disclaimer in the}
+00012 \textcolor{comment}{ *     documentation and/or other materials provided with the distribution.}
+00013 \textcolor{comment}{ *   * Neither the name of Redis nor the names of its contributors may be used}
+00014 \textcolor{comment}{ *     to endorse or promote products derived from this software without}
+00015 \textcolor{comment}{ *     specific prior written permission.}
+00016 \textcolor{comment}{ *}
+00017 \textcolor{comment}{ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"}
+00018 \textcolor{comment}{ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE}
+00019 \textcolor{comment}{ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE}
+00020 \textcolor{comment}{ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE}
+00021 \textcolor{comment}{ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR}
+00022 \textcolor{comment}{ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF}
+00023 \textcolor{comment}{ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS}
+00024 \textcolor{comment}{ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN}
+00025 \textcolor{comment}{ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)}
+00026 \textcolor{comment}{ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE}
+00027 \textcolor{comment}{ * POSSIBILITY OF SUCH DAMAGE.}
+00028 \textcolor{comment}{ */}
+00029 
+00030 \textcolor{preprocessor}{#}\textcolor{preprocessor}{ifndef} \textcolor{preprocessor}{\_\_RDB\_H}
+00031 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{\_\_RDB\_H}
+00032 
+00033 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{stdio}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00034 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \hyperlink{rio_8h}{"rio.h"}
+00035 
+00036 \textcolor{comment}{/* TBD: include only necessary headers. */}
+00037 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \hyperlink{server_8h}{"server.h"}
+00038 
+00039 \textcolor{comment}{/* The current RDB version. When the format changes in a way that is no longer}
+00040 \textcolor{comment}{ * backward compatible this number gets incremented. */}
+00041 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{RDB\_VERSION} 8
+00042 
+00043 \textcolor{comment}{/* Defines related to the dump file format. To store 32 bits lengths for short}
+00044 \textcolor{comment}{ * keys requires a lot of space, so we check the most significant 2 bits of}
+00045 \textcolor{comment}{ * the first byte to interpreter the length:}
+00046 \textcolor{comment}{ *}
+00047 \textcolor{comment}{ * 00|XXXXXX => if the two MSB are 00 the len is the 6 bits of this byte}
+00048 \textcolor{comment}{ * 01|XXXXXX XXXXXXXX =>  01, the len is 14 byes, 6 bits + 8 bits of next byte}
+00049 \textcolor{comment}{ * 10|000000 [32 bit integer] => A full 32 bit len in net byte order will follow}
+00050 \textcolor{comment}{ * 10|000001 [64 bit integer] => A full 64 bit len in net byte order will follow}
+00051 \textcolor{comment}{ * 11|OBKIND this means: specially encoded object will follow. The six bits}
+00052 \textcolor{comment}{ *           number specify the kind of object that follows.}
+00053 \textcolor{comment}{ *           See the RDB\_ENC\_* defines.}
+00054 \textcolor{comment}{ *}
+00055 \textcolor{comment}{ * Lengths up to 63 are stored using a single byte, most DB keys, and may}
+00056 \textcolor{comment}{ * values, will fit inside. */}
+00057 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{RDB\_6BITLEN} 0
+00058 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{RDB\_14BITLEN} 1
+00059 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{RDB\_32BITLEN} 0x80
+00060 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{RDB\_64BITLEN} 0x81
+00061 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{RDB\_ENCVAL} 3
+00062 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{RDB\_LENERR} UINT64\_MAX
+00063 
+00064 \textcolor{comment}{/* When a length of a string object stored on disk has the first two bits}
+00065 \textcolor{comment}{ * set, the remaining six bits specify a special encoding for the object}
+00066 \textcolor{comment}{ * accordingly to the following defines: */}
+00067 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{RDB\_ENC\_INT8} 0        \textcolor{comment}{/* 8 bit signed integer */}
+00068 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{RDB\_ENC\_INT16} 1       \textcolor{comment}{/* 16 bit signed integer */}
+00069 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{RDB\_ENC\_INT32} 2       \textcolor{comment}{/* 32 bit signed integer */}
+00070 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{RDB\_ENC\_LZF} 3         \textcolor{comment}{/* string compressed with FASTLZ */}
+00071 
+00072 \textcolor{comment}{/* Map object types to RDB object types. Macros starting with OBJ\_ are for}
+00073 \textcolor{comment}{ * memory storage and may change. Instead RDB types must be fixed because}
+00074 \textcolor{comment}{ * we store them on disk. */}
+00075 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{RDB\_TYPE\_STRING} 0
+00076 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{RDB\_TYPE\_LIST}   1
+00077 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{RDB\_TYPE\_SET}    2
+00078 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{RDB\_TYPE\_ZSET}   3
+00079 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{RDB\_TYPE\_HASH}   4
+00080 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{RDB\_TYPE\_ZSET\_2} 5 \textcolor{comment}{/* ZSET version 2 with doubles stored in binary. */}
+00081 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{RDB\_TYPE\_MODULE} 6
+00082 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{RDB\_TYPE\_MODULE\_2} 7 \textcolor{comment}{/* Module value with annotations for parsing without}
+00083 \textcolor{comment}{                               the generating module being loaded. */}
+00084 \textcolor{comment}{/* NOTE: WHEN ADDING NEW RDB TYPE, UPDATE rdbIsObjectType() BELOW */}
+00085 
+00086 \textcolor{comment}{/* Object types for encoded objects. */}
+00087 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{RDB\_TYPE\_HASH\_ZIPMAP}    9
+00088 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{RDB\_TYPE\_LIST\_ZIPLIST}  10
+00089 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{RDB\_TYPE\_SET\_INTSET}    11
+00090 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{RDB\_TYPE\_ZSET\_ZIPLIST}  12
+00091 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{RDB\_TYPE\_HASH\_ZIPLIST}  13
+00092 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{RDB\_TYPE\_LIST\_QUICKLIST} 14
+00093 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{RDB\_TYPE\_STREAM\_LISTPACKS} 15
+00094 \textcolor{comment}{/* NOTE: WHEN ADDING NEW RDB TYPE, UPDATE rdbIsObjectType() BELOW */}
+00095 
+00096 \textcolor{comment}{/* Test if a type is an object type. */}
+00097 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{rdbIsObjectType}\textcolor{preprocessor}{(}\textcolor{preprocessor}{t}\textcolor{preprocessor}{)} \textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{t} \textcolor{preprocessor}{>=} 0 \textcolor{preprocessor}{&&} \textcolor{preprocessor}{t} \textcolor{preprocessor}{<=} 7\textcolor{preprocessor}{)} \textcolor{preprocessor}{||} \textcolor{preprocessor}{(}\textcolor{preprocessor}{t} \textcolor{preprocessor}{>=} 9 \textcolor{preprocessor}{&&} \textcolor{preprocessor}{t} \textcolor{preprocessor}{<=} 15\textcolor{preprocessor}{)}\textcolor{preprocessor}{)}
+00098 
+00099 \textcolor{comment}{/* Special RDB opcodes (saved/loaded with rdbSaveType/rdbLoadType). */}
+00100 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{RDB\_OPCODE\_AUX}        250
+00101 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{RDB\_OPCODE\_RESIZEDB}   251
+00102 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{RDB\_OPCODE\_EXPIRETIME\_MS} 252
+00103 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{RDB\_OPCODE\_EXPIRETIME} 253
+00104 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{RDB\_OPCODE\_SELECTDB}   254
+00105 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{RDB\_OPCODE\_EOF}        255
+00106 
+00107 \textcolor{comment}{/* Module serialized values sub opcodes */}
+00108 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{RDB\_MODULE\_OPCODE\_EOF}   0   \textcolor{comment}{/* End of module value. */}
+00109 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{RDB\_MODULE\_OPCODE\_SINT}  1   \textcolor{comment}{/* Signed integer. */}
+00110 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{RDB\_MODULE\_OPCODE\_UINT}  2   \textcolor{comment}{/* Unsigned integer. */}
+00111 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{RDB\_MODULE\_OPCODE\_FLOAT} 3   \textcolor{comment}{/* Float. */}
+00112 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{RDB\_MODULE\_OPCODE\_DOUBLE} 4  \textcolor{comment}{/* Double. */}
+00113 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{RDB\_MODULE\_OPCODE\_STRING} 5  \textcolor{comment}{/* String. */}
+00114 
+00115 \textcolor{comment}{/* rdbLoad...() functions flags. */}
+00116 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{RDB\_LOAD\_NONE}   0
+00117 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{RDB\_LOAD\_ENC}    \textcolor{preprocessor}{(}1\textcolor{preprocessor}{<<}0\textcolor{preprocessor}{)}
+00118 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{RDB\_LOAD\_PLAIN}  \textcolor{preprocessor}{(}1\textcolor{preprocessor}{<<}1\textcolor{preprocessor}{)}
+00119 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{RDB\_LOAD\_SDS}    \textcolor{preprocessor}{(}1\textcolor{preprocessor}{<<}2\textcolor{preprocessor}{)}
+00120 
+00121 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{RDB\_SAVE\_NONE} 0
+00122 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{RDB\_SAVE\_AOF\_PREAMBLE} \textcolor{preprocessor}{(}1\textcolor{preprocessor}{<<}0\textcolor{preprocessor}{)}
+00123 
+00124 \textcolor{keywordtype}{int} rdbSaveType(rio *rdb, \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} type);
+00125 \textcolor{keywordtype}{int} rdbLoadType(rio *rdb);
+00126 \textcolor{keywordtype}{int} rdbSaveTime(rio *rdb, time\_t t);
+00127 time\_t rdbLoadTime(rio *rdb);
+00128 \textcolor{keywordtype}{int} rdbSaveLen(rio *rdb, uint64\_t len);
+00129 uint64\_t rdbLoadLen(rio *rdb, \textcolor{keywordtype}{int} *isencoded);
+00130 \textcolor{keywordtype}{int} rdbLoadLenByRef(rio *rdb, \textcolor{keywordtype}{int} *isencoded, uint64\_t *lenptr);
+00131 \textcolor{keywordtype}{int} rdbSaveObjectType(rio *rdb, robj *o);
+00132 \textcolor{keywordtype}{int} rdbLoadObjectType(rio *rdb);
+00133 \textcolor{keywordtype}{int} rdbLoad(\textcolor{keywordtype}{char} *filename, rdbSaveInfo *rsi);
+00134 \textcolor{keywordtype}{int} rdbSaveBackground(\textcolor{keywordtype}{char} *filename, rdbSaveInfo *rsi);
+00135 \textcolor{keywordtype}{int} rdbSaveToSlavesSockets(rdbSaveInfo *rsi);
+00136 \textcolor{keywordtype}{void} rdbRemoveTempFile(pid\_t childpid);
+00137 \textcolor{keywordtype}{int} rdbSave(\textcolor{keywordtype}{char} *filename, rdbSaveInfo *rsi);
+00138 ssize\_t rdbSaveObject(rio *rdb, robj *o);
+00139 size\_t rdbSavedObjectLen(robj *o);
+00140 robj *rdbLoadObject(\textcolor{keywordtype}{int} type, rio *rdb);
+00141 \textcolor{keywordtype}{void} backgroundSaveDoneHandler(\textcolor{keywordtype}{int} exitcode, \textcolor{keywordtype}{int} bysignal);
+00142 \textcolor{keywordtype}{int} rdbSaveKeyValuePair(rio *rdb, robj *key, robj *val, \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} expiretime, \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} now);
+00143 robj *rdbLoadStringObject(rio *rdb);
+00144 \textcolor{keywordtype}{int} rdbSaveStringObject(rio *rdb, robj *obj);
+00145 ssize\_t rdbSaveRawString(rio *rdb, \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *s, size\_t len);
+00146 \textcolor{keywordtype}{void} *rdbGenericLoadStringObject(rio *rdb, \textcolor{keywordtype}{int} flags, size\_t *lenptr);
+00147 \textcolor{keywordtype}{int} rdbSaveBinaryDoubleValue(rio *rdb, \textcolor{keywordtype}{double} val);
+00148 \textcolor{keywordtype}{int} rdbLoadBinaryDoubleValue(rio *rdb, \textcolor{keywordtype}{double} *val);
+00149 \textcolor{keywordtype}{int} rdbSaveBinaryFloatValue(rio *rdb, \textcolor{keywordtype}{float} val);
+00150 \textcolor{keywordtype}{int} rdbLoadBinaryFloatValue(rio *rdb, \textcolor{keywordtype}{float} *val);
+00151 \textcolor{keywordtype}{int} rdbLoadRio(rio *rdb, rdbSaveInfo *rsi);
+00152 rdbSaveInfo *rdbPopulateSaveInfo(rdbSaveInfo *rsi);
+00153 
+00154 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+\end{DoxyCode}

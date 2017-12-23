@@ -1,0 +1,104 @@
+\hypertarget{zmalloc_8h_source}{}\section{zmalloc.\+h}
+\label{zmalloc_8h_source}\index{src/zmalloc.\+h@{src/zmalloc.\+h}}
+
+\begin{DoxyCode}
+00001 \textcolor{comment}{/* zmalloc - total amount of allocated memory aware version of malloc()}
+00002 \textcolor{comment}{ *}
+00003 \textcolor{comment}{ * Copyright (c) 2009-2010, Salvatore Sanfilippo <antirez at gmail dot com>}
+00004 \textcolor{comment}{ * All rights reserved.}
+00005 \textcolor{comment}{ *}
+00006 \textcolor{comment}{ * Redistribution and use in source and binary forms, with or without}
+00007 \textcolor{comment}{ * modification, are permitted provided that the following conditions are met:}
+00008 \textcolor{comment}{ *}
+00009 \textcolor{comment}{ *   * Redistributions of source code must retain the above copyright notice,}
+00010 \textcolor{comment}{ *     this list of conditions and the following disclaimer.}
+00011 \textcolor{comment}{ *   * Redistributions in binary form must reproduce the above copyright}
+00012 \textcolor{comment}{ *     notice, this list of conditions and the following disclaimer in the}
+00013 \textcolor{comment}{ *     documentation and/or other materials provided with the distribution.}
+00014 \textcolor{comment}{ *   * Neither the name of Redis nor the names of its contributors may be used}
+00015 \textcolor{comment}{ *     to endorse or promote products derived from this software without}
+00016 \textcolor{comment}{ *     specific prior written permission.}
+00017 \textcolor{comment}{ *}
+00018 \textcolor{comment}{ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"}
+00019 \textcolor{comment}{ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE}
+00020 \textcolor{comment}{ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE}
+00021 \textcolor{comment}{ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE}
+00022 \textcolor{comment}{ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR}
+00023 \textcolor{comment}{ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF}
+00024 \textcolor{comment}{ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS}
+00025 \textcolor{comment}{ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN}
+00026 \textcolor{comment}{ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)}
+00027 \textcolor{comment}{ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE}
+00028 \textcolor{comment}{ * POSSIBILITY OF SUCH DAMAGE.}
+00029 \textcolor{comment}{ */}
+00030 
+00031 \textcolor{preprocessor}{#}\textcolor{preprocessor}{ifndef} \textcolor{preprocessor}{\_\_ZMALLOC\_H}
+00032 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{\_\_ZMALLOC\_H}
+00033 
+00034 \textcolor{comment}{/* Double expansion needed for stringification of macro values. */}
+00035 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{\_\_xstr}\textcolor{preprocessor}{(}\textcolor{preprocessor}{s}\textcolor{preprocessor}{)} \hyperlink{zmalloc_8h_a7587d2de00556018e66da47766f21608}{\_\_str}\textcolor{preprocessor}{(}\textcolor{preprocessor}{s}\textcolor{preprocessor}{)}
+00036 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{\_\_str}\textcolor{preprocessor}{(}\textcolor{preprocessor}{s}\textcolor{preprocessor}{)} \textcolor{preprocessor}{#}\textcolor{preprocessor}{s}
+00037 
+00038 \textcolor{preprocessor}{#}\textcolor{preprocessor}{if} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{USE\_TCMALLOC}\textcolor{preprocessor}{)}
+00039 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{ZMALLOC\_LIB} \textcolor{preprocessor}{(}\textcolor{stringliteral}{"tcmalloc-"} \textcolor{preprocessor}{\_\_xstr}\textcolor{preprocessor}{(}\textcolor{preprocessor}{TC\_VERSION\_MAJOR}\textcolor{preprocessor}{)} \textcolor{stringliteral}{"."} \textcolor{preprocessor}{\_\_xstr}\textcolor{preprocessor}{(}\textcolor{preprocessor}{TC\_VERSION\_MINOR}\textcolor{preprocessor}{)}\textcolor{preprocessor}{)}
+00040 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{google}\textcolor{preprocessor}{/}\textcolor{preprocessor}{tcmalloc}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00041 \textcolor{preprocessor}{#}\textcolor{preprocessor}{if} \textcolor{preprocessor}{(}\textcolor{preprocessor}{TC\_VERSION\_MAJOR} \textcolor{preprocessor}{==} 1 \textcolor{preprocessor}{&&} \textcolor{preprocessor}{TC\_VERSION\_MINOR} \textcolor{preprocessor}{>=} 6\textcolor{preprocessor}{)} \textcolor{preprocessor}{||} \textcolor{preprocessor}{(}\textcolor{preprocessor}{TC\_VERSION\_MAJOR} \textcolor{preprocessor}{>} 1\textcolor{preprocessor}{)}
+00042 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{HAVE\_MALLOC\_SIZE} 1
+00043 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{zmalloc\_size}\textcolor{preprocessor}{(}\textcolor{preprocessor}{p}\textcolor{preprocessor}{)} \textcolor{preprocessor}{tc\_malloc\_size}\textcolor{preprocessor}{(}\textcolor{preprocessor}{p}\textcolor{preprocessor}{)}
+00044 \textcolor{preprocessor}{#}\textcolor{preprocessor}{else}
+00045 \textcolor{preprocessor}{#}\textcolor{preprocessor}{error} \textcolor{stringliteral}{"Newer version of tcmalloc required"}
+00046 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00047 
+00048 \textcolor{preprocessor}{#}\textcolor{preprocessor}{elif} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{USE\_JEMALLOC}\textcolor{preprocessor}{)}
+00049 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{ZMALLOC\_LIB} \textcolor{preprocessor}{(}\textcolor{stringliteral}{"jemalloc-"} \textcolor{preprocessor}{\_\_xstr}\textcolor{preprocessor}{(}\textcolor{preprocessor}{JEMALLOC\_VERSION\_MAJOR}\textcolor{preprocessor}{)} \textcolor{stringliteral}{"."} \textcolor{preprocessor}{\_\_xstr}\textcolor{preprocessor}{(}\textcolor{preprocessor}{JEMALLOC\_VERSION\_MINOR}\textcolor{preprocessor}{)} \textcolor{stringliteral}{"."}
+       \textcolor{preprocessor}{\_\_xstr}\textcolor{preprocessor}{(}\textcolor{preprocessor}{JEMALLOC\_VERSION\_BUGFIX}\textcolor{preprocessor}{)}\textcolor{preprocessor}{)}
+00050 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{jemalloc}\textcolor{preprocessor}{/}\textcolor{preprocessor}{jemalloc}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00051 \textcolor{preprocessor}{#}\textcolor{preprocessor}{if} \textcolor{preprocessor}{(}\textcolor{preprocessor}{JEMALLOC\_VERSION\_MAJOR} \textcolor{preprocessor}{==} 2 \textcolor{preprocessor}{&&} \textcolor{preprocessor}{JEMALLOC\_VERSION\_MINOR} \textcolor{preprocessor}{>=} 1\textcolor{preprocessor}{)} \textcolor{preprocessor}{||} \textcolor{preprocessor}{(}\textcolor{preprocessor}{JEMALLOC\_VERSION\_MAJOR} \textcolor{preprocessor}{>} 2\textcolor{preprocessor}{)}
+00052 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{HAVE\_MALLOC\_SIZE} 1
+00053 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{zmalloc\_size}\textcolor{preprocessor}{(}\textcolor{preprocessor}{p}\textcolor{preprocessor}{)} \textcolor{preprocessor}{je\_malloc\_usable\_size}\textcolor{preprocessor}{(}\textcolor{preprocessor}{p}\textcolor{preprocessor}{)}
+00054 \textcolor{preprocessor}{#}\textcolor{preprocessor}{else}
+00055 \textcolor{preprocessor}{#}\textcolor{preprocessor}{error} \textcolor{stringliteral}{"Newer version of jemalloc required"}
+00056 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00057 
+00058 \textcolor{preprocessor}{#}\textcolor{preprocessor}{elif} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_\_APPLE\_\_}\textcolor{preprocessor}{)}
+00059 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{malloc}\textcolor{preprocessor}{/}\textcolor{preprocessor}{malloc}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00060 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{HAVE\_MALLOC\_SIZE} 1
+00061 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{zmalloc\_size}\textcolor{preprocessor}{(}\textcolor{preprocessor}{p}\textcolor{preprocessor}{)} \textcolor{preprocessor}{malloc\_size}\textcolor{preprocessor}{(}\textcolor{preprocessor}{p}\textcolor{preprocessor}{)}
+00062 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00063 
+00064 \textcolor{preprocessor}{#}\textcolor{preprocessor}{ifndef} \textcolor{preprocessor}{ZMALLOC\_LIB}
+00065 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{ZMALLOC\_LIB} \textcolor{stringliteral}{"libc"}
+00066 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00067 
+00068 \textcolor{comment}{/* We can enable the Redis defrag capabilities only if we are using Jemalloc}
+00069 \textcolor{comment}{ * and the version used is our special version modified for Redis having}
+00070 \textcolor{comment}{ * the ability to return per-allocation fragmentation hints. */}
+00071 \textcolor{preprocessor}{#}\textcolor{preprocessor}{if} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{USE\_JEMALLOC}\textcolor{preprocessor}{)} \textcolor{preprocessor}{&&} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{JEMALLOC\_FRAG\_HINT}\textcolor{preprocessor}{)}
+00072 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{HAVE\_DEFRAG}
+00073 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00074 
+00075 \textcolor{keywordtype}{void} *zmalloc(size\_t size);
+00076 \textcolor{keywordtype}{void} *zcalloc(size\_t size);
+00077 \textcolor{keywordtype}{void} *zrealloc(\textcolor{keywordtype}{void} *ptr, size\_t size);
+00078 \textcolor{keywordtype}{void} zfree(\textcolor{keywordtype}{void} *ptr);
+00079 \textcolor{keywordtype}{char} *zstrdup(\textcolor{keyword}{const} \textcolor{keywordtype}{char} *s);
+00080 size\_t zmalloc\_used\_memory(\textcolor{keywordtype}{void});
+00081 \textcolor{keywordtype}{void} zmalloc\_set\_oom\_handler(\textcolor{keywordtype}{void} (*oom\_handler)(size\_t));
+00082 \textcolor{keywordtype}{float} zmalloc\_get\_fragmentation\_ratio(size\_t rss);
+00083 size\_t zmalloc\_get\_rss(\textcolor{keywordtype}{void});
+00084 size\_t zmalloc\_get\_private\_dirty(\textcolor{keywordtype}{long} pid);
+00085 size\_t zmalloc\_get\_smap\_bytes\_by\_field(\textcolor{keywordtype}{char} *field, \textcolor{keywordtype}{long} pid);
+00086 size\_t zmalloc\_get\_memory\_size(\textcolor{keywordtype}{void});
+00087 \textcolor{keywordtype}{void} zlibc\_free(\textcolor{keywordtype}{void} *ptr);
+00088 
+00089 \textcolor{preprocessor}{#}\textcolor{preprocessor}{ifdef} \textcolor{preprocessor}{HAVE\_DEFRAG}
+00090 \textcolor{keywordtype}{void} zfree\_no\_tcache(\textcolor{keywordtype}{void} *ptr);
+00091 \textcolor{keywordtype}{void} *zmalloc\_no\_tcache(size\_t size);
+00092 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00093 
+00094 \textcolor{preprocessor}{#}\textcolor{preprocessor}{ifndef} \textcolor{preprocessor}{HAVE\_MALLOC\_SIZE}
+00095 size\_t zmalloc\_size(\textcolor{keywordtype}{void} *ptr);
+00096 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00097 
+00098 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif} \textcolor{comment}{/* \_\_ZMALLOC\_H */}
+\end{DoxyCode}

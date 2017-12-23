@@ -1,0 +1,151 @@
+\hypertarget{rio_8h_source}{}\section{rio.\+h}
+\label{rio_8h_source}\index{src/rio.\+h@{src/rio.\+h}}
+
+\begin{DoxyCode}
+00001 \textcolor{comment}{/*}
+00002 \textcolor{comment}{ * Copyright (c) 2009-2012, Pieter Noordhuis <pcnoordhuis at gmail dot com>}
+00003 \textcolor{comment}{ * Copyright (c) 2009-2012, Salvatore Sanfilippo <antirez at gmail dot com>}
+00004 \textcolor{comment}{ * All rights reserved.}
+00005 \textcolor{comment}{ *}
+00006 \textcolor{comment}{ * Redistribution and use in source and binary forms, with or without}
+00007 \textcolor{comment}{ * modification, are permitted provided that the following conditions are met:}
+00008 \textcolor{comment}{ *}
+00009 \textcolor{comment}{ *   * Redistributions of source code must retain the above copyright notice,}
+00010 \textcolor{comment}{ *     this list of conditions and the following disclaimer.}
+00011 \textcolor{comment}{ *   * Redistributions in binary form must reproduce the above copyright}
+00012 \textcolor{comment}{ *     notice, this list of conditions and the following disclaimer in the}
+00013 \textcolor{comment}{ *     documentation and/or other materials provided with the distribution.}
+00014 \textcolor{comment}{ *   * Neither the name of Redis nor the names of its contributors may be used}
+00015 \textcolor{comment}{ *     to endorse or promote products derived from this software without}
+00016 \textcolor{comment}{ *     specific prior written permission.}
+00017 \textcolor{comment}{ *}
+00018 \textcolor{comment}{ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"}
+00019 \textcolor{comment}{ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE}
+00020 \textcolor{comment}{ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE}
+00021 \textcolor{comment}{ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE}
+00022 \textcolor{comment}{ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR}
+00023 \textcolor{comment}{ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF}
+00024 \textcolor{comment}{ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS}
+00025 \textcolor{comment}{ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN}
+00026 \textcolor{comment}{ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)}
+00027 \textcolor{comment}{ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE}
+00028 \textcolor{comment}{ * POSSIBILITY OF SUCH DAMAGE.}
+00029 \textcolor{comment}{ */}
+00030 
+00031 
+00032 \textcolor{preprocessor}{#}\textcolor{preprocessor}{ifndef} \textcolor{preprocessor}{\_\_REDIS\_RIO\_H}
+00033 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{\_\_REDIS\_RIO\_H}
+00034 
+00035 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{stdio}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00036 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{stdint}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00037 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \hyperlink{sds_8h}{"sds.h"}
+00038 
+\Hypertarget{rio_8h_source_l00039}\hyperlink{struct__rio}{00039} \textcolor{keyword}{struct} \_rio \{
+00040     \textcolor{comment}{/* Backend functions.}
+00041 \textcolor{comment}{     * Since this functions do not tolerate short writes or reads the return}
+00042 \textcolor{comment}{     * value is simplified to: zero on error, non zero on complete success. */}
+00043     size\_t (*read)(\textcolor{keyword}{struct} \_rio *, \textcolor{keywordtype}{void} *buf, size\_t len);
+00044     size\_t (*write)(\textcolor{keyword}{struct} \_rio *, \textcolor{keyword}{const} \textcolor{keywordtype}{void} *buf, size\_t len);
+00045     off\_t (*tell)(\textcolor{keyword}{struct} \_rio *);
+00046     \textcolor{keywordtype}{int} (*flush)(\textcolor{keyword}{struct} \_rio *);
+00047     \textcolor{comment}{/* The update\_cksum method if not NULL is used to compute the checksum of}
+00048 \textcolor{comment}{     * all the data that was read or written so far. The method should be}
+00049 \textcolor{comment}{     * designed so that can be called with the current checksum, and the buf}
+00050 \textcolor{comment}{     * and len fields pointing to the new block of data to add to the checksum}
+00051 \textcolor{comment}{     * computation. */}
+00052     \textcolor{keywordtype}{void} (*update\_cksum)(\textcolor{keyword}{struct} \_rio *, \textcolor{keyword}{const} \textcolor{keywordtype}{void} *buf, size\_t len);
+00053 
+00054     \textcolor{comment}{/* The current checksum */}
+00055     uint64\_t cksum;
+00056 
+00057     \textcolor{comment}{/* number of bytes read or written */}
+00058     size\_t processed\_bytes;
+00059 
+00060     \textcolor{comment}{/* maximum single read or write chunk size */}
+00061     size\_t max\_processing\_chunk;
+00062 
+00063     \textcolor{comment}{/* Backend-specific vars. */}
+\Hypertarget{rio_8h_source_l00064}\hyperlink{union__rio_8io}{00064}     \textcolor{keyword}{union} \{
+00065         \textcolor{comment}{/* In-memory buffer target. */}
+\Hypertarget{rio_8h_source_l00066}\hyperlink{struct__rio_8io_8buffer}{00066}         \textcolor{keyword}{struct} \{
+00067             sds ptr;
+00068             off\_t pos;
+00069         \} buffer;
+00070         \textcolor{comment}{/* Stdio file pointer target. */}
+\Hypertarget{rio_8h_source_l00071}\hyperlink{struct__rio_8io_8file}{00071}         \textcolor{keyword}{struct} \{
+00072             FILE *fp;
+00073             off\_t buffered; \textcolor{comment}{/* Bytes written since last fsync. */}
+00074             off\_t autosync; \textcolor{comment}{/* fsync after 'autosync' bytes written. */}
+00075         \} file;
+00076         \textcolor{comment}{/* Multiple FDs target (used to write to N sockets). */}
+\Hypertarget{rio_8h_source_l00077}\hyperlink{struct__rio_8io_8fdset}{00077}         \textcolor{keyword}{struct} \{
+00078             \textcolor{keywordtype}{int} *fds;       \textcolor{comment}{/* File descriptors. */}
+00079             \textcolor{keywordtype}{int} *state;     \textcolor{comment}{/* Error state of each fd. 0 (if ok) or errno. */}
+00080             \textcolor{keywordtype}{int} numfds;
+00081             off\_t pos;
+00082             sds buf;
+00083         \} fdset;
+00084     \} io;
+00085 \};
+00086 
+00087 \textcolor{keyword}{typedef} \textcolor{keyword}{struct} \_rio rio;
+00088 
+00089 \textcolor{comment}{/* The following functions are our interface with the stream. They'll call the}
+00090 \textcolor{comment}{ * actual implementation of read / write / tell, and will update the checksum}
+00091 \textcolor{comment}{ * if needed. */}
+00092 
+00093 \textcolor{keyword}{static} \textcolor{keyword}{inline} size\_t rioWrite(rio *r, \textcolor{keyword}{const} \textcolor{keywordtype}{void} *buf, size\_t len) \{
+00094     \textcolor{keywordflow}{while} (len) \{
+00095         size\_t bytes\_to\_write = (r->max\_processing\_chunk && r->max\_processing\_chunk < len) ? r->
+      max\_processing\_chunk : len;
+00096         \textcolor{keywordflow}{if} (r->update\_cksum) r->update\_cksum(r,buf,bytes\_to\_write);
+00097         \textcolor{keywordflow}{if} (r->write(r,buf,bytes\_to\_write) == 0)
+00098             \textcolor{keywordflow}{return} 0;
+00099         buf = (\textcolor{keywordtype}{char}*)buf + bytes\_to\_write;
+00100         len -= bytes\_to\_write;
+00101         r->processed\_bytes += bytes\_to\_write;
+00102     \}
+00103     \textcolor{keywordflow}{return} 1;
+00104 \}
+00105 
+00106 \textcolor{keyword}{static} \textcolor{keyword}{inline} size\_t rioRead(rio *r, \textcolor{keywordtype}{void} *buf, size\_t len) \{
+00107     \textcolor{keywordflow}{while} (len) \{
+00108         size\_t bytes\_to\_read = (r->max\_processing\_chunk && r->max\_processing\_chunk < len) ? r->
+      max\_processing\_chunk : len;
+00109         \textcolor{keywordflow}{if} (r->read(r,buf,bytes\_to\_read) == 0)
+00110             \textcolor{keywordflow}{return} 0;
+00111         \textcolor{keywordflow}{if} (r->update\_cksum) r->update\_cksum(r,buf,bytes\_to\_read);
+00112         buf = (\textcolor{keywordtype}{char}*)buf + bytes\_to\_read;
+00113         len -= bytes\_to\_read;
+00114         r->processed\_bytes += bytes\_to\_read;
+00115     \}
+00116     \textcolor{keywordflow}{return} 1;
+00117 \}
+00118 
+00119 \textcolor{keyword}{static} \textcolor{keyword}{inline} off\_t rioTell(rio *r) \{
+00120     \textcolor{keywordflow}{return} r->tell(r);
+00121 \}
+00122 
+00123 \textcolor{keyword}{static} \textcolor{keyword}{inline} \textcolor{keywordtype}{int} rioFlush(rio *r) \{
+00124     \textcolor{keywordflow}{return} r->flush(r);
+00125 \}
+00126 
+00127 \textcolor{keywordtype}{void} rioInitWithFile(rio *r, FILE *fp);
+00128 \textcolor{keywordtype}{void} rioInitWithBuffer(rio *r, sds s);
+00129 \textcolor{keywordtype}{void} rioInitWithFdset(rio *r, \textcolor{keywordtype}{int} *fds, \textcolor{keywordtype}{int} numfds);
+00130 
+00131 \textcolor{keywordtype}{void} rioFreeFdset(rio *r);
+00132 
+00133 size\_t rioWriteBulkCount(rio *r, \textcolor{keywordtype}{char} prefix, \textcolor{keywordtype}{int} count);
+00134 size\_t rioWriteBulkString(rio *r, \textcolor{keyword}{const} \textcolor{keywordtype}{char} *buf, size\_t len);
+00135 size\_t rioWriteBulkLongLong(rio *r, \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} l);
+00136 size\_t rioWriteBulkDouble(rio *r, \textcolor{keywordtype}{double} d);
+00137 
+00138 \textcolor{keyword}{struct} \hyperlink{structredisObject}{redisObject};
+00139 \textcolor{keywordtype}{int} rioWriteBulkObject(rio *r, \textcolor{keyword}{struct} \hyperlink{structredisObject}{redisObject} *obj);
+00140 
+00141 \textcolor{keywordtype}{void} rioGenericUpdateChecksum(rio *r, \textcolor{keyword}{const} \textcolor{keywordtype}{void} *buf, size\_t len);
+00142 \textcolor{keywordtype}{void} rioSetAutoSync(rio *r, off\_t bytes);
+00143 
+00144 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+\end{DoxyCode}

@@ -1,0 +1,6 @@
+<map id="GeoHashRadius" name="GeoHashRadius">
+<area shape="rect" id="node2" href="$structGeoHashNeighbors.html" title="{GeoHashNeighbors\n||}" alt="" coords="72,263,208,340"/>
+<area shape="rect" id="node3" href="$structGeoHashBits.html" title="{GeoHashBits\n|+ bits\l+ step\l|}" alt="" coords="70,5,170,97"/>
+<area shape="rect" id="node4" href="$structGeoHashArea.html" title="{GeoHashArea\n||}" alt="" coords="232,263,336,340"/>
+<area shape="rect" id="node5" href="$structGeoHashRange.html" title="{GeoHashRange\n|+ min\l+ max\l|}" alt="" coords="245,5,360,97"/>
+</map>

@@ -1,0 +1,104 @@
+\hypertarget{lzf_8h_source}{}\section{lzf.\+h}
+\label{lzf_8h_source}\index{src/lzf.\+h@{src/lzf.\+h}}
+
+\begin{DoxyCode}
+00001 \textcolor{comment}{/*}
+00002 \textcolor{comment}{ * Copyright (c) 2000-2008 Marc Alexander Lehmann <schmorp@schmorp.de>}
+00003 \textcolor{comment}{ *}
+00004 \textcolor{comment}{ * Redistribution and use in source and binary forms, with or without modifica-}
+00005 \textcolor{comment}{ * tion, are permitted provided that the following conditions are met:}
+00006 \textcolor{comment}{ *}
+00007 \textcolor{comment}{ *   1.  Redistributions of source code must retain the above copyright notice,}
+00008 \textcolor{comment}{ *       this list of conditions and the following disclaimer.}
+00009 \textcolor{comment}{ *}
+00010 \textcolor{comment}{ *   2.  Redistributions in binary form must reproduce the above copyright}
+00011 \textcolor{comment}{ *       notice, this list of conditions and the following disclaimer in the}
+00012 \textcolor{comment}{ *       documentation and/or other materials provided with the distribution.}
+00013 \textcolor{comment}{ *}
+00014 \textcolor{comment}{ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR IMPLIED}
+00015 \textcolor{comment}{ * WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MER-}
+00016 \textcolor{comment}{ * CHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO}
+00017 \textcolor{comment}{ * EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPE-}
+00018 \textcolor{comment}{ * CIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,}
+00019 \textcolor{comment}{ * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;}
+00020 \textcolor{comment}{ * OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,}
+00021 \textcolor{comment}{ * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTH-}
+00022 \textcolor{comment}{ * ERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED}
+00023 \textcolor{comment}{ * OF THE POSSIBILITY OF SUCH DAMAGE.}
+00024 \textcolor{comment}{ *}
+00025 \textcolor{comment}{ * Alternatively, the contents of this file may be used under the terms of}
+00026 \textcolor{comment}{ * the GNU General Public License ("GPL") version 2 or any later version,}
+00027 \textcolor{comment}{ * in which case the provisions of the GPL are applicable instead of}
+00028 \textcolor{comment}{ * the above. If you wish to allow the use of your version of this file}
+00029 \textcolor{comment}{ * only under the terms of the GPL and not to allow others to use your}
+00030 \textcolor{comment}{ * version of this file under the BSD license, indicate your decision}
+00031 \textcolor{comment}{ * by deleting the provisions above and replace them with the notice}
+00032 \textcolor{comment}{ * and other provisions required by the GPL. If you do not delete the}
+00033 \textcolor{comment}{ * provisions above, a recipient may use your version of this file under}
+00034 \textcolor{comment}{ * either the BSD or the GPL.}
+00035 \textcolor{comment}{ */}
+00036 
+00037 \textcolor{preprocessor}{#}\textcolor{preprocessor}{ifndef} \textcolor{preprocessor}{LZF\_H}
+00038 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{LZF\_H}
+00039 
+00040 \textcolor{comment}{/***********************************************************************}
+00041 \textcolor{comment}{**}
+00042 \textcolor{comment}{**  lzf -- an extremely fast/free compression/decompression-method}
+00043 \textcolor{comment}{**  http://liblzf.plan9.de/}
+00044 \textcolor{comment}{**}
+00045 \textcolor{comment}{**  This algorithm is believed to be patent-free.}
+00046 \textcolor{comment}{**}
+00047 \textcolor{comment}{***********************************************************************/}
+00048 
+00049 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{LZF\_VERSION} 0x0105 \textcolor{comment}{/* 1.5, API version */}
+00050 
+00051 \textcolor{comment}{/*}
+00052 \textcolor{comment}{ * Compress in\_len bytes stored at the memory block starting at}
+00053 \textcolor{comment}{ * in\_data and write the result to out\_data, up to a maximum length}
+00054 \textcolor{comment}{ * of out\_len bytes.}
+00055 \textcolor{comment}{ *}
+00056 \textcolor{comment}{ * If the output buffer is not large enough or any error occurs return 0,}
+00057 \textcolor{comment}{ * otherwise return the number of bytes used, which might be considerably}
+00058 \textcolor{comment}{ * more than in\_len (but less than 104% of the original size), so it}
+00059 \textcolor{comment}{ * makes sense to always use out\_len == in\_len - 1), to ensure \_some\_}
+00060 \textcolor{comment}{ * compression, and store the data uncompressed otherwise (with a flag, of}
+00061 \textcolor{comment}{ * course.}
+00062 \textcolor{comment}{ *}
+00063 \textcolor{comment}{ * lzf\_compress might use different algorithms on different systems and}
+00064 \textcolor{comment}{ * even different runs, thus might result in different compressed strings}
+00065 \textcolor{comment}{ * depending on the phase of the moon or similar factors. However, all}
+00066 \textcolor{comment}{ * these strings are architecture-independent and will result in the}
+00067 \textcolor{comment}{ * original data when decompressed using lzf\_decompress.}
+00068 \textcolor{comment}{ *}
+00069 \textcolor{comment}{ * The buffers must not be overlapping.}
+00070 \textcolor{comment}{ *}
+00071 \textcolor{comment}{ * If the option LZF\_STATE\_ARG is enabled, an extra argument must be}
+00072 \textcolor{comment}{ * supplied which is not reflected in this header file. Refer to lzfP.h}
+00073 \textcolor{comment}{ * and lzf\_c.c.}
+00074 \textcolor{comment}{ *}
+00075 \textcolor{comment}{ */}
+00076 \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{int}
+00077 lzf\_compress (\textcolor{keyword}{const} \textcolor{keywordtype}{void} *\textcolor{keyword}{const} in\_data,  \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{int} in\_len,
+00078               \textcolor{keywordtype}{void}             *out\_data, \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{int} out\_len);
+00079 
+00080 \textcolor{comment}{/*}
+00081 \textcolor{comment}{ * Decompress data compressed with some version of the lzf\_compress}
+00082 \textcolor{comment}{ * function and stored at location in\_data and length in\_len. The result}
+00083 \textcolor{comment}{ * will be stored at out\_data up to a maximum of out\_len characters.}
+00084 \textcolor{comment}{ *}
+00085 \textcolor{comment}{ * If the output buffer is not large enough to hold the decompressed}
+00086 \textcolor{comment}{ * data, a 0 is returned and errno is set to E2BIG. Otherwise the number}
+00087 \textcolor{comment}{ * of decompressed bytes (i.e. the original length of the data) is}
+00088 \textcolor{comment}{ * returned.}
+00089 \textcolor{comment}{ *}
+00090 \textcolor{comment}{ * If an error in the compressed data is detected, a zero is returned and}
+00091 \textcolor{comment}{ * errno is set to EINVAL.}
+00092 \textcolor{comment}{ *}
+00093 \textcolor{comment}{ * This function is very fast, about as fast as a copying loop.}
+00094 \textcolor{comment}{ */}
+00095 \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{int}
+00096 lzf\_decompress (\textcolor{keyword}{const} \textcolor{keywordtype}{void} *\textcolor{keyword}{const} in\_data,  \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{int} in\_len,
+00097                 \textcolor{keywordtype}{void}             *out\_data, \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{int} out\_len);
+00098 
+00099 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+\end{DoxyCode}

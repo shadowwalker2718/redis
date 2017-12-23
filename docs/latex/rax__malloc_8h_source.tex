@@ -1,0 +1,49 @@
+\hypertarget{rax__malloc_8h_source}{}\section{rax\+\_\+malloc.\+h}
+\label{rax__malloc_8h_source}\index{src/rax\+\_\+malloc.\+h@{src/rax\+\_\+malloc.\+h}}
+
+\begin{DoxyCode}
+00001 \textcolor{comment}{/* Rax -- A radix tree implementation.}
+00002 \textcolor{comment}{ *}
+00003 \textcolor{comment}{ * Copyright (c) 2017, Salvatore Sanfilippo <antirez at gmail dot com>}
+00004 \textcolor{comment}{ * All rights reserved.}
+00005 \textcolor{comment}{ *}
+00006 \textcolor{comment}{ * Redistribution and use in source and binary forms, with or without}
+00007 \textcolor{comment}{ * modification, are permitted provided that the following conditions are met:}
+00008 \textcolor{comment}{ *}
+00009 \textcolor{comment}{ *   * Redistributions of source code must retain the above copyright notice,}
+00010 \textcolor{comment}{ *     this list of conditions and the following disclaimer.}
+00011 \textcolor{comment}{ *   * Redistributions in binary form must reproduce the above copyright}
+00012 \textcolor{comment}{ *     notice, this list of conditions and the following disclaimer in the}
+00013 \textcolor{comment}{ *     documentation and/or other materials provided with the distribution.}
+00014 \textcolor{comment}{ *   * Neither the name of Redis nor the names of its contributors may be used}
+00015 \textcolor{comment}{ *     to endorse or promote products derived from this software without}
+00016 \textcolor{comment}{ *     specific prior written permission.}
+00017 \textcolor{comment}{ *}
+00018 \textcolor{comment}{ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"}
+00019 \textcolor{comment}{ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE}
+00020 \textcolor{comment}{ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE}
+00021 \textcolor{comment}{ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE}
+00022 \textcolor{comment}{ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR}
+00023 \textcolor{comment}{ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF}
+00024 \textcolor{comment}{ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS}
+00025 \textcolor{comment}{ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN}
+00026 \textcolor{comment}{ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)}
+00027 \textcolor{comment}{ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE}
+00028 \textcolor{comment}{ * POSSIBILITY OF SUCH DAMAGE.}
+00029 \textcolor{comment}{ */}
+00030 
+00031 \textcolor{comment}{/* Allocator selection.}
+00032 \textcolor{comment}{ *}
+00033 \textcolor{comment}{ * This file is used in order to change the Rax allocator at compile time.}
+00034 \textcolor{comment}{ * Just define the following defines to what you want to use. Also add}
+00035 \textcolor{comment}{ * the include of your alternate allocator if needed (not needed in order}
+00036 \textcolor{comment}{ * to use the default libc allocator). */}
+00037 
+00038 \textcolor{preprocessor}{#}\textcolor{preprocessor}{ifndef} \textcolor{preprocessor}{RAX\_ALLOC\_H}
+00039 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{RAX\_ALLOC\_H}
+00040 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \hyperlink{zmalloc_8h}{"zmalloc.h"}
+00041 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{rax\_malloc} \textcolor{preprocessor}{zmalloc}
+00042 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{rax\_realloc} \textcolor{preprocessor}{zrealloc}
+00043 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{rax\_free} \textcolor{preprocessor}{zfree}
+00044 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+\end{DoxyCode}

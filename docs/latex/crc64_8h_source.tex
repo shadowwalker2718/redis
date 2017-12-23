@@ -1,0 +1,17 @@
+\hypertarget{crc64_8h_source}{}\section{crc64.\+h}
+\label{crc64_8h_source}\index{src/crc64.\+h@{src/crc64.\+h}}
+
+\begin{DoxyCode}
+00001 \textcolor{preprocessor}{#}\textcolor{preprocessor}{ifndef} \textcolor{preprocessor}{CRC64\_H}
+00002 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{CRC64\_H}
+00003 
+00004 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{stdint}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00005 
+00006 uint64\_t crc64(uint64\_t crc, \textcolor{keyword}{const} \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *s, uint64\_t l);
+00007 
+00008 \textcolor{preprocessor}{#}\textcolor{preprocessor}{ifdef} \textcolor{preprocessor}{REDIS\_TEST}
+00009 \textcolor{keywordtype}{int} crc64Test(\textcolor{keywordtype}{int} argc, \textcolor{keywordtype}{char} *argv[]);
+00010 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00011 
+00012 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+\end{DoxyCode}

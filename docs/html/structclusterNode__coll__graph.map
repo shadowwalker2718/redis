@@ -1,0 +1,5 @@
+<map id="clusterNode" name="clusterNode">
+<area shape="rect" id="node2" href="$structclusterLink.html" title="{clusterLink\n|+ ctime\l+ fd\l+ sndbuf\l+ rcvbuf\l|}" alt="" coords="22,631,107,752"/>
+<area shape="rect" id="node3" href="$structlist.html" title="{list\n|+ dup\l+ free\l+ match\l+ len\l|}" alt="" coords="29,160,100,281"/>
+<area shape="rect" id="node4" href="$structlistNode.html" title="{listNode\n|+ value\l|}" alt="" coords="29,5,100,83"/>
+</map>

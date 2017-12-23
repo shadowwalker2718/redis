@@ -1,0 +1,91 @@
+\hypertarget{childinfo_8c_source}{}\section{childinfo.\+c}
+\label{childinfo_8c_source}\index{src/childinfo.\+c@{src/childinfo.\+c}}
+
+\begin{DoxyCode}
+00001 \textcolor{comment}{/*}
+00002 \textcolor{comment}{ * Copyright (c) 2016, Salvatore Sanfilippo <antirez at gmail dot com>}
+00003 \textcolor{comment}{ * All rights reserved.}
+00004 \textcolor{comment}{ *}
+00005 \textcolor{comment}{ * Redistribution and use in source and binary forms, with or without}
+00006 \textcolor{comment}{ * modification, are permitted provided that the following conditions are met:}
+00007 \textcolor{comment}{ *}
+00008 \textcolor{comment}{ *   * Redistributions of source code must retain the above copyright notice,}
+00009 \textcolor{comment}{ *     this list of conditions and the following disclaimer.}
+00010 \textcolor{comment}{ *   * Redistributions in binary form must reproduce the above copyright}
+00011 \textcolor{comment}{ *     notice, this list of conditions and the following disclaimer in the}
+00012 \textcolor{comment}{ *     documentation and/or other materials provided with the distribution.}
+00013 \textcolor{comment}{ *   * Neither the name of Redis nor the names of its contributors may be used}
+00014 \textcolor{comment}{ *     to endorse or promote products derived from this software without}
+00015 \textcolor{comment}{ *     specific prior written permission.}
+00016 \textcolor{comment}{ *}
+00017 \textcolor{comment}{ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"}
+00018 \textcolor{comment}{ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE}
+00019 \textcolor{comment}{ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE}
+00020 \textcolor{comment}{ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE}
+00021 \textcolor{comment}{ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR}
+00022 \textcolor{comment}{ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF}
+00023 \textcolor{comment}{ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS}
+00024 \textcolor{comment}{ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN}
+00025 \textcolor{comment}{ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)}
+00026 \textcolor{comment}{ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE}
+00027 \textcolor{comment}{ * POSSIBILITY OF SUCH DAMAGE.}
+00028 \textcolor{comment}{ */}
+00029 
+00030 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \hyperlink{server_8h}{"server.h"}
+00031 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{unistd}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00032 
+00033 \textcolor{comment}{/* Open a child-parent channel used in order to move information about the}
+00034 \textcolor{comment}{ * RDB / AOF saving process from the child to the parent (for instance}
+00035 \textcolor{comment}{ * the amount of copy on write memory used) */}
+00036 \textcolor{keywordtype}{void} openChildInfoPipe(\textcolor{keywordtype}{void}) \{
+00037     \textcolor{keywordflow}{if} (pipe(server.child\_info\_pipe) == -1) \{
+00038         \textcolor{comment}{/* On error our two file descriptors should be still set to -1,}
+00039 \textcolor{comment}{         * but we call anyway cloesChildInfoPipe() since can't hurt. */}
+00040         closeChildInfoPipe();
+00041     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (anetNonBlock(NULL,server.child\_info\_pipe[0]) != \hyperlink{anet_8h_a25fb91ccc6457153f6d2e21380d4c6cf}{ANET\_OK}) \{
+00042         closeChildInfoPipe();
+00043     \} \textcolor{keywordflow}{else} \{
+00044         memset(&server.child\_info\_data,0,\textcolor{keyword}{sizeof}(server.child\_info\_data));
+00045     \}
+00046 \}
+00047 
+00048 \textcolor{comment}{/* Close the pipes opened with openChildInfoPipe(). */}
+00049 \textcolor{keywordtype}{void} closeChildInfoPipe(\textcolor{keywordtype}{void}) \{
+00050     \textcolor{keywordflow}{if} (server.child\_info\_pipe[0] != -1 ||
+00051         server.child\_info\_pipe[1] != -1)
+00052     \{
+00053         close(server.child\_info\_pipe[0]);
+00054         close(server.child\_info\_pipe[1]);
+00055         server.child\_info\_pipe[0] = -1;
+00056         server.child\_info\_pipe[1] = -1;
+00057     \}
+00058 \}
+00059 
+00060 \textcolor{comment}{/* Send COW data to parent. The child should call this function after populating}
+00061 \textcolor{comment}{ * the corresponding fields it want to sent (according to the process type). */}
+00062 \textcolor{keywordtype}{void} sendChildInfo(\textcolor{keywordtype}{int} ptype) \{
+00063     \textcolor{keywordflow}{if} (server.child\_info\_pipe[1] == -1) \textcolor{keywordflow}{return};
+00064     server.child\_info\_data.magic = \hyperlink{server_8h_a5486686c8ced8ece3cdd7d936efd24ac}{CHILD\_INFO\_MAGIC};
+00065     server.child\_info\_data.process\_type = ptype;
+00066     ssize\_t wlen = \textcolor{keyword}{sizeof}(server.child\_info\_data);
+00067     \textcolor{keywordflow}{if} (write(server.child\_info\_pipe[1],&server.child\_info\_data,wlen) != wlen) \{
+00068         \textcolor{comment}{/* Nothing to do on error, this will be detected by the other side. */}
+00069     \}
+00070 \}
+00071 
+00072 \textcolor{comment}{/* Receive COW data from parent. */}
+00073 \textcolor{keywordtype}{void} receiveChildInfo(\textcolor{keywordtype}{void}) \{
+00074     \textcolor{keywordflow}{if} (server.child\_info\_pipe[0] == -1) \textcolor{keywordflow}{return};
+00075     ssize\_t wlen = \textcolor{keyword}{sizeof}(server.child\_info\_data);
+00076     \textcolor{keywordflow}{if} (read(server.child\_info\_pipe[0],&server.child\_info\_data,wlen) == wlen &&
+00077         server.child\_info\_data.magic == \hyperlink{server_8h_a5486686c8ced8ece3cdd7d936efd24ac}{CHILD\_INFO\_MAGIC})
+00078     \{
+00079         \textcolor{keywordflow}{if} (server.child\_info\_data.process\_type == \hyperlink{server_8h_a878f18d9e3d0af58b81a17d764a81dbe}{CHILD\_INFO\_TYPE\_RDB}) \{
+00080             server.stat\_rdb\_cow\_bytes = server.child\_info\_data.cow\_size;
+00081         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (server.child\_info\_data.process\_type == 
+      \hyperlink{server_8h_a9b759a9f6c6f785433572ab86a3ed214}{CHILD\_INFO\_TYPE\_AOF}) \{
+00082             server.stat\_aof\_cow\_bytes = server.child\_info\_data.cow\_size;
+00083         \}
+00084     \}
+00085 \}
+\end{DoxyCode}

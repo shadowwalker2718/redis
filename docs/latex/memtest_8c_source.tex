@@ -1,0 +1,368 @@
+\hypertarget{memtest_8c_source}{}\section{memtest.\+c}
+\label{memtest_8c_source}\index{src/memtest.\+c@{src/memtest.\+c}}
+
+\begin{DoxyCode}
+00001 \textcolor{comment}{/*}
+00002 \textcolor{comment}{ * Copyright (c) 2009-2012, Salvatore Sanfilippo <antirez at gmail dot com>}
+00003 \textcolor{comment}{ * All rights reserved.}
+00004 \textcolor{comment}{ *}
+00005 \textcolor{comment}{ * Redistribution and use in source and binary forms, with or without}
+00006 \textcolor{comment}{ * modification, are permitted provided that the following conditions are met:}
+00007 \textcolor{comment}{ *}
+00008 \textcolor{comment}{ *   * Redistributions of source code must retain the above copyright notice,}
+00009 \textcolor{comment}{ *     this list of conditions and the following disclaimer.}
+00010 \textcolor{comment}{ *   * Redistributions in binary form must reproduce the above copyright}
+00011 \textcolor{comment}{ *     notice, this list of conditions and the following disclaimer in the}
+00012 \textcolor{comment}{ *     documentation and/or other materials provided with the distribution.}
+00013 \textcolor{comment}{ *   * Neither the name of Redis nor the names of its contributors may be used}
+00014 \textcolor{comment}{ *     to endorse or promote products derived from this software without}
+00015 \textcolor{comment}{ *     specific prior written permission.}
+00016 \textcolor{comment}{ *}
+00017 \textcolor{comment}{ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"}
+00018 \textcolor{comment}{ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE}
+00019 \textcolor{comment}{ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE}
+00020 \textcolor{comment}{ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE}
+00021 \textcolor{comment}{ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR}
+00022 \textcolor{comment}{ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF}
+00023 \textcolor{comment}{ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS}
+00024 \textcolor{comment}{ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN}
+00025 \textcolor{comment}{ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)}
+00026 \textcolor{comment}{ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE}
+00027 \textcolor{comment}{ * POSSIBILITY OF SUCH DAMAGE.}
+00028 \textcolor{comment}{ */}
+00029 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{stdint}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00030 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{stdlib}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00031 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{stdio}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00032 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{string}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00033 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{assert}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00034 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{limits}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00035 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{errno}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00036 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{termios}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00037 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{sys}\textcolor{preprocessor}{/}\textcolor{preprocessor}{ioctl}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00038 \textcolor{preprocessor}{#}\textcolor{preprocessor}{if} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_\_sun}\textcolor{preprocessor}{)}
+00039 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{stropts}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00040 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00041 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \hyperlink{config_8h}{"config.h"}
+00042 
+00043 \textcolor{preprocessor}{#}\textcolor{preprocessor}{if} \textcolor{preprocessor}{(}\textcolor{preprocessor}{ULONG\_MAX} \textcolor{preprocessor}{==} 4294967295UL\textcolor{preprocessor}{)}
+00044 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{MEMTEST\_32BIT}
+00045 \textcolor{preprocessor}{#}\textcolor{preprocessor}{elif} \textcolor{preprocessor}{(}\textcolor{preprocessor}{ULONG\_MAX} \textcolor{preprocessor}{==} 18446744073709551615ULL\textcolor{preprocessor}{)}
+00046 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{MEMTEST\_64BIT}
+00047 \textcolor{preprocessor}{#}\textcolor{preprocessor}{else}
+00048 \textcolor{preprocessor}{#}\textcolor{preprocessor}{error} \textcolor{stringliteral}{"ULONG\_MAX value not supported."}
+00049 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00050 
+00051 \textcolor{preprocessor}{#}\textcolor{preprocessor}{ifdef} \textcolor{preprocessor}{MEMTEST\_32BIT}
+00052 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{ULONG\_ONEZERO} 0xaaaaaaaaUL
+00053 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{ULONG\_ZEROONE} 0x55555555UL
+00054 \textcolor{preprocessor}{#}\textcolor{preprocessor}{else}
+00055 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{ULONG\_ONEZERO} 0xaaaaaaaaaaaaaaaaUL
+00056 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{ULONG\_ZEROONE} 0x5555555555555555UL
+00057 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00058 
+00059 \textcolor{keyword}{static} \textcolor{keyword}{struct} winsize ws;
+00060 size\_t progress\_printed; \textcolor{comment}{/* Printed chars in screen-wide progress bar. */}
+00061 size\_t progress\_full; \textcolor{comment}{/* How many chars to write to fill the progress bar. */}
+00062 
+00063 \textcolor{keywordtype}{void} memtest\_progress\_start(\textcolor{keywordtype}{char} *title, \textcolor{keywordtype}{int} pass) \{
+00064     \textcolor{keywordtype}{int} j;
+00065 
+00066     printf(\textcolor{stringliteral}{"\(\backslash\)x1b[H\(\backslash\)x1b[2J"});    \textcolor{comment}{/* Cursor home, clear screen. */}
+00067     \textcolor{comment}{/* Fill with dots. */}
+00068     \textcolor{keywordflow}{for} (j = 0; j < ws.ws\_col*(ws.ws\_row-2); j++) printf(\textcolor{stringliteral}{"."});
+00069     printf(\textcolor{stringliteral}{"Please keep the test running several minutes per GB of memory.\(\backslash\)n"});
+00070     printf(\textcolor{stringliteral}{"Also check http://www.memtest86.com/ and http://pyropus.ca/software/memtester/"});
+00071     printf(\textcolor{stringliteral}{"\(\backslash\)x1b[H\(\backslash\)x1b[2K"});          \textcolor{comment}{/* Cursor home, clear current line.  */}
+00072     printf(\textcolor{stringliteral}{"%s [%d]\(\backslash\)n"}, title, pass); \textcolor{comment}{/* Print title. */}
+00073     progress\_printed = 0;
+00074     progress\_full = ws.ws\_col*(ws.ws\_row-3);
+00075     fflush(stdout);
+00076 \}
+00077 
+00078 \textcolor{keywordtype}{void} memtest\_progress\_end(\textcolor{keywordtype}{void}) \{
+00079     printf(\textcolor{stringliteral}{"\(\backslash\)x1b[H\(\backslash\)x1b[2J"});    \textcolor{comment}{/* Cursor home, clear screen. */}
+00080 \}
+00081 
+00082 \textcolor{keywordtype}{void} memtest\_progress\_step(size\_t curr, size\_t size, \textcolor{keywordtype}{char} c) \{
+00083     size\_t chars = ((\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} \textcolor{keywordtype}{long})curr*progress\_full)/size, j;
+00084 
+00085     \textcolor{keywordflow}{for} (j = 0; j < chars-progress\_printed; j++) printf(\textcolor{stringliteral}{"%c"},c);
+00086     progress\_printed = chars;
+00087     fflush(stdout);
+00088 \}
+00089 
+00090 \textcolor{comment}{/* Test that addressing is fine. Every location is populated with its own}
+00091 \textcolor{comment}{ * address, and finally verified. This test is very fast but may detect}
+00092 \textcolor{comment}{ * ASAP big issues with the memory subsystem. */}
+00093 \textcolor{keywordtype}{int} memtest\_addressing(\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} *l, size\_t bytes, \textcolor{keywordtype}{int} interactive) \{
+00094     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} words = bytes/\textcolor{keyword}{sizeof}(\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long});
+00095     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} j, *p;
+00096 
+00097     \textcolor{comment}{/* Fill */}
+00098     p = l;
+00099     \textcolor{keywordflow}{for} (j = 0; j < words; j++) \{
+00100         *p = (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long})p;
+00101         p++;
+00102         \textcolor{keywordflow}{if} ((j & 0xffff) == 0 && interactive)
+00103             memtest\_progress\_step(j,words*2,\textcolor{stringliteral}{'A'});
+00104     \}
+00105     \textcolor{comment}{/* Test */}
+00106     p = l;
+00107     \textcolor{keywordflow}{for} (j = 0; j < words; j++) \{
+00108         \textcolor{keywordflow}{if} (*p != (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long})p) \{
+00109             \textcolor{keywordflow}{if} (interactive) \{
+00110                 printf(\textcolor{stringliteral}{"\(\backslash\)n*** MEMORY ADDRESSING ERROR: %p contains %lu\(\backslash\)n"},
+00111                     (\textcolor{keywordtype}{void}*) p, *p);
+00112                 exit(1);
+00113             \}
+00114             \textcolor{keywordflow}{return} 1;
+00115         \}
+00116         p++;
+00117         \textcolor{keywordflow}{if} ((j & 0xffff) == 0 && interactive)
+00118             memtest\_progress\_step(j+words,words*2,\textcolor{stringliteral}{'A'});
+00119     \}
+00120     \textcolor{keywordflow}{return} 0;
+00121 \}
+00122 
+00123 \textcolor{comment}{/* Fill words stepping a single page at every write, so we continue to}
+00124 \textcolor{comment}{ * touch all the pages in the smallest amount of time reducing the}
+00125 \textcolor{comment}{ * effectiveness of caches, and making it hard for the OS to transfer}
+00126 \textcolor{comment}{ * pages on the swap.}
+00127 \textcolor{comment}{ *}
+00128 \textcolor{comment}{ * In this test we can't call rand() since the system may be completely}
+00129 \textcolor{comment}{ * unable to handle library calls, so we have to resort to our own}
+00130 \textcolor{comment}{ * PRNG that only uses local state. We use an xorshift* PRNG. */}
+00131 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{xorshift64star\_next}\textcolor{preprocessor}{(}\textcolor{preprocessor}{)} \textcolor{keywordflow}{do} \textcolor{preprocessor}{\{}
+00132         \textcolor{preprocessor}{rseed} \textcolor{preprocessor}{^=} \textcolor{preprocessor}{rseed} \textcolor{preprocessor}{>>} 12\textcolor{preprocessor}{;}
+00133         \textcolor{preprocessor}{rseed} \textcolor{preprocessor}{^=} \textcolor{preprocessor}{rseed} \textcolor{preprocessor}{<<} 25\textcolor{preprocessor}{;}
+00134         \textcolor{preprocessor}{rseed} \textcolor{preprocessor}{^=} \textcolor{preprocessor}{rseed} \textcolor{preprocessor}{>>} 27\textcolor{preprocessor}{;}
+00135         \textcolor{preprocessor}{rout} \textcolor{preprocessor}{=} \textcolor{preprocessor}{rseed} \textcolor{preprocessor}{*} UINT64\_C\textcolor{preprocessor}{(}2685821657736338717\textcolor{preprocessor}{)}\textcolor{preprocessor}{;} \textcolor{preprocessor}{\(\backslash\)}
+00136 \textcolor{preprocessor}{\}}\textcolor{keywordflow}{while}\textcolor{preprocessor}{(}0\textcolor{preprocessor}{)}
+00137 
+00138 \textcolor{keywordtype}{void} memtest\_fill\_random(\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} *l, size\_t bytes, \textcolor{keywordtype}{int} interactive) \{
+00139     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} step = 4096/\textcolor{keyword}{sizeof}(\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long});
+00140     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} words = bytes/\textcolor{keyword}{sizeof}(\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long})/2;
+00141     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} iwords = words/step;  \textcolor{comment}{/* words per iteration */}
+00142     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} off, w, *l1, *l2;
+00143     uint64\_t rseed = UINT64\_C(0xd13133de9afdb566); \textcolor{comment}{/* Just a random seed. */}
+00144     uint64\_t rout = 0;
+00145 
+00146     \hyperlink{redisassert_8h_a993abaa2c168852c1592879472938781}{assert}((bytes & 4095) == 0);
+00147     \textcolor{keywordflow}{for} (off = 0; off < step; off++) \{
+00148         l1 = l+off;
+00149         l2 = l1+words;
+00150         \textcolor{keywordflow}{for} (w = 0; w < iwords; w++) \{
+00151             \hyperlink{memtest_8c_adfc09349d0ddc534c3d1702997afbab8}{xorshift64star\_next}();
+00152             *l1 = *l2 = (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) rout;
+00153             l1 += step;
+00154             l2 += step;
+00155             \textcolor{keywordflow}{if} ((w & 0xffff) == 0 && interactive)
+00156                 memtest\_progress\_step(w+iwords*off,words,\textcolor{stringliteral}{'R'});
+00157         \}
+00158     \}
+00159 \}
+00160 
+00161 \textcolor{comment}{/* Like memtest\_fill\_random() but uses the two specified values to fill}
+00162 \textcolor{comment}{ * memory, in an alternated way (v1|v2|v1|v2|...) */}
+00163 \textcolor{keywordtype}{void} memtest\_fill\_value(\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} *l, size\_t bytes, \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} v1,
+00164                         \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} v2, \textcolor{keywordtype}{char} sym, \textcolor{keywordtype}{int} interactive)
+00165 \{
+00166     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} step = 4096/\textcolor{keyword}{sizeof}(\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long});
+00167     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} words = bytes/\textcolor{keyword}{sizeof}(\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long})/2;
+00168     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} iwords = words/step;  \textcolor{comment}{/* words per iteration */}
+00169     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} off, w, *l1, *l2, v;
+00170 
+00171     \hyperlink{redisassert_8h_a993abaa2c168852c1592879472938781}{assert}((bytes & 4095) == 0);
+00172     \textcolor{keywordflow}{for} (off = 0; off < step; off++) \{
+00173         l1 = l+off;
+00174         l2 = l1+words;
+00175         v = (off & 1) ? v2 : v1;
+00176         \textcolor{keywordflow}{for} (w = 0; w < iwords; w++) \{
+00177 \textcolor{preprocessor}{#}\textcolor{preprocessor}{ifdef} \textcolor{preprocessor}{MEMTEST\_32BIT}
+00178             *l1 = *l2 = ((\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long})     v) |
+00179                         (((\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long})    v) << 16);
+00180 \textcolor{preprocessor}{#}\textcolor{preprocessor}{else}
+00181             *l1 = *l2 = ((\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long})     v) |
+00182                         (((\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long})    v) << 16) |
+00183                         (((\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long})    v) << 32) |
+00184                         (((\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long})    v) << 48);
+00185 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00186             l1 += step;
+00187             l2 += step;
+00188             \textcolor{keywordflow}{if} ((w & 0xffff) == 0 && interactive)
+00189                 memtest\_progress\_step(w+iwords*off,words,sym);
+00190         \}
+00191     \}
+00192 \}
+00193 
+00194 \textcolor{keywordtype}{int} memtest\_compare(\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} *l, size\_t bytes, \textcolor{keywordtype}{int} interactive) \{
+00195     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} words = bytes/\textcolor{keyword}{sizeof}(\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long})/2;
+00196     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} w, *l1, *l2;
+00197 
+00198     \hyperlink{redisassert_8h_a993abaa2c168852c1592879472938781}{assert}((bytes & 4095) == 0);
+00199     l1 = l;
+00200     l2 = l1+words;
+00201     \textcolor{keywordflow}{for} (w = 0; w < words; w++) \{
+00202         \textcolor{keywordflow}{if} (*l1 != *l2) \{
+00203             \textcolor{keywordflow}{if} (interactive) \{
+00204                 printf(\textcolor{stringliteral}{"\(\backslash\)n*** MEMORY ERROR DETECTED: %p != %p (%lu vs %lu)\(\backslash\)n"},
+00205                     (\textcolor{keywordtype}{void}*)l1, (\textcolor{keywordtype}{void}*)l2, *l1, *l2);
+00206                 exit(1);
+00207             \}
+00208             \textcolor{keywordflow}{return} 1;
+00209         \}
+00210         l1 ++;
+00211         l2 ++;
+00212         \textcolor{keywordflow}{if} ((w & 0xffff) == 0 && interactive)
+00213             memtest\_progress\_step(w,words,\textcolor{stringliteral}{'='});
+00214     \}
+00215     \textcolor{keywordflow}{return} 0;
+00216 \}
+00217 
+00218 \textcolor{keywordtype}{int} memtest\_compare\_times(\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} *m, size\_t bytes, \textcolor{keywordtype}{int} pass, \textcolor{keywordtype}{int} times,
+00219                           \textcolor{keywordtype}{int} interactive)
+00220 \{
+00221     \textcolor{keywordtype}{int} j;
+00222     \textcolor{keywordtype}{int} errors = 0;
+00223 
+00224     \textcolor{keywordflow}{for} (j = 0; j < times; j++) \{
+00225         \textcolor{keywordflow}{if} (interactive) memtest\_progress\_start(\textcolor{stringliteral}{"Compare"},pass);
+00226         errors += memtest\_compare(m,bytes,interactive);
+00227         \textcolor{keywordflow}{if} (interactive) memtest\_progress\_end();
+00228     \}
+00229     \textcolor{keywordflow}{return} errors;
+00230 \}
+00231 
+00232 \textcolor{comment}{/* Test the specified memory. The number of bytes must be multiple of 4096.}
+00233 \textcolor{comment}{ * If interactive is true the program exists with an error and prints}
+00234 \textcolor{comment}{ * ASCII arts to show progresses. Instead when interactive is 0, it can}
+00235 \textcolor{comment}{ * be used as an API call, and returns 1 if memory errors were found or}
+00236 \textcolor{comment}{ * 0 if there were no errors detected. */}
+00237 \textcolor{keywordtype}{int} memtest\_test(\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} *m, size\_t bytes, \textcolor{keywordtype}{int} passes, \textcolor{keywordtype}{int} interactive) \{
+00238     \textcolor{keywordtype}{int} pass = 0;
+00239     \textcolor{keywordtype}{int} errors = 0;
+00240 
+00241     \textcolor{keywordflow}{while} (pass != passes) \{
+00242         pass++;
+00243 
+00244         \textcolor{keywordflow}{if} (interactive) memtest\_progress\_start(\textcolor{stringliteral}{"Addressing test"},pass);
+00245         errors += memtest\_addressing(m,bytes,interactive);
+00246         \textcolor{keywordflow}{if} (interactive) memtest\_progress\_end();
+00247 
+00248         \textcolor{keywordflow}{if} (interactive) memtest\_progress\_start(\textcolor{stringliteral}{"Random fill"},pass);
+00249         memtest\_fill\_random(m,bytes,interactive);
+00250         \textcolor{keywordflow}{if} (interactive) memtest\_progress\_end();
+00251         errors += memtest\_compare\_times(m,bytes,pass,4,interactive);
+00252 
+00253         \textcolor{keywordflow}{if} (interactive) memtest\_progress\_start(\textcolor{stringliteral}{"Solid fill"},pass);
+00254         memtest\_fill\_value(m,bytes,0,(\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long})-1,\textcolor{stringliteral}{'S'},interactive);
+00255         \textcolor{keywordflow}{if} (interactive) memtest\_progress\_end();
+00256         errors += memtest\_compare\_times(m,bytes,pass,4,interactive);
+00257 
+00258         \textcolor{keywordflow}{if} (interactive) memtest\_progress\_start(\textcolor{stringliteral}{"Checkerboard fill"},pass);
+00259         memtest\_fill\_value(m,bytes,\hyperlink{memtest_8c_a927b6adad012fd0e4e067a706d8df6e9}{ULONG\_ONEZERO},\hyperlink{memtest_8c_ae1766c92a4af73778f7c05a7bd9deaf1}{ULONG\_ZEROONE},\textcolor{stringliteral}{'C'},
+      interactive);
+00260         \textcolor{keywordflow}{if} (interactive) memtest\_progress\_end();
+00261         errors += memtest\_compare\_times(m,bytes,pass,4,interactive);
+00262     \}
+00263     \textcolor{keywordflow}{return} errors;
+00264 \}
+00265 
+00266 \textcolor{comment}{/* A version of memtest\_test() that tests memory in small pieces}
+00267 \textcolor{comment}{ * in order to restore the memory content at exit.}
+00268 \textcolor{comment}{ *}
+00269 \textcolor{comment}{ * One problem we have with this approach, is that the cache can avoid}
+00270 \textcolor{comment}{ * real memory accesses, and we can't test big chunks of memory at the}
+00271 \textcolor{comment}{ * same time, because we need to backup them on the stack (the allocator}
+00272 \textcolor{comment}{ * may not be usable or we may be already in an out of memory condition).}
+00273 \textcolor{comment}{ * So what we do is to try to trash the cache with useless memory accesses}
+00274 \textcolor{comment}{ * between the fill and compare cycles. */}
+00275 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{MEMTEST\_BACKUP\_WORDS} \textcolor{preprocessor}{(}1024\textcolor{preprocessor}{*}\textcolor{preprocessor}{(}1024\textcolor{preprocessor}{/}\textcolor{keyword}{sizeof}\textcolor{preprocessor}{(}\textcolor{keywordtype}{long}\textcolor{preprocessor}{)}\textcolor{preprocessor}{)}\textcolor{preprocessor}{)}
+00276 \textcolor{comment}{/* Random accesses of MEMTEST\_DECACHE\_SIZE are performed at the start and}
+00277 \textcolor{comment}{ * end of the region between fill and compare cycles in order to trash}
+00278 \textcolor{comment}{ * the cache. */}
+00279 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{MEMTEST\_DECACHE\_SIZE} \textcolor{preprocessor}{(}1024\textcolor{preprocessor}{*}8\textcolor{preprocessor}{)}
+00280 \textcolor{keywordtype}{int} memtest\_preserving\_test(\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} *m, size\_t bytes, \textcolor{keywordtype}{int} passes) \{
+00281     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} backup[\hyperlink{memtest_8c_a836fc304e6b2a982c5fc97ce9ca8598a}{MEMTEST\_BACKUP\_WORDS}];
+00282     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} *p = m;
+00283     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} *end = (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}*) (((\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char}*)m)+(bytes-
+      \hyperlink{memtest_8c_af445933770893d6bc1b2a1cb3c99dfa5}{MEMTEST\_DECACHE\_SIZE}));
+00284     size\_t left = bytes;
+00285     \textcolor{keywordtype}{int} errors = 0;
+00286 
+00287     \textcolor{keywordflow}{if} (bytes & 4095) \textcolor{keywordflow}{return} 0; \textcolor{comment}{/* Can't test across 4k page boundaries. */}
+00288     \textcolor{keywordflow}{if} (bytes < 4096*2) \textcolor{keywordflow}{return} 0; \textcolor{comment}{/* Can't test a single page. */}
+00289 
+00290     \textcolor{keywordflow}{while}(left) \{
+00291         \textcolor{comment}{/* If we have to test a single final page, go back a single page}
+00292 \textcolor{comment}{         * so that we can test two pages, since the code can't test a single}
+00293 \textcolor{comment}{         * page but at least two. */}
+00294         \textcolor{keywordflow}{if} (left == 4096) \{
+00295             left += 4096;
+00296             p -= 4096/\textcolor{keyword}{sizeof}(\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long});
+00297         \}
+00298 
+00299         \textcolor{keywordtype}{int} pass = 0;
+00300         size\_t len = (left > \textcolor{keyword}{sizeof}(backup)) ? \textcolor{keyword}{sizeof}(backup) : left;
+00301 
+00302         \textcolor{comment}{/* Always test an even number of pages. */}
+00303         \textcolor{keywordflow}{if} (len/4096 % 2) len -= 4096;
+00304 
+00305         memcpy(backup,p,len); \textcolor{comment}{/* Backup. */}
+00306         \textcolor{keywordflow}{while}(pass != passes) \{
+00307             pass++;
+00308             errors += memtest\_addressing(p,len,0);
+00309             memtest\_fill\_random(p,len,0);
+00310             \textcolor{keywordflow}{if} (bytes >= \hyperlink{memtest_8c_af445933770893d6bc1b2a1cb3c99dfa5}{MEMTEST\_DECACHE\_SIZE}) \{
+00311                 memtest\_compare\_times(m,\hyperlink{memtest_8c_af445933770893d6bc1b2a1cb3c99dfa5}{MEMTEST\_DECACHE\_SIZE},pass,1,0);
+00312                 memtest\_compare\_times(end,\hyperlink{memtest_8c_af445933770893d6bc1b2a1cb3c99dfa5}{MEMTEST\_DECACHE\_SIZE},pass,1,0);
+00313             \}
+00314             errors += memtest\_compare\_times(p,len,pass,4,0);
+00315             memtest\_fill\_value(p,len,0,(\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long})-1,\textcolor{stringliteral}{'S'},0);
+00316             \textcolor{keywordflow}{if} (bytes >= \hyperlink{memtest_8c_af445933770893d6bc1b2a1cb3c99dfa5}{MEMTEST\_DECACHE\_SIZE}) \{
+00317                 memtest\_compare\_times(m,\hyperlink{memtest_8c_af445933770893d6bc1b2a1cb3c99dfa5}{MEMTEST\_DECACHE\_SIZE},pass,1,0);
+00318                 memtest\_compare\_times(end,\hyperlink{memtest_8c_af445933770893d6bc1b2a1cb3c99dfa5}{MEMTEST\_DECACHE\_SIZE},pass,1,0);
+00319             \}
+00320             errors += memtest\_compare\_times(p,len,pass,4,0);
+00321             memtest\_fill\_value(p,len,\hyperlink{memtest_8c_a927b6adad012fd0e4e067a706d8df6e9}{ULONG\_ONEZERO},
+      \hyperlink{memtest_8c_ae1766c92a4af73778f7c05a7bd9deaf1}{ULONG\_ZEROONE},\textcolor{stringliteral}{'C'},0);
+00322             \textcolor{keywordflow}{if} (bytes >= \hyperlink{memtest_8c_af445933770893d6bc1b2a1cb3c99dfa5}{MEMTEST\_DECACHE\_SIZE}) \{
+00323                 memtest\_compare\_times(m,\hyperlink{memtest_8c_af445933770893d6bc1b2a1cb3c99dfa5}{MEMTEST\_DECACHE\_SIZE},pass,1,0);
+00324                 memtest\_compare\_times(end,\hyperlink{memtest_8c_af445933770893d6bc1b2a1cb3c99dfa5}{MEMTEST\_DECACHE\_SIZE},pass,1,0);
+00325             \}
+00326             errors += memtest\_compare\_times(p,len,pass,4,0);
+00327         \}
+00328         memcpy(p,backup,len); \textcolor{comment}{/* Restore. */}
+00329         left -= len;
+00330         p += len/\textcolor{keyword}{sizeof}(\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long});
+00331     \}
+00332     \textcolor{keywordflow}{return} errors;
+00333 \}
+00334 
+00335 \textcolor{comment}{/* Perform an interactive test allocating the specified number of megabytes. */}
+00336 \textcolor{keywordtype}{void} memtest\_alloc\_and\_test(size\_t megabytes, \textcolor{keywordtype}{int} passes) \{
+00337     size\_t bytes = megabytes*1024*1024;
+00338     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} *m = malloc(bytes);
+00339 
+00340     \textcolor{keywordflow}{if} (m == NULL) \{
+00341         fprintf(stderr,\textcolor{stringliteral}{"Unable to allocate %zu megabytes: %s"},
+00342             megabytes, strerror(errno));
+00343         exit(1);
+00344     \}
+00345     memtest\_test(m,bytes,passes,1);
+00346     free(m);
+00347 \}
+00348 
+00349 \textcolor{keywordtype}{void} memtest(size\_t megabytes, \textcolor{keywordtype}{int} passes) \{
+00350     \textcolor{keywordflow}{if} (ioctl(1, TIOCGWINSZ, &ws) == -1) \{
+00351         ws.ws\_col = 80;
+00352         ws.ws\_row = 20;
+00353     \}
+00354     memtest\_alloc\_and\_test(megabytes,passes);
+00355     printf(\textcolor{stringliteral}{"\(\backslash\)nYour memory passed this test.\(\backslash\)n"});
+00356     printf(\textcolor{stringliteral}{"Please if you are still in doubt use the following two tools:\(\backslash\)n"});
+00357     printf(\textcolor{stringliteral}{"1) memtest86: http://www.memtest86.com/\(\backslash\)n"});
+00358     printf(\textcolor{stringliteral}{"2) memtester: http://pyropus.ca/software/memtester/\(\backslash\)n"});
+00359     exit(0);
+00360 \}
+\end{DoxyCode}

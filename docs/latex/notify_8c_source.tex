@@ -1,0 +1,137 @@
+\hypertarget{notify_8c_source}{}\section{notify.\+c}
+\label{notify_8c_source}\index{src/notify.\+c@{src/notify.\+c}}
+
+\begin{DoxyCode}
+00001 \textcolor{comment}{/*}
+00002 \textcolor{comment}{ * Copyright (c) 2013, Salvatore Sanfilippo <antirez at gmail dot com>}
+00003 \textcolor{comment}{ * All rights reserved.}
+00004 \textcolor{comment}{ *}
+00005 \textcolor{comment}{ * Redistribution and use in source and binary forms, with or without}
+00006 \textcolor{comment}{ * modification, are permitted provided that the following conditions are met:}
+00007 \textcolor{comment}{ *}
+00008 \textcolor{comment}{ *   * Redistributions of source code must retain the above copyright notice,}
+00009 \textcolor{comment}{ *     this list of conditions and the following disclaimer.}
+00010 \textcolor{comment}{ *   * Redistributions in binary form must reproduce the above copyright}
+00011 \textcolor{comment}{ *     notice, this list of conditions and the following disclaimer in the}
+00012 \textcolor{comment}{ *     documentation and/or other materials provided with the distribution.}
+00013 \textcolor{comment}{ *   * Neither the name of Redis nor the names of its contributors may be used}
+00014 \textcolor{comment}{ *     to endorse or promote products derived from this software without}
+00015 \textcolor{comment}{ *     specific prior written permission.}
+00016 \textcolor{comment}{ *}
+00017 \textcolor{comment}{ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"}
+00018 \textcolor{comment}{ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE}
+00019 \textcolor{comment}{ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE}
+00020 \textcolor{comment}{ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE}
+00021 \textcolor{comment}{ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR}
+00022 \textcolor{comment}{ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF}
+00023 \textcolor{comment}{ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS}
+00024 \textcolor{comment}{ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN}
+00025 \textcolor{comment}{ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)}
+00026 \textcolor{comment}{ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE}
+00027 \textcolor{comment}{ * POSSIBILITY OF SUCH DAMAGE.}
+00028 \textcolor{comment}{ */}
+00029 
+00030 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \hyperlink{server_8h}{"server.h"}
+00031 
+00032 \textcolor{comment}{/* This file implements keyspace events notification via Pub/Sub ad}
+00033 \textcolor{comment}{ * described at http://redis.io/topics/keyspace-events. */}
+00034 
+00035 \textcolor{comment}{/* Turn a string representing notification classes into an integer}
+00036 \textcolor{comment}{ * representing notification classes flags xored.}
+00037 \textcolor{comment}{ *}
+00038 \textcolor{comment}{ * The function returns -1 if the input contains characters not mapping to}
+00039 \textcolor{comment}{ * any class. */}
+00040 \textcolor{keywordtype}{int} keyspaceEventsStringToFlags(\textcolor{keywordtype}{char} *classes) \{
+00041     \textcolor{keywordtype}{char} *p = classes;
+00042     \textcolor{keywordtype}{int} c, flags = 0;
+00043 
+00044     \textcolor{keywordflow}{while}((c = *p++) != \textcolor{stringliteral}{'\(\backslash\)0'}) \{
+00045         \textcolor{keywordflow}{switch}(c) \{
+00046         \textcolor{keywordflow}{case} \textcolor{stringliteral}{'A'}: flags |= \hyperlink{server_8h_acab8ae6df35d95c39dc8727890bbb7da}{NOTIFY\_ALL}; \textcolor{keywordflow}{break};
+00047         \textcolor{keywordflow}{case} \textcolor{stringliteral}{'g'}: flags |= \hyperlink{server_8h_a9fa53dd1068e62365f3964ad3479eec2}{NOTIFY\_GENERIC}; \textcolor{keywordflow}{break};
+00048         \textcolor{keywordflow}{case} \textcolor{stringliteral}{'$'}: flags |= \hyperlink{server_8h_a1902292b73b71baa65d86db2d61b47ce}{NOTIFY\_STRING}; \textcolor{keywordflow}{break};
+00049         \textcolor{keywordflow}{case} \textcolor{stringliteral}{'l'}: flags |= \hyperlink{server_8h_a1c0b64c84b0e66dff3554ffe3e2ec4c8}{NOTIFY\_LIST}; \textcolor{keywordflow}{break};
+00050         \textcolor{keywordflow}{case} \textcolor{stringliteral}{'s'}: flags |= \hyperlink{server_8h_a625aec945b2152a46979b1b21f2af274}{NOTIFY\_SET}; \textcolor{keywordflow}{break};
+00051         \textcolor{keywordflow}{case} \textcolor{stringliteral}{'h'}: flags |= \hyperlink{server_8h_afe25ae13417e6fa5011e7efc69a34bc0}{NOTIFY\_HASH}; \textcolor{keywordflow}{break};
+00052         \textcolor{keywordflow}{case} \textcolor{stringliteral}{'z'}: flags |= \hyperlink{server_8h_ab8516a5a3ff1b9eb5f1cb303abef0d2f}{NOTIFY\_ZSET}; \textcolor{keywordflow}{break};
+00053         \textcolor{keywordflow}{case} \textcolor{stringliteral}{'x'}: flags |= \hyperlink{server_8h_a6b6b55f4f6ffcd0b1648395fea5fafc1}{NOTIFY\_EXPIRED}; \textcolor{keywordflow}{break};
+00054         \textcolor{keywordflow}{case} \textcolor{stringliteral}{'e'}: flags |= \hyperlink{server_8h_aefeeae0f3ac953537135a902b17bf63d}{NOTIFY\_EVICTED}; \textcolor{keywordflow}{break};
+00055         \textcolor{keywordflow}{case} \textcolor{stringliteral}{'K'}: flags |= \hyperlink{server_8h_ae266f8cd5361f66ffa473badae12ff8f}{NOTIFY\_KEYSPACE}; \textcolor{keywordflow}{break};
+00056         \textcolor{keywordflow}{case} \textcolor{stringliteral}{'E'}: flags |= \hyperlink{server_8h_a4db1f9cfaeccf1ee00d27aa50c4e5d1a}{NOTIFY\_KEYEVENT}; \textcolor{keywordflow}{break};
+00057         \textcolor{keywordflow}{case} \textcolor{stringliteral}{'t'}: flags |= \hyperlink{server_8h_a045eabb1c5cc4dd02abfbfbae1d27c84}{NOTIFY\_STREAM}; \textcolor{keywordflow}{break};
+00058         \textcolor{keywordflow}{default}: \textcolor{keywordflow}{return} -1;
+00059         \}
+00060     \}
+00061     \textcolor{keywordflow}{return} flags;
+00062 \}
+00063 
+00064 \textcolor{comment}{/* This function does exactly the revese of the function above: it gets}
+00065 \textcolor{comment}{ * as input an integer with the xored flags and returns a string representing}
+00066 \textcolor{comment}{ * the selected classes. The string returned is an sds string that needs to}
+00067 \textcolor{comment}{ * be released with sdsfree(). */}
+00068 sds keyspaceEventsFlagsToString(\textcolor{keywordtype}{int} flags) \{
+00069     sds res;
+00070 
+00071     res = sdsempty();
+00072     \textcolor{keywordflow}{if} ((flags & \hyperlink{server_8h_acab8ae6df35d95c39dc8727890bbb7da}{NOTIFY\_ALL}) == \hyperlink{server_8h_acab8ae6df35d95c39dc8727890bbb7da}{NOTIFY\_ALL}) \{
+00073         res = sdscatlen(res,\textcolor{stringliteral}{"A"},1);
+00074     \} \textcolor{keywordflow}{else} \{
+00075         \textcolor{keywordflow}{if} (flags & \hyperlink{server_8h_a9fa53dd1068e62365f3964ad3479eec2}{NOTIFY\_GENERIC}) res = sdscatlen(res,\textcolor{stringliteral}{"g"},1);
+00076         \textcolor{keywordflow}{if} (flags & \hyperlink{server_8h_a1902292b73b71baa65d86db2d61b47ce}{NOTIFY\_STRING}) res = sdscatlen(res,\textcolor{stringliteral}{"$"},1);
+00077         \textcolor{keywordflow}{if} (flags & \hyperlink{server_8h_a1c0b64c84b0e66dff3554ffe3e2ec4c8}{NOTIFY\_LIST}) res = sdscatlen(res,\textcolor{stringliteral}{"l"},1);
+00078         \textcolor{keywordflow}{if} (flags & \hyperlink{server_8h_a625aec945b2152a46979b1b21f2af274}{NOTIFY\_SET}) res = sdscatlen(res,\textcolor{stringliteral}{"s"},1);
+00079         \textcolor{keywordflow}{if} (flags & \hyperlink{server_8h_afe25ae13417e6fa5011e7efc69a34bc0}{NOTIFY\_HASH}) res = sdscatlen(res,\textcolor{stringliteral}{"h"},1);
+00080         \textcolor{keywordflow}{if} (flags & \hyperlink{server_8h_ab8516a5a3ff1b9eb5f1cb303abef0d2f}{NOTIFY\_ZSET}) res = sdscatlen(res,\textcolor{stringliteral}{"z"},1);
+00081         \textcolor{keywordflow}{if} (flags & \hyperlink{server_8h_a6b6b55f4f6ffcd0b1648395fea5fafc1}{NOTIFY\_EXPIRED}) res = sdscatlen(res,\textcolor{stringliteral}{"x"},1);
+00082         \textcolor{keywordflow}{if} (flags & \hyperlink{server_8h_aefeeae0f3ac953537135a902b17bf63d}{NOTIFY\_EVICTED}) res = sdscatlen(res,\textcolor{stringliteral}{"e"},1);
+00083         \textcolor{keywordflow}{if} (flags & \hyperlink{server_8h_a045eabb1c5cc4dd02abfbfbae1d27c84}{NOTIFY\_STREAM}) res = sdscatlen(res,\textcolor{stringliteral}{"t"},1);
+00084     \}
+00085     \textcolor{keywordflow}{if} (flags & \hyperlink{server_8h_ae266f8cd5361f66ffa473badae12ff8f}{NOTIFY\_KEYSPACE}) res = sdscatlen(res,\textcolor{stringliteral}{"K"},1);
+00086     \textcolor{keywordflow}{if} (flags & \hyperlink{server_8h_a4db1f9cfaeccf1ee00d27aa50c4e5d1a}{NOTIFY\_KEYEVENT}) res = sdscatlen(res,\textcolor{stringliteral}{"E"},1);
+00087     \textcolor{keywordflow}{return} res;
+00088 \}
+00089 
+00090 \textcolor{comment}{/* The API provided to the rest of the Redis core is a simple function:}
+00091 \textcolor{comment}{ *}
+00092 \textcolor{comment}{ * notifyKeyspaceEvent(char *event, robj *key, int dbid);}
+00093 \textcolor{comment}{ *}
+00094 \textcolor{comment}{ * 'event' is a C string representing the event name.}
+00095 \textcolor{comment}{ * 'key' is a Redis object representing the key name.}
+00096 \textcolor{comment}{ * 'dbid' is the database ID where the key lives.  */}
+00097 \textcolor{keywordtype}{void} notifyKeyspaceEvent(\textcolor{keywordtype}{int} type, \textcolor{keywordtype}{char} *event, robj *key, \textcolor{keywordtype}{int} dbid) \{
+00098     sds chan;
+00099     robj *chanobj, *eventobj;
+00100     \textcolor{keywordtype}{int} len = -1;
+00101     \textcolor{keywordtype}{char} buf[24];
+00102 
+00103     \textcolor{comment}{/* If notifications for this class of events are off, return ASAP. */}
+00104     \textcolor{keywordflow}{if} (!(server.notify\_keyspace\_events & type)) \textcolor{keywordflow}{return};
+00105 
+00106     eventobj = createStringObject(event,strlen(event));
+00107 
+00108     \textcolor{comment}{/* \_\_keyspace@<db>\_\_:<key> <event> notifications. */}
+00109     \textcolor{keywordflow}{if} (server.notify\_keyspace\_events & \hyperlink{server_8h_ae266f8cd5361f66ffa473badae12ff8f}{NOTIFY\_KEYSPACE}) \{
+00110         chan = sdsnewlen(\textcolor{stringliteral}{"\_\_keyspace@"},11);
+00111         len = ll2string(buf,\textcolor{keyword}{sizeof}(buf),dbid);
+00112         chan = sdscatlen(chan, buf, len);
+00113         chan = sdscatlen(chan, \textcolor{stringliteral}{"\_\_:"}, 3);
+00114         chan = sdscatsds(chan, key->ptr);
+00115         chanobj = createObject(\hyperlink{server_8h_a65236ea160f69cdef33ec942092af88f}{OBJ\_STRING}, chan);
+00116         pubsubPublishMessage(chanobj, eventobj);
+00117         decrRefCount(chanobj);
+00118     \}
+00119 
+00120     \textcolor{comment}{/* \_\_keyevente@<db>\_\_:<event> <key> notifications. */}
+00121     \textcolor{keywordflow}{if} (server.notify\_keyspace\_events & \hyperlink{server_8h_a4db1f9cfaeccf1ee00d27aa50c4e5d1a}{NOTIFY\_KEYEVENT}) \{
+00122         chan = sdsnewlen(\textcolor{stringliteral}{"\_\_keyevent@"},11);
+00123         \textcolor{keywordflow}{if} (len == -1) len = ll2string(buf,\textcolor{keyword}{sizeof}(buf),dbid);
+00124         chan = sdscatlen(chan, buf, len);
+00125         chan = sdscatlen(chan, \textcolor{stringliteral}{"\_\_:"}, 3);
+00126         chan = sdscatsds(chan, eventobj->ptr);
+00127         chanobj = createObject(\hyperlink{server_8h_a65236ea160f69cdef33ec942092af88f}{OBJ\_STRING}, chan);
+00128         pubsubPublishMessage(chanobj, key);
+00129         decrRefCount(chanobj);
+00130     \}
+00131     decrRefCount(eventobj);
+00132 \}
+\end{DoxyCode}

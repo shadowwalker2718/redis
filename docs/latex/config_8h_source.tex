@@ -1,0 +1,234 @@
+\hypertarget{config_8h_source}{}\section{config.\+h}
+\label{config_8h_source}\index{src/config.\+h@{src/config.\+h}}
+
+\begin{DoxyCode}
+00001 \textcolor{comment}{/*}
+00002 \textcolor{comment}{ * Copyright (c) 2009-2012, Salvatore Sanfilippo <antirez at gmail dot com>}
+00003 \textcolor{comment}{ * All rights reserved.}
+00004 \textcolor{comment}{ *}
+00005 \textcolor{comment}{ * Redistribution and use in source and binary forms, with or without}
+00006 \textcolor{comment}{ * modification, are permitted provided that the following conditions are met:}
+00007 \textcolor{comment}{ *}
+00008 \textcolor{comment}{ *   * Redistributions of source code must retain the above copyright notice,}
+00009 \textcolor{comment}{ *     this list of conditions and the following disclaimer.}
+00010 \textcolor{comment}{ *   * Redistributions in binary form must reproduce the above copyright}
+00011 \textcolor{comment}{ *     notice, this list of conditions and the following disclaimer in the}
+00012 \textcolor{comment}{ *     documentation and/or other materials provided with the distribution.}
+00013 \textcolor{comment}{ *   * Neither the name of Redis nor the names of its contributors may be used}
+00014 \textcolor{comment}{ *     to endorse or promote products derived from this software without}
+00015 \textcolor{comment}{ *     specific prior written permission.}
+00016 \textcolor{comment}{ *}
+00017 \textcolor{comment}{ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"}
+00018 \textcolor{comment}{ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE}
+00019 \textcolor{comment}{ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE}
+00020 \textcolor{comment}{ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE}
+00021 \textcolor{comment}{ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR}
+00022 \textcolor{comment}{ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF}
+00023 \textcolor{comment}{ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS}
+00024 \textcolor{comment}{ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN}
+00025 \textcolor{comment}{ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)}
+00026 \textcolor{comment}{ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE}
+00027 \textcolor{comment}{ * POSSIBILITY OF SUCH DAMAGE.}
+00028 \textcolor{comment}{ */}
+00029 
+00030 \textcolor{preprocessor}{#}\textcolor{preprocessor}{ifndef} \textcolor{preprocessor}{\_\_CONFIG\_H}
+00031 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{\_\_CONFIG\_H}
+00032 
+00033 \textcolor{preprocessor}{#}\textcolor{preprocessor}{ifdef} \textcolor{preprocessor}{\_\_APPLE\_\_}
+00034 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{AvailabilityMacros}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00035 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00036 
+00037 \textcolor{preprocessor}{#}\textcolor{preprocessor}{ifdef} \_\_linux\_\_
+00038 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{linux}\textcolor{preprocessor}{/}\textcolor{preprocessor}{version}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00039 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{features}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00040 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00041 
+00042 \textcolor{comment}{/* Define redis\_fstat to fstat or fstat64() */}
+00043 \textcolor{preprocessor}{#}\textcolor{preprocessor}{if} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_\_APPLE\_\_}\textcolor{preprocessor}{)} \textcolor{preprocessor}{&&} \textcolor{preprocessor}{!}\textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{MAC\_OS\_X\_VERSION\_10\_6}\textcolor{preprocessor}{)}
+00044 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{redis\_fstat} \textcolor{preprocessor}{fstat64}
+00045 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{redis\_stat} \textcolor{preprocessor}{stat64}
+00046 \textcolor{preprocessor}{#}\textcolor{preprocessor}{else}
+00047 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{redis\_fstat} \textcolor{preprocessor}{fstat}
+00048 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{redis\_stat} \textcolor{preprocessor}{stat}
+00049 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00050 
+00051 \textcolor{comment}{/* Test for proc filesystem */}
+00052 \textcolor{preprocessor}{#}\textcolor{preprocessor}{ifdef} \_\_linux\_\_
+00053 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{HAVE\_PROC\_STAT} 1
+00054 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{HAVE\_PROC\_MAPS} 1
+00055 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{HAVE\_PROC\_SMAPS} 1
+00056 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{HAVE\_PROC\_SOMAXCONN} 1
+00057 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00058 
+00059 \textcolor{comment}{/* Test for task\_info() */}
+00060 \textcolor{preprocessor}{#}\textcolor{preprocessor}{if} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_\_APPLE\_\_}\textcolor{preprocessor}{)}
+00061 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{HAVE\_TASKINFO} 1
+00062 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00063 
+00064 \textcolor{comment}{/* Test for backtrace() */}
+00065 \textcolor{preprocessor}{#}\textcolor{preprocessor}{if} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_\_APPLE\_\_}\textcolor{preprocessor}{)} \textcolor{preprocessor}{||} \textcolor{preprocessor}{(}\textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\_\_linux\_\_\textcolor{preprocessor}{)} \textcolor{preprocessor}{&&} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\_\_GLIBC\_\_\textcolor{preprocessor}{)}\textcolor{preprocessor}{)}
+00066 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{HAVE\_BACKTRACE} 1
+00067 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00068 
+00069 \textcolor{comment}{/* MSG\_NOSIGNAL. */}
+00070 \textcolor{preprocessor}{#}\textcolor{preprocessor}{ifdef} \_\_linux\_\_
+00071 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{HAVE\_MSG\_NOSIGNAL} 1
+00072 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00073 
+00074 \textcolor{comment}{/* Test for polling API */}
+00075 \textcolor{preprocessor}{#}\textcolor{preprocessor}{ifdef} \_\_linux\_\_
+00076 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{HAVE\_EPOLL} 1
+00077 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00078 
+00079 \textcolor{preprocessor}{#}\textcolor{preprocessor}{if} \textcolor{preprocessor}{(}\textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_\_APPLE\_\_}\textcolor{preprocessor}{)} \textcolor{preprocessor}{&&} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{MAC\_OS\_X\_VERSION\_10\_6}\textcolor{preprocessor}{)}\textcolor{preprocessor}{)} \textcolor{preprocessor}{||} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_\_FreeBSD\_\_}\textcolor{preprocessor}{)} \textcolor{preprocessor}{||} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{
+      \_\_OpenBSD\_\_}\textcolor{preprocessor}{)} \textcolor{preprocessor}{||} \textcolor{preprocessor}{defined} \textcolor{preprocessor}{(}\textcolor{preprocessor}{\_\_NetBSD\_\_}\textcolor{preprocessor}{)}
+00080 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{HAVE\_KQUEUE} 1
+00081 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00082 
+00083 \textcolor{preprocessor}{#}\textcolor{preprocessor}{ifdef} \textcolor{preprocessor}{\_\_sun}
+00084 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{sys}\textcolor{preprocessor}{/}\textcolor{preprocessor}{feature\_tests}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00085 \textcolor{preprocessor}{#}\textcolor{preprocessor}{ifdef} \textcolor{preprocessor}{\_DTRACE\_VERSION}
+00086 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{HAVE\_EVPORT} 1
+00087 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00088 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00089 
+00090 \textcolor{comment}{/* Define aof\_fsync to fdatasync() in Linux and fsync() for all the rest */}
+00091 \textcolor{preprocessor}{#}\textcolor{preprocessor}{ifdef} \_\_linux\_\_
+00092 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{aof\_fsync} \textcolor{preprocessor}{fdatasync}
+00093 \textcolor{preprocessor}{#}\textcolor{preprocessor}{else}
+00094 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{aof\_fsync} \textcolor{preprocessor}{fsync}
+00095 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00096 
+00097 \textcolor{comment}{/* Define rdb\_fsync\_range to sync\_file\_range() on Linux, otherwise we use}
+00098 \textcolor{comment}{ * the plain fsync() call. */}
+00099 \textcolor{preprocessor}{#}\textcolor{preprocessor}{ifdef} \_\_linux\_\_
+00100 \textcolor{preprocessor}{#}\textcolor{preprocessor}{if} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\_\_GLIBC\_\_\textcolor{preprocessor}{)} \textcolor{preprocessor}{&&} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\_\_GLIBC\_PREREQ\textcolor{preprocessor}{)}
+00101 \textcolor{preprocessor}{#}\textcolor{preprocessor}{if} \textcolor{preprocessor}{(}LINUX\_VERSION\_CODE \textcolor{preprocessor}{>=} 0x020611 \textcolor{preprocessor}{&&} \_\_GLIBC\_PREREQ\textcolor{preprocessor}{(}2\textcolor{preprocessor}{,} 6\textcolor{preprocessor}{)}\textcolor{preprocessor}{)}
+00102 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{HAVE\_SYNC\_FILE\_RANGE} 1
+00103 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00104 \textcolor{preprocessor}{#}\textcolor{preprocessor}{else}
+00105 \textcolor{preprocessor}{#}\textcolor{preprocessor}{if} \textcolor{preprocessor}{(}\textcolor{preprocessor}{LINUX\_VERSION\_CODE} \textcolor{preprocessor}{>=} 0x020611\textcolor{preprocessor}{)}
+00106 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{HAVE\_SYNC\_FILE\_RANGE} 1
+00107 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00108 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00109 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00110 
+00111 \textcolor{preprocessor}{#}\textcolor{preprocessor}{ifdef} HAVE\_SYNC\_FILE\_RANGE
+00112 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{rdb\_fsync\_range}\textcolor{preprocessor}{(}\textcolor{preprocessor}{fd}\textcolor{preprocessor}{,}\textcolor{preprocessor}{off}\textcolor{preprocessor}{,}\textcolor{preprocessor}{size}\textcolor{preprocessor}{)} \textcolor{preprocessor}{sync\_file\_range}\textcolor{preprocessor}{(}\textcolor{preprocessor}{fd}\textcolor{preprocessor}{,}\textcolor{preprocessor}{off}\textcolor{preprocessor}{,}\textcolor{preprocessor}{size}\textcolor{preprocessor}{,}\textcolor{preprocessor}{SYNC\_FILE\_RANGE\_WAIT\_BEFORE}\textcolor{preprocessor}{|}\textcolor{preprocessor}{
+      SYNC\_FILE\_RANGE\_WRITE}\textcolor{preprocessor}{)}
+00113 \textcolor{preprocessor}{#}\textcolor{preprocessor}{else}
+00114 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{rdb\_fsync\_range}\textcolor{preprocessor}{(}\textcolor{preprocessor}{fd}\textcolor{preprocessor}{,}\textcolor{preprocessor}{off}\textcolor{preprocessor}{,}\textcolor{preprocessor}{size}\textcolor{preprocessor}{)} \textcolor{preprocessor}{fsync}\textcolor{preprocessor}{(}\textcolor{preprocessor}{fd}\textcolor{preprocessor}{)}
+00115 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00116 
+00117 \textcolor{comment}{/* Check if we can use setproctitle().}
+00118 \textcolor{comment}{ * BSD systems have support for it, we provide an implementation for}
+00119 \textcolor{comment}{ * Linux and osx. */}
+00120 \textcolor{preprocessor}{#}\textcolor{preprocessor}{if} \textcolor{preprocessor}{(}\textcolor{preprocessor}{defined} \textcolor{preprocessor}{\_\_NetBSD\_\_} \textcolor{preprocessor}{||} \textcolor{preprocessor}{defined} \textcolor{preprocessor}{\_\_FreeBSD\_\_} \textcolor{preprocessor}{||} \textcolor{preprocessor}{defined} \textcolor{preprocessor}{\_\_OpenBSD\_\_}\textcolor{preprocessor}{)}
+00121 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{USE\_SETPROCTITLE}
+00122 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00123 
+00124 \textcolor{preprocessor}{#}\textcolor{preprocessor}{if} \textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{defined} \_\_linux \textcolor{preprocessor}{&&} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\_\_GLIBC\_\_\textcolor{preprocessor}{)}\textcolor{preprocessor}{)} \textcolor{preprocessor}{||} \textcolor{preprocessor}{defined} \textcolor{preprocessor}{\_\_APPLE\_\_}\textcolor{preprocessor}{)}
+00125 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{USE\_SETPROCTITLE}
+00126 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{INIT\_SETPROCTITLE\_REPLACEMENT}
+00127 \textcolor{keywordtype}{void} spt\_init(\textcolor{keywordtype}{int} argc, \textcolor{keywordtype}{char} *argv[]);
+00128 \textcolor{keywordtype}{void} setproctitle(\textcolor{keyword}{const} \textcolor{keywordtype}{char} *fmt, ...);
+00129 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00130 
+00131 \textcolor{comment}{/* Byte ordering detection */}
+00132 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{sys}\textcolor{preprocessor}{/}\textcolor{preprocessor}{types}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>} \textcolor{comment}{/* This will likely define BYTE\_ORDER */}
+00133 
+00134 \textcolor{preprocessor}{#}\textcolor{preprocessor}{ifndef} BYTE\_ORDER
+00135 \textcolor{preprocessor}{#}\textcolor{preprocessor}{if} \textcolor{preprocessor}{(}\textcolor{preprocessor}{BSD} \textcolor{preprocessor}{>=} 199103\textcolor{preprocessor}{)}
+00136 \textcolor{preprocessor}{#} \textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{machine}\textcolor{preprocessor}{/}\textcolor{preprocessor}{endian}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00137 \textcolor{preprocessor}{#}\textcolor{preprocessor}{else}
+00138 \textcolor{preprocessor}{#}\textcolor{preprocessor}{if} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{linux}\textcolor{preprocessor}{)} \textcolor{preprocessor}{||} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_\_linux\_\_}\textcolor{preprocessor}{)}
+00139 \textcolor{preprocessor}{#} \textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{endian}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00140 \textcolor{preprocessor}{#}\textcolor{preprocessor}{else}
+00141 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{LITTLE\_ENDIAN}   1234    \textcolor{comment}{/* least-significant byte first (vax, pc) */}
+00142 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{BIG\_ENDIAN}  4321    \textcolor{comment}{/* most-significant byte first (IBM, net) */}
+00143 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{PDP\_ENDIAN}  3412    \textcolor{comment}{/* LSB first in word, MSW first in long (pdp)*/}
+00144 
+00145 \textcolor{preprocessor}{#}\textcolor{preprocessor}{if} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_\_i386\_\_}\textcolor{preprocessor}{)} \textcolor{preprocessor}{||} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_\_x86\_64\_\_}\textcolor{preprocessor}{)} \textcolor{preprocessor}{||} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_\_amd64\_\_}\textcolor{preprocessor}{)} \textcolor{preprocessor}{||}
+00146    \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{vax}\textcolor{preprocessor}{)} \textcolor{preprocessor}{||} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{ns32000}\textcolor{preprocessor}{)} \textcolor{preprocessor}{||} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{sun386}\textcolor{preprocessor}{)} \textcolor{preprocessor}{||}
+00147    \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{MIPSEL}\textcolor{preprocessor}{)} \textcolor{preprocessor}{||} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_MIPSEL}\textcolor{preprocessor}{)} \textcolor{preprocessor}{||} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{BIT\_ZERO\_ON\_RIGHT}\textcolor{preprocessor}{)} \textcolor{preprocessor}{||}
+00148    \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_\_alpha\_\_}\textcolor{preprocessor}{)} \textcolor{preprocessor}{||} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_\_alpha}\textcolor{preprocessor}{)}
+00149 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{BYTE\_ORDER}    \textcolor{preprocessor}{LITTLE\_ENDIAN}
+00150 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00151 
+00152 \textcolor{preprocessor}{#}\textcolor{preprocessor}{if} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{sel}\textcolor{preprocessor}{)} \textcolor{preprocessor}{||} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{pyr}\textcolor{preprocessor}{)} \textcolor{preprocessor}{||} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{mc68000}\textcolor{preprocessor}{)} \textcolor{preprocessor}{||} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{sparc}\textcolor{preprocessor}{)} \textcolor{preprocessor}{||}
+00153     \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{is68k}\textcolor{preprocessor}{)} \textcolor{preprocessor}{||} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{tahoe}\textcolor{preprocessor}{)} \textcolor{preprocessor}{||} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{ibm032}\textcolor{preprocessor}{)} \textcolor{preprocessor}{||} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{ibm370}\textcolor{preprocessor}{)} \textcolor{preprocessor}{||}
+00154     \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{MIPSEB}\textcolor{preprocessor}{)} \textcolor{preprocessor}{||} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_MIPSEB}\textcolor{preprocessor}{)} \textcolor{preprocessor}{||} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_IBMR2}\textcolor{preprocessor}{)} \textcolor{preprocessor}{||} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{DGUX}\textcolor{preprocessor}{)} \textcolor{preprocessor}{||}
+00155     \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{apollo}\textcolor{preprocessor}{)} \textcolor{preprocessor}{||} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_\_convex\_\_}\textcolor{preprocessor}{)} \textcolor{preprocessor}{||} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_CRAY}\textcolor{preprocessor}{)} \textcolor{preprocessor}{||}
+00156     \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_\_hppa}\textcolor{preprocessor}{)} \textcolor{preprocessor}{||} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_\_hp9000}\textcolor{preprocessor}{)} \textcolor{preprocessor}{||}
+00157     \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_\_hp9000s300}\textcolor{preprocessor}{)} \textcolor{preprocessor}{||} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_\_hp9000s700}\textcolor{preprocessor}{)} \textcolor{preprocessor}{||}
+00158     \textcolor{preprocessor}{defined} \textcolor{preprocessor}{(}\textcolor{preprocessor}{BIT\_ZERO\_ON\_LEFT}\textcolor{preprocessor}{)} \textcolor{preprocessor}{||} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{m68k}\textcolor{preprocessor}{)} \textcolor{preprocessor}{||} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_\_sparc}\textcolor{preprocessor}{)}
+00159 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{BYTE\_ORDER}  \textcolor{preprocessor}{BIG\_ENDIAN}
+00160 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00161 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif} \textcolor{comment}{/* linux */}
+00162 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif} \textcolor{comment}{/* BSD */}
+00163 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif} \textcolor{comment}{/* BYTE\_ORDER */}
+00164 
+00165 \textcolor{comment}{/* Sometimes after including an OS-specific header that defines the}
+00166 \textcolor{comment}{ * endianess we end with \_\_BYTE\_ORDER but not with BYTE\_ORDER that is what}
+00167 \textcolor{comment}{ * the Redis code uses. In this case let's define everything without the}
+00168 \textcolor{comment}{ * underscores. */}
+00169 \textcolor{preprocessor}{#}\textcolor{preprocessor}{ifndef} BYTE\_ORDER
+00170 \textcolor{preprocessor}{#}\textcolor{preprocessor}{ifdef} \textcolor{preprocessor}{\_\_BYTE\_ORDER}
+00171 \textcolor{preprocessor}{#}\textcolor{preprocessor}{if} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_\_LITTLE\_ENDIAN}\textcolor{preprocessor}{)} \textcolor{preprocessor}{&&} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_\_BIG\_ENDIAN}\textcolor{preprocessor}{)}
+00172 \textcolor{preprocessor}{#}\textcolor{preprocessor}{ifndef} \textcolor{preprocessor}{LITTLE\_ENDIAN}
+00173 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{LITTLE\_ENDIAN} \textcolor{preprocessor}{\_\_LITTLE\_ENDIAN}
+00174 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00175 \textcolor{preprocessor}{#}\textcolor{preprocessor}{ifndef} \textcolor{preprocessor}{BIG\_ENDIAN}
+00176 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{BIG\_ENDIAN} \textcolor{preprocessor}{\_\_BIG\_ENDIAN}
+00177 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00178 \textcolor{preprocessor}{#}\textcolor{preprocessor}{if} \textcolor{preprocessor}{(}\textcolor{preprocessor}{\_\_BYTE\_ORDER} \textcolor{preprocessor}{==} \textcolor{preprocessor}{\_\_LITTLE\_ENDIAN}\textcolor{preprocessor}{)}
+00179 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{BYTE\_ORDER} \textcolor{preprocessor}{LITTLE\_ENDIAN}
+00180 \textcolor{preprocessor}{#}\textcolor{preprocessor}{else}
+00181 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{BYTE\_ORDER} \textcolor{preprocessor}{BIG\_ENDIAN}
+00182 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00183 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00184 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00185 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00186 
+00187 \textcolor{preprocessor}{#}\textcolor{preprocessor}{if} \textcolor{preprocessor}{!}\textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}BYTE\_ORDER\textcolor{preprocessor}{)} \textcolor{preprocessor}{||}
+00188     \textcolor{preprocessor}{(}BYTE\_ORDER \textcolor{preprocessor}{!=} \hyperlink{config_8h_a23eb5e058a210efdde3d64e69679fafa}{BIG\_ENDIAN} \textcolor{preprocessor}{&&} BYTE\_ORDER \textcolor{preprocessor}{!=} \hyperlink{config_8h_a8782a401fbf55261460863fc2f8df1ce}{LITTLE\_ENDIAN}\textcolor{preprocessor}{)}
+00189     \textcolor{comment}{/* you must determine what the correct bit order is for}
+00190 \textcolor{comment}{     * your compiler - the next line is an intentional error}
+00191 \textcolor{comment}{     * which will force your compiles to bomb until you fix}
+00192 \textcolor{comment}{     * the above macros.}
+00193 \textcolor{comment}{     */}
+00194 \textcolor{preprocessor}{#}\textcolor{preprocessor}{error} \textcolor{stringliteral}{"Undefined or invalid BYTE\_ORDER"}
+00195 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00196 
+00197 \textcolor{preprocessor}{#}\textcolor{preprocessor}{if} \textcolor{preprocessor}{(}\textcolor{preprocessor}{\_\_i386} \textcolor{preprocessor}{||} \_\_amd64 \textcolor{preprocessor}{||} \textcolor{preprocessor}{\_\_powerpc\_\_}\textcolor{preprocessor}{)} \textcolor{preprocessor}{&&} \_\_GNUC\_\_
+00198 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{GNUC\_VERSION} \textcolor{preprocessor}{(}\_\_GNUC\_\_ \textcolor{preprocessor}{*} 10000 \textcolor{preprocessor}{+} \_\_GNUC\_MINOR\_\_ \textcolor{preprocessor}{*} 100 \textcolor{preprocessor}{+} \_\_GNUC\_PATCHLEVEL\_\_\textcolor{preprocessor}{)}
+00199 \textcolor{preprocessor}{#}\textcolor{preprocessor}{if} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\_\_clang\_\_\textcolor{preprocessor}{)}
+00200 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{HAVE\_ATOMIC}
+00201 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00202 \textcolor{preprocessor}{#}\textcolor{preprocessor}{if} \textcolor{preprocessor}{(}\textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\_\_GLIBC\_\_\textcolor{preprocessor}{)} \textcolor{preprocessor}{&&} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\_\_GLIBC\_PREREQ\textcolor{preprocessor}{)}\textcolor{preprocessor}{)}
+00203 \textcolor{preprocessor}{#}\textcolor{preprocessor}{if} \textcolor{preprocessor}{(}GNUC\_VERSION \textcolor{preprocessor}{>=} 40100 \textcolor{preprocessor}{&&} \_\_GLIBC\_PREREQ\textcolor{preprocessor}{(}2\textcolor{preprocessor}{,} 6\textcolor{preprocessor}{)}\textcolor{preprocessor}{)}
+00204 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{HAVE\_ATOMIC}
+00205 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00206 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00207 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00208 
+00209 \textcolor{comment}{/* Make sure we can test for ARM just checking for \_\_arm\_\_, since sometimes}
+00210 \textcolor{comment}{ * \_\_arm is defined but \_\_arm\_\_ is not. */}
+00211 \textcolor{preprocessor}{#}\textcolor{preprocessor}{if} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_\_arm}\textcolor{preprocessor}{)} \textcolor{preprocessor}{&&} \textcolor{preprocessor}{!}\textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_\_arm\_\_}\textcolor{preprocessor}{)}
+00212 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{\_\_arm\_\_}
+00213 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00214 \textcolor{preprocessor}{#}\textcolor{preprocessor}{if} \textcolor{preprocessor}{defined} \textcolor{preprocessor}{(}\textcolor{preprocessor}{\_\_aarch64\_\_}\textcolor{preprocessor}{)} \textcolor{preprocessor}{&&} \textcolor{preprocessor}{!}\textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_\_arm64\_\_}\textcolor{preprocessor}{)}
+00215 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{\_\_arm64\_\_}
+00216 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00217 
+00218 \textcolor{comment}{/* Make sure we can test for SPARC just checking for \_\_sparc\_\_. */}
+00219 \textcolor{preprocessor}{#}\textcolor{preprocessor}{if} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_\_sparc}\textcolor{preprocessor}{)} \textcolor{preprocessor}{&&} \textcolor{preprocessor}{!}\textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_\_sparc\_\_}\textcolor{preprocessor}{)}
+00220 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{\_\_sparc\_\_}
+00221 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00222 
+00223 \textcolor{preprocessor}{#}\textcolor{preprocessor}{if} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_\_sparc\_\_}\textcolor{preprocessor}{)} \textcolor{preprocessor}{||} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_\_arm\_\_}\textcolor{preprocessor}{)}
+00224 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{USE\_ALIGNED\_ACCESS}
+00225 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00226 
+00227 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+\end{DoxyCode}

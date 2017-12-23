@@ -1,0 +1,325 @@
+\hypertarget{ae__evport_8c_source}{}\section{ae\+\_\+evport.\+c}
+\label{ae__evport_8c_source}\index{src/ae\+\_\+evport.\+c@{src/ae\+\_\+evport.\+c}}
+
+\begin{DoxyCode}
+00001 \textcolor{comment}{/* ae.c module for illumos event ports.}
+00002 \textcolor{comment}{ *}
+00003 \textcolor{comment}{ * Copyright (c) 2012, Joyent, Inc. All rights reserved.}
+00004 \textcolor{comment}{ *}
+00005 \textcolor{comment}{ * Redistribution and use in source and binary forms, with or without}
+00006 \textcolor{comment}{ * modification, are permitted provided that the following conditions are met:}
+00007 \textcolor{comment}{ *}
+00008 \textcolor{comment}{ *   * Redistributions of source code must retain the above copyright notice,}
+00009 \textcolor{comment}{ *     this list of conditions and the following disclaimer.}
+00010 \textcolor{comment}{ *   * Redistributions in binary form must reproduce the above copyright}
+00011 \textcolor{comment}{ *     notice, this list of conditions and the following disclaimer in the}
+00012 \textcolor{comment}{ *     documentation and/or other materials provided with the distribution.}
+00013 \textcolor{comment}{ *   * Neither the name of Redis nor the names of its contributors may be used}
+00014 \textcolor{comment}{ *     to endorse or promote products derived from this software without}
+00015 \textcolor{comment}{ *     specific prior written permission.}
+00016 \textcolor{comment}{ *}
+00017 \textcolor{comment}{ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"}
+00018 \textcolor{comment}{ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE}
+00019 \textcolor{comment}{ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE}
+00020 \textcolor{comment}{ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE}
+00021 \textcolor{comment}{ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR}
+00022 \textcolor{comment}{ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF}
+00023 \textcolor{comment}{ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS}
+00024 \textcolor{comment}{ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN}
+00025 \textcolor{comment}{ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)}
+00026 \textcolor{comment}{ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE}
+00027 \textcolor{comment}{ * POSSIBILITY OF SUCH DAMAGE.}
+00028 \textcolor{comment}{ */}
+00029 
+00030 
+00031 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{assert}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00032 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{errno}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00033 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{port}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00034 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{poll}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00035 
+00036 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{sys}\textcolor{preprocessor}{/}\textcolor{preprocessor}{types}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00037 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{sys}\textcolor{preprocessor}{/}\textcolor{preprocessor}{time}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00038 
+00039 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{stdio}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00040 
+00041 \textcolor{keyword}{static} \textcolor{keywordtype}{int} evport\_debug = 0;
+00042 
+00043 \textcolor{comment}{/*}
+00044 \textcolor{comment}{ * This file implements the ae API using event ports, present on Solaris-based}
+00045 \textcolor{comment}{ * systems since Solaris 10.  Using the event port interface, we associate file}
+00046 \textcolor{comment}{ * descriptors with the port.  Each association also includes the set of poll(2)}
+00047 \textcolor{comment}{ * events that the consumer is interested in (e.g., POLLIN and POLLOUT).}
+00048 \textcolor{comment}{ *}
+00049 \textcolor{comment}{ * There's one tricky piece to this implementation: when we return events via}
+00050 \textcolor{comment}{ * aeApiPoll, the corresponding file descriptors become dissociated from the}
+00051 \textcolor{comment}{ * port.  This is necessary because poll events are level-triggered, so if the}
+00052 \textcolor{comment}{ * fd didn't become dissociated, it would immediately fire another event since}
+00053 \textcolor{comment}{ * the underlying state hasn't changed yet.  We must re-associate the file}
+00054 \textcolor{comment}{ * descriptor, but only after we know that our caller has actually read from it.}
+00055 \textcolor{comment}{ * The ae API does not tell us exactly when that happens, but we do know that}
+00056 \textcolor{comment}{ * it must happen by the time aeApiPoll is called again.  Our solution is to}
+00057 \textcolor{comment}{ * keep track of the last fds returned by aeApiPoll and re-associate them next}
+00058 \textcolor{comment}{ * time aeApiPoll is invoked.}
+00059 \textcolor{comment}{ *}
+00060 \textcolor{comment}{ * To summarize, in this module, each fd association is EITHER (a) represented}
+00061 \textcolor{comment}{ * only via the in-kernel association OR (b) represented by pending\_fds and}
+00062 \textcolor{comment}{ * pending\_masks.  (b) is only true for the last fds we returned from aeApiPoll,}
+00063 \textcolor{comment}{ * and only until we enter aeApiPoll again (at which point we restore the}
+00064 \textcolor{comment}{ * in-kernel association).}
+00065 \textcolor{comment}{ */}
+00066 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{MAX\_EVENT\_BATCHSZ} 512
+00067 
+00068 \textcolor{keyword}{typedef} \textcolor{keyword}{struct} \hyperlink{structaeApiState}{aeApiState} \{
+00069     \textcolor{keywordtype}{int}     portfd;                             \textcolor{comment}{/* event port */}
+00070     \textcolor{keywordtype}{int}     npending;                           \textcolor{comment}{/* # of pending fds */}
+00071     \textcolor{keywordtype}{int}     pending\_fds[\hyperlink{ae__evport_8c_ab9854fb7f580a9077208ed70f45c8f15}{MAX\_EVENT\_BATCHSZ}];     \textcolor{comment}{/* pending fds */}
+00072     \textcolor{keywordtype}{int}     pending\_masks[\hyperlink{ae__evport_8c_ab9854fb7f580a9077208ed70f45c8f15}{MAX\_EVENT\_BATCHSZ}];   \textcolor{comment}{/* pending fds' masks */}
+00073 \} aeApiState;
+00074 
+00075 \textcolor{keyword}{static} \textcolor{keywordtype}{int} aeApiCreate(aeEventLoop *eventLoop) \{
+00076     \textcolor{keywordtype}{int} i;
+00077     aeApiState *state = zmalloc(\textcolor{keyword}{sizeof}(aeApiState));
+00078     \textcolor{keywordflow}{if} (!state) \textcolor{keywordflow}{return} -1;
+00079 
+00080     state->portfd = port\_create();
+00081     \textcolor{keywordflow}{if} (state->portfd == -1) \{
+00082         zfree(state);
+00083         \textcolor{keywordflow}{return} -1;
+00084     \}
+00085 
+00086     state->npending = 0;
+00087 
+00088     \textcolor{keywordflow}{for} (i = 0; i < \hyperlink{ae__evport_8c_ab9854fb7f580a9077208ed70f45c8f15}{MAX\_EVENT\_BATCHSZ}; i++) \{
+00089         state->pending\_fds[i] = -1;
+00090         state->pending\_masks[i] = AE\_NONE;
+00091     \}
+00092 
+00093     eventLoop->apidata = state;
+00094     \textcolor{keywordflow}{return} 0;
+00095 \}
+00096 
+00097 \textcolor{keyword}{static} \textcolor{keywordtype}{int} aeApiResize(aeEventLoop *eventLoop, \textcolor{keywordtype}{int} setsize) \{
+00098     \textcolor{comment}{/* Nothing to resize here. */}
+00099     \textcolor{keywordflow}{return} 0;
+00100 \}
+00101 
+00102 \textcolor{keyword}{static} \textcolor{keywordtype}{void} aeApiFree(aeEventLoop *eventLoop) \{
+00103     aeApiState *state = eventLoop->apidata;
+00104 
+00105     close(state->portfd);
+00106     zfree(state);
+00107 \}
+00108 
+00109 \textcolor{keyword}{static} \textcolor{keywordtype}{int} aeApiLookupPending(aeApiState *state, \textcolor{keywordtype}{int} fd) \{
+00110     \textcolor{keywordtype}{int} i;
+00111 
+00112     \textcolor{keywordflow}{for} (i = 0; i < state->npending; i++) \{
+00113         \textcolor{keywordflow}{if} (state->pending\_fds[i] == fd)
+00114             \textcolor{keywordflow}{return} (i);
+00115     \}
+00116 
+00117     \textcolor{keywordflow}{return} (-1);
+00118 \}
+00119 
+00120 \textcolor{comment}{/*}
+00121 \textcolor{comment}{ * Helper function to invoke port\_associate for the given fd and mask.}
+00122 \textcolor{comment}{ */}
+00123 \textcolor{keyword}{static} \textcolor{keywordtype}{int} aeApiAssociate(\textcolor{keyword}{const} \textcolor{keywordtype}{char} *where, \textcolor{keywordtype}{int} portfd, \textcolor{keywordtype}{int} fd, \textcolor{keywordtype}{int} mask) \{
+00124     \textcolor{keywordtype}{int} events = 0;
+00125     \textcolor{keywordtype}{int} rv, err;
+00126 
+00127     \textcolor{keywordflow}{if} (mask & AE\_READABLE)
+00128         events |= POLLIN;
+00129     \textcolor{keywordflow}{if} (mask & AE\_WRITABLE)
+00130         events |= POLLOUT;
+00131 
+00132     \textcolor{keywordflow}{if} (evport\_debug)
+00133         fprintf(stderr, \textcolor{stringliteral}{"%s: port\_associate(%d, 0x%x) = "}, where, fd, events);
+00134 
+00135     rv = port\_associate(portfd, PORT\_SOURCE\_FD, fd, events,
+00136         (\textcolor{keywordtype}{void} *)(uintptr\_t)mask);
+00137     err = errno;
+00138 
+00139     \textcolor{keywordflow}{if} (evport\_debug)
+00140         fprintf(stderr, \textcolor{stringliteral}{"%d (%s)\(\backslash\)n"}, rv, rv == 0 ? \textcolor{stringliteral}{"no error"} : strerror(err));
+00141 
+00142     \textcolor{keywordflow}{if} (rv == -1) \{
+00143         fprintf(stderr, \textcolor{stringliteral}{"%s: port\_associate: %s\(\backslash\)n"}, where, strerror(err));
+00144 
+00145         \textcolor{keywordflow}{if} (err == EAGAIN)
+00146             fprintf(stderr, \textcolor{stringliteral}{"aeApiAssociate: event port limit exceeded."});
+00147     \}
+00148 
+00149     \textcolor{keywordflow}{return} rv;
+00150 \}
+00151 
+00152 \textcolor{keyword}{static} \textcolor{keywordtype}{int} aeApiAddEvent(aeEventLoop *eventLoop, \textcolor{keywordtype}{int} fd, \textcolor{keywordtype}{int} mask) \{
+00153     aeApiState *state = eventLoop->apidata;
+00154     \textcolor{keywordtype}{int} fullmask, pfd;
+00155 
+00156     \textcolor{keywordflow}{if} (evport\_debug)
+00157         fprintf(stderr, \textcolor{stringliteral}{"aeApiAddEvent: fd %d mask 0x%x\(\backslash\)n"}, fd, mask);
+00158 
+00159     \textcolor{comment}{/*}
+00160 \textcolor{comment}{     * Since port\_associate's "events" argument replaces any existing events, we}
+00161 \textcolor{comment}{     * must be sure to include whatever events are already associated when}
+00162 \textcolor{comment}{     * we call port\_associate() again.}
+00163 \textcolor{comment}{     */}
+00164     fullmask = mask | eventLoop->events[fd].mask;
+00165     pfd = aeApiLookupPending(state, fd);
+00166 
+00167     \textcolor{keywordflow}{if} (pfd != -1) \{
+00168         \textcolor{comment}{/*}
+00169 \textcolor{comment}{         * This fd was recently returned from aeApiPoll.  It should be safe to}
+00170 \textcolor{comment}{         * assume that the consumer has processed that poll event, but we play}
+00171 \textcolor{comment}{         * it safer by simply updating pending\_mask.  The fd will be}
+00172 \textcolor{comment}{         * re-associated as usual when aeApiPoll is called again.}
+00173 \textcolor{comment}{         */}
+00174         \textcolor{keywordflow}{if} (evport\_debug)
+00175             fprintf(stderr, \textcolor{stringliteral}{"aeApiAddEvent: adding to pending fd %d\(\backslash\)n"}, fd);
+00176         state->pending\_masks[pfd] |= fullmask;
+00177         \textcolor{keywordflow}{return} 0;
+00178     \}
+00179 
+00180     \textcolor{keywordflow}{return} (aeApiAssociate(\textcolor{stringliteral}{"aeApiAddEvent"}, state->portfd, fd, fullmask));
+00181 \}
+00182 
+00183 \textcolor{keyword}{static} \textcolor{keywordtype}{void} aeApiDelEvent(aeEventLoop *eventLoop, \textcolor{keywordtype}{int} fd, \textcolor{keywordtype}{int} mask) \{
+00184     aeApiState *state = eventLoop->apidata;
+00185     \textcolor{keywordtype}{int} fullmask, pfd;
+00186 
+00187     \textcolor{keywordflow}{if} (evport\_debug)
+00188         fprintf(stderr, \textcolor{stringliteral}{"del fd %d mask 0x%x\(\backslash\)n"}, fd, mask);
+00189 
+00190     pfd = aeApiLookupPending(state, fd);
+00191 
+00192     \textcolor{keywordflow}{if} (pfd != -1) \{
+00193         \textcolor{keywordflow}{if} (evport\_debug)
+00194             fprintf(stderr, \textcolor{stringliteral}{"deleting event from pending fd %d\(\backslash\)n"}, fd);
+00195 
+00196         \textcolor{comment}{/*}
+00197 \textcolor{comment}{         * This fd was just returned from aeApiPoll, so it's not currently}
+00198 \textcolor{comment}{         * associated with the port.  All we need to do is update}
+00199 \textcolor{comment}{         * pending\_mask appropriately.}
+00200 \textcolor{comment}{         */}
+00201         state->pending\_masks[pfd] &= ~mask;
+00202 
+00203         \textcolor{keywordflow}{if} (state->pending\_masks[pfd] == AE\_NONE)
+00204             state->pending\_fds[pfd] = -1;
+00205 
+00206         \textcolor{keywordflow}{return};
+00207     \}
+00208 
+00209     \textcolor{comment}{/*}
+00210 \textcolor{comment}{     * The fd is currently associated with the port.  Like with the add case}
+00211 \textcolor{comment}{     * above, we must look at the full mask for the file descriptor before}
+00212 \textcolor{comment}{     * updating that association.  We don't have a good way of knowing what the}
+00213 \textcolor{comment}{     * events are without looking into the eventLoop state directly.  We rely on}
+00214 \textcolor{comment}{     * the fact that our caller has already updated the mask in the eventLoop.}
+00215 \textcolor{comment}{     */}
+00216 
+00217     fullmask = eventLoop->events[fd].mask;
+00218     \textcolor{keywordflow}{if} (fullmask == AE\_NONE) \{
+00219         \textcolor{comment}{/*}
+00220 \textcolor{comment}{         * We're removing *all* events, so use port\_dissociate to remove the}
+00221 \textcolor{comment}{         * association completely.  Failure here indicates a bug.}
+00222 \textcolor{comment}{         */}
+00223         \textcolor{keywordflow}{if} (evport\_debug)
+00224             fprintf(stderr, \textcolor{stringliteral}{"aeApiDelEvent: port\_dissociate(%d)\(\backslash\)n"}, fd);
+00225 
+00226         \textcolor{keywordflow}{if} (port\_dissociate(state->portfd, PORT\_SOURCE\_FD, fd) != 0) \{
+00227             perror(\textcolor{stringliteral}{"aeApiDelEvent: port\_dissociate"});
+00228             abort(); \textcolor{comment}{/* will not return */}
+00229         \}
+00230     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (aeApiAssociate(\textcolor{stringliteral}{"aeApiDelEvent"}, state->portfd, fd,
+00231         fullmask) != 0) \{
+00232         \textcolor{comment}{/*}
+00233 \textcolor{comment}{         * ENOMEM is a potentially transient condition, but the kernel won't}
+00234 \textcolor{comment}{         * generally return it unless things are really bad.  EAGAIN indicates}
+00235 \textcolor{comment}{         * we've reached an resource limit, for which it doesn't make sense to}
+00236 \textcolor{comment}{         * retry (counter-intuitively).  All other errors indicate a bug.  In any}
+00237 \textcolor{comment}{         * of these cases, the best we can do is to abort.}
+00238 \textcolor{comment}{         */}
+00239         abort(); \textcolor{comment}{/* will not return */}
+00240     \}
+00241 \}
+00242 
+00243 \textcolor{keyword}{static} \textcolor{keywordtype}{int} aeApiPoll(aeEventLoop *eventLoop, \textcolor{keyword}{struct} timeval *tvp) \{
+00244     aeApiState *state = eventLoop->apidata;
+00245     \textcolor{keyword}{struct} timespec timeout, *tsp;
+00246     \textcolor{keywordtype}{int} mask, i;
+00247     uint\_t nevents;
+00248     port\_event\_t event[\hyperlink{ae__evport_8c_ab9854fb7f580a9077208ed70f45c8f15}{MAX\_EVENT\_BATCHSZ}];
+00249 
+00250     \textcolor{comment}{/*}
+00251 \textcolor{comment}{     * If we've returned fd events before, we must re-associate them with the}
+00252 \textcolor{comment}{     * port now, before calling port\_get().  See the block comment at the top of}
+00253 \textcolor{comment}{     * this file for an explanation of why.}
+00254 \textcolor{comment}{     */}
+00255     \textcolor{keywordflow}{for} (i = 0; i < state->npending; i++) \{
+00256         \textcolor{keywordflow}{if} (state->pending\_fds[i] == -1)
+00257             \textcolor{comment}{/* This fd has since been deleted. */}
+00258             \textcolor{keywordflow}{continue};
+00259 
+00260         \textcolor{keywordflow}{if} (aeApiAssociate(\textcolor{stringliteral}{"aeApiPoll"}, state->portfd,
+00261             state->pending\_fds[i], state->pending\_masks[i]) != 0) \{
+00262             \textcolor{comment}{/* See aeApiDelEvent for why this case is fatal. */}
+00263             abort();
+00264         \}
+00265 
+00266         state->pending\_masks[i] = AE\_NONE;
+00267         state->pending\_fds[i] = -1;
+00268     \}
+00269 
+00270     state->npending = 0;
+00271 
+00272     \textcolor{keywordflow}{if} (tvp != NULL) \{
+00273         timeout.tv\_sec = tvp->tv\_sec;
+00274         timeout.tv\_nsec = tvp->tv\_usec * 1000;
+00275         tsp = &timeout;
+00276     \} \textcolor{keywordflow}{else} \{
+00277         tsp = NULL;
+00278     \}
+00279 
+00280     \textcolor{comment}{/*}
+00281 \textcolor{comment}{     * port\_getn can return with errno == ETIME having returned some events (!).}
+00282 \textcolor{comment}{     * So if we get ETIME, we check nevents, too.}
+00283 \textcolor{comment}{     */}
+00284     nevents = 1;
+00285     \textcolor{keywordflow}{if} (port\_getn(state->portfd, event, \hyperlink{ae__evport_8c_ab9854fb7f580a9077208ed70f45c8f15}{MAX\_EVENT\_BATCHSZ}, &nevents,
+00286         tsp) == -1 && (errno != ETIME || nevents == 0)) \{
+00287         \textcolor{keywordflow}{if} (errno == ETIME || errno == EINTR)
+00288             \textcolor{keywordflow}{return} 0;
+00289 
+00290         \textcolor{comment}{/* Any other error indicates a bug. */}
+00291         perror(\textcolor{stringliteral}{"aeApiPoll: port\_get"});
+00292         abort();
+00293     \}
+00294 
+00295     state->npending = nevents;
+00296 
+00297     \textcolor{keywordflow}{for} (i = 0; i < nevents; i++) \{
+00298             mask = 0;
+00299             \textcolor{keywordflow}{if} (event[i].portev\_events & POLLIN)
+00300                 mask |= AE\_READABLE;
+00301             \textcolor{keywordflow}{if} (event[i].portev\_events & POLLOUT)
+00302                 mask |= AE\_WRITABLE;
+00303 
+00304             eventLoop->fired[i].fd = event[i].portev\_object;
+00305             eventLoop->fired[i].mask = mask;
+00306 
+00307             \textcolor{keywordflow}{if} (evport\_debug)
+00308                 fprintf(stderr, \textcolor{stringliteral}{"aeApiPoll: fd %d mask 0x%x\(\backslash\)n"},
+00309                     (\textcolor{keywordtype}{int})event[i].portev\_object, mask);
+00310 
+00311             state->pending\_fds[i] = event[i].portev\_object;
+00312             state->pending\_masks[i] = (uintptr\_t)event[i].portev\_user;
+00313     \}
+00314 
+00315     \textcolor{keywordflow}{return} nevents;
+00316 \}
+00317 
+00318 \textcolor{keyword}{static} \textcolor{keywordtype}{char} *aeApiName(\textcolor{keywordtype}{void}) \{
+00319     \textcolor{keywordflow}{return} \textcolor{stringliteral}{"evport"};
+00320 \}
+\end{DoxyCode}

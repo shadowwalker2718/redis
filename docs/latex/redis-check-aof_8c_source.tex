@@ -1,0 +1,239 @@
+\hypertarget{redis-check-aof_8c_source}{}\section{redis-\/check-\/aof.c}
+\label{redis-check-aof_8c_source}\index{src/redis-\/check-\/aof.\+c@{src/redis-\/check-\/aof.\+c}}
+
+\begin{DoxyCode}
+00001 \textcolor{comment}{/*}
+00002 \textcolor{comment}{ * Copyright (c) 2009-2012, Pieter Noordhuis <pcnoordhuis at gmail dot com>}
+00003 \textcolor{comment}{ * Copyright (c) 2009-2012, Salvatore Sanfilippo <antirez at gmail dot com>}
+00004 \textcolor{comment}{ * All rights reserved.}
+00005 \textcolor{comment}{ *}
+00006 \textcolor{comment}{ * Redistribution and use in source and binary forms, with or without}
+00007 \textcolor{comment}{ * modification, are permitted provided that the following conditions are met:}
+00008 \textcolor{comment}{ *}
+00009 \textcolor{comment}{ *   * Redistributions of source code must retain the above copyright notice,}
+00010 \textcolor{comment}{ *     this list of conditions and the following disclaimer.}
+00011 \textcolor{comment}{ *   * Redistributions in binary form must reproduce the above copyright}
+00012 \textcolor{comment}{ *     notice, this list of conditions and the following disclaimer in the}
+00013 \textcolor{comment}{ *     documentation and/or other materials provided with the distribution.}
+00014 \textcolor{comment}{ *   * Neither the name of Redis nor the names of its contributors may be used}
+00015 \textcolor{comment}{ *     to endorse or promote products derived from this software without}
+00016 \textcolor{comment}{ *     specific prior written permission.}
+00017 \textcolor{comment}{ *}
+00018 \textcolor{comment}{ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"}
+00019 \textcolor{comment}{ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE}
+00020 \textcolor{comment}{ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE}
+00021 \textcolor{comment}{ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE}
+00022 \textcolor{comment}{ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR}
+00023 \textcolor{comment}{ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF}
+00024 \textcolor{comment}{ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS}
+00025 \textcolor{comment}{ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN}
+00026 \textcolor{comment}{ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)}
+00027 \textcolor{comment}{ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE}
+00028 \textcolor{comment}{ * POSSIBILITY OF SUCH DAMAGE.}
+00029 \textcolor{comment}{ */}
+00030 
+00031 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \hyperlink{server_8h}{"server.h"}
+00032 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{sys}\textcolor{preprocessor}{/}\textcolor{preprocessor}{stat}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00033 
+00034 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{ERROR}\textcolor{preprocessor}{(}\textcolor{preprocessor}{...}\textcolor{preprocessor}{)} \textcolor{preprocessor}{\{}
+00035     \textcolor{keywordtype}{char} \textcolor{preprocessor}{\_\_buf}\textcolor{preprocessor}{[}1024\textcolor{preprocessor}{]}\textcolor{preprocessor}{;}
+00036     \textcolor{preprocessor}{sprintf}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_\_buf}\textcolor{preprocessor}{,} \textcolor{preprocessor}{\_\_VA\_ARGS\_\_}\textcolor{preprocessor}{)}\textcolor{preprocessor}{;}
+00037     \textcolor{preprocessor}{sprintf}\textcolor{preprocessor}{(}\textcolor{preprocessor}{error}\textcolor{preprocessor}{,} \textcolor{stringliteral}{"0x%16llx: %s"}\textcolor{preprocessor}{,} \textcolor{preprocessor}{(}\textcolor{keywordtype}{long} \textcolor{keywordtype}{long}\textcolor{preprocessor}{)}\textcolor{preprocessor}{epos}\textcolor{preprocessor}{,} \textcolor{preprocessor}{\_\_buf}\textcolor{preprocessor}{)}\textcolor{preprocessor}{;} \textcolor{preprocessor}{\(\backslash\)}
+00038 \textcolor{preprocessor}{\}}
+00039 
+00040 \textcolor{keyword}{static} \textcolor{keywordtype}{char} error[1024];
+00041 \textcolor{keyword}{static} off\_t epos;
+00042 
+00043 \textcolor{keywordtype}{int} consumeNewline(\textcolor{keywordtype}{char} *buf) \{
+00044     \textcolor{keywordflow}{if} (strncmp(buf,\textcolor{stringliteral}{"\(\backslash\)r\(\backslash\)n"},2) != 0) \{
+00045         \hyperlink{redis-check-aof_8c_a02ce8a968600d004ba60858425c46307}{ERROR}(\textcolor{stringliteral}{"Expected \(\backslash\)\(\backslash\)r\(\backslash\)\(\backslash\)n, got: %02x%02x"},buf[0],buf[1]);
+00046         \textcolor{keywordflow}{return} 0;
+00047     \}
+00048     \textcolor{keywordflow}{return} 1;
+00049 \}
+00050 
+00051 \textcolor{keywordtype}{int} readLong(FILE *fp, \textcolor{keywordtype}{char} prefix, \textcolor{keywordtype}{long} *target) \{
+00052     \textcolor{keywordtype}{char} buf[128], *eptr;
+00053     epos = ftello(fp);
+00054     \textcolor{keywordflow}{if} (fgets(buf,\textcolor{keyword}{sizeof}(buf),fp) == NULL) \{
+00055         \textcolor{keywordflow}{return} 0;
+00056     \}
+00057     \textcolor{keywordflow}{if} (buf[0] != prefix) \{
+00058         \hyperlink{redis-check-aof_8c_a02ce8a968600d004ba60858425c46307}{ERROR}(\textcolor{stringliteral}{"Expected prefix '%c', got: '%c'"},prefix,buf[0]);
+00059         \textcolor{keywordflow}{return} 0;
+00060     \}
+00061     *target = strtol(buf+1,&eptr,10);
+00062     \textcolor{keywordflow}{return} consumeNewline(eptr);
+00063 \}
+00064 
+00065 \textcolor{keywordtype}{int} readBytes(FILE *fp, \textcolor{keywordtype}{char} *target, \textcolor{keywordtype}{long} length) \{
+00066     \textcolor{keywordtype}{long} real;
+00067     epos = ftello(fp);
+00068     real = fread(target,1,length,fp);
+00069     \textcolor{keywordflow}{if} (real != length) \{
+00070         \hyperlink{redis-check-aof_8c_a02ce8a968600d004ba60858425c46307}{ERROR}(\textcolor{stringliteral}{"Expected to read %ld bytes, got %ld bytes"},length,real);
+00071         \textcolor{keywordflow}{return} 0;
+00072     \}
+00073     \textcolor{keywordflow}{return} 1;
+00074 \}
+00075 
+00076 \textcolor{keywordtype}{int} readString(FILE *fp, \textcolor{keywordtype}{char}** target) \{
+00077     \textcolor{keywordtype}{long} len;
+00078     *target = NULL;
+00079     \textcolor{keywordflow}{if} (!readLong(fp,\textcolor{stringliteral}{'$'},&len)) \{
+00080         \textcolor{keywordflow}{return} 0;
+00081     \}
+00082 
+00083     \textcolor{comment}{/* Increase length to also consume \(\backslash\)r\(\backslash\)n */}
+00084     len += 2;
+00085     *target = (\textcolor{keywordtype}{char}*)zmalloc(len);
+00086     \textcolor{keywordflow}{if} (!readBytes(fp,*target,len)) \{
+00087         \textcolor{keywordflow}{return} 0;
+00088     \}
+00089     \textcolor{keywordflow}{if} (!consumeNewline(*target+len-2)) \{
+00090         \textcolor{keywordflow}{return} 0;
+00091     \}
+00092     (*target)[len-2] = \textcolor{stringliteral}{'\(\backslash\)0'};
+00093     \textcolor{keywordflow}{return} 1;
+00094 \}
+00095 
+00096 \textcolor{keywordtype}{int} readArgc(FILE *fp, \textcolor{keywordtype}{long} *target) \{
+00097     \textcolor{keywordflow}{return} readLong(fp,\textcolor{stringliteral}{'*'},target);
+00098 \}
+00099 
+00100 off\_t process(FILE *fp) \{
+00101     \textcolor{keywordtype}{long} argc;
+00102     off\_t pos = 0;
+00103     \textcolor{keywordtype}{int} i, multi = 0;
+00104     \textcolor{keywordtype}{char} *str;
+00105 
+00106     \textcolor{keywordflow}{while}(1) \{
+00107         \textcolor{keywordflow}{if} (!multi) pos = ftello(fp);
+00108         \textcolor{keywordflow}{if} (!readArgc(fp, &argc)) \textcolor{keywordflow}{break};
+00109 
+00110         \textcolor{keywordflow}{for} (i = 0; i < argc; i++) \{
+00111             \textcolor{keywordflow}{if} (!readString(fp,&str)) \textcolor{keywordflow}{break};
+00112             \textcolor{keywordflow}{if} (i == 0) \{
+00113                 \textcolor{keywordflow}{if} (strcasecmp(str, \textcolor{stringliteral}{"multi"}) == 0) \{
+00114                     \textcolor{keywordflow}{if} (multi++) \{
+00115                         \hyperlink{redis-check-aof_8c_a02ce8a968600d004ba60858425c46307}{ERROR}(\textcolor{stringliteral}{"Unexpected MULTI"});
+00116                         \textcolor{keywordflow}{break};
+00117                     \}
+00118                 \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (strcasecmp(str, \textcolor{stringliteral}{"exec"}) == 0) \{
+00119                     \textcolor{keywordflow}{if} (--multi) \{
+00120                         \hyperlink{redis-check-aof_8c_a02ce8a968600d004ba60858425c46307}{ERROR}(\textcolor{stringliteral}{"Unexpected EXEC"});
+00121                         \textcolor{keywordflow}{break};
+00122                     \}
+00123                 \}
+00124             \}
+00125             zfree(str);
+00126         \}
+00127 
+00128         \textcolor{comment}{/* Stop if the loop did not finish */}
+00129         \textcolor{keywordflow}{if} (i < argc) \{
+00130             \textcolor{keywordflow}{if} (str) zfree(str);
+00131             \textcolor{keywordflow}{break};
+00132         \}
+00133     \}
+00134 
+00135     \textcolor{keywordflow}{if} (feof(fp) && multi && strlen(error) == 0) \{
+00136         \hyperlink{redis-check-aof_8c_a02ce8a968600d004ba60858425c46307}{ERROR}(\textcolor{stringliteral}{"Reached EOF before reading EXEC for MULTI"});
+00137     \}
+00138     \textcolor{keywordflow}{if} (strlen(error) > 0) \{
+00139         printf(\textcolor{stringliteral}{"%s\(\backslash\)n"}, error);
+00140     \}
+00141     \textcolor{keywordflow}{return} pos;
+00142 \}
+00143 
+00144 \textcolor{keywordtype}{int} redis\_check\_aof\_main(\textcolor{keywordtype}{int} argc, \textcolor{keywordtype}{char} **argv) \{
+00145     \textcolor{keywordtype}{char} *filename;
+00146     \textcolor{keywordtype}{int} fix = 0;
+00147 
+00148     \textcolor{keywordflow}{if} (argc < 2) \{
+00149         printf(\textcolor{stringliteral}{"Usage: %s [--fix] <file.aof>\(\backslash\)n"}, argv[0]);
+00150         exit(1);
+00151     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (argc == 2) \{
+00152         filename = argv[1];
+00153     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (argc == 3) \{
+00154         \textcolor{keywordflow}{if} (strcmp(argv[1],\textcolor{stringliteral}{"--fix"}) != 0) \{
+00155             printf(\textcolor{stringliteral}{"Invalid argument: %s\(\backslash\)n"}, argv[1]);
+00156             exit(1);
+00157         \}
+00158         filename = argv[2];
+00159         fix = 1;
+00160     \} \textcolor{keywordflow}{else} \{
+00161         printf(\textcolor{stringliteral}{"Invalid arguments\(\backslash\)n"});
+00162         exit(1);
+00163     \}
+00164 
+00165     FILE *fp = fopen(filename,\textcolor{stringliteral}{"r+"});
+00166     \textcolor{keywordflow}{if} (fp == NULL) \{
+00167         printf(\textcolor{stringliteral}{"Cannot open file: %s\(\backslash\)n"}, filename);
+00168         exit(1);
+00169     \}
+00170 
+00171     \textcolor{keyword}{struct} \hyperlink{config_8h_ae18037d20ab1bc7c716ea0bcb506f7af}{redis\_stat} sb;
+00172     \textcolor{keywordflow}{if} (\hyperlink{config_8h_a7fb7329d05a6b4d1b1e7a3fac44c0668}{redis\_fstat}(fileno(fp),&sb) == -1) \{
+00173         printf(\textcolor{stringliteral}{"Cannot stat file: %s\(\backslash\)n"}, filename);
+00174         exit(1);
+00175     \}
+00176 
+00177     off\_t size = sb.st\_size;
+00178     \textcolor{keywordflow}{if} (size == 0) \{
+00179         printf(\textcolor{stringliteral}{"Empty file: %s\(\backslash\)n"}, filename);
+00180         exit(1);
+00181     \}
+00182 
+00183     \textcolor{comment}{/* This AOF file may have an RDB preamble. Check this to start, and if this}
+00184 \textcolor{comment}{     * is the case, start processing the RDB part. */}
+00185     \textcolor{keywordflow}{if} (size >= 8) \{    \textcolor{comment}{/* There must be at least room for the RDB header. */}
+00186         \textcolor{keywordtype}{char} sig[5];
+00187         \textcolor{keywordtype}{int} has\_preamble = fread(sig,\textcolor{keyword}{sizeof}(sig),1,fp) == 1 &&
+00188                             memcmp(sig,\textcolor{stringliteral}{"REDIS"},\textcolor{keyword}{sizeof}(sig)) == 0;
+00189         rewind(fp);
+00190         \textcolor{keywordflow}{if} (has\_preamble) \{
+00191             printf(\textcolor{stringliteral}{"The AOF appears to start with an RDB preamble.\(\backslash\)n"}
+00192                    \textcolor{stringliteral}{"Checking the RDB preamble to start:\(\backslash\)n"});
+00193             \textcolor{keywordflow}{if} (redis\_check\_rdb\_main(argc,argv,fp) == \hyperlink{server_8h_af98ac28d5f4d23d7ed5985188e6fb7d1}{C\_ERR}) \{
+00194                 printf(\textcolor{stringliteral}{"RDB preamble of AOF file is not sane, aborting.\(\backslash\)n"});
+00195                 exit(1);
+00196             \} \textcolor{keywordflow}{else} \{
+00197                 printf(\textcolor{stringliteral}{"RDB preamble is OK, proceeding with AOF tail...\(\backslash\)n"});
+00198             \}
+00199         \}
+00200     \}
+00201 
+00202     off\_t pos = process(fp);
+00203     off\_t diff = size-pos;
+00204     printf(\textcolor{stringliteral}{"AOF analyzed: size=%lld, ok\_up\_to=%lld, diff=%lld\(\backslash\)n"},
+00205         (\textcolor{keywordtype}{long} \textcolor{keywordtype}{long}) size, (\textcolor{keywordtype}{long} \textcolor{keywordtype}{long}) pos, (\textcolor{keywordtype}{long} \textcolor{keywordtype}{long}) diff);
+00206     \textcolor{keywordflow}{if} (diff > 0) \{
+00207         \textcolor{keywordflow}{if} (fix) \{
+00208             \textcolor{keywordtype}{char} buf[2];
+00209             printf(\textcolor{stringliteral}{"This will shrink the AOF from %lld bytes, with %lld bytes, to %lld bytes\(\backslash\)n"},(\textcolor{keywordtype}{long} \textcolor{keywordtype}{
+      long})size,(\textcolor{keywordtype}{long} \textcolor{keywordtype}{long})diff,(\textcolor{keywordtype}{long} \textcolor{keywordtype}{long})pos);
+00210             printf(\textcolor{stringliteral}{"Continue? [y/N]: "});
+00211             \textcolor{keywordflow}{if} (fgets(buf,\textcolor{keyword}{sizeof}(buf),stdin) == NULL ||
+00212                 strncasecmp(buf,\textcolor{stringliteral}{"y"},1) != 0) \{
+00213                     printf(\textcolor{stringliteral}{"Aborting...\(\backslash\)n"});
+00214                     exit(1);
+00215             \}
+00216             \textcolor{keywordflow}{if} (ftruncate(fileno(fp), pos) == -1) \{
+00217                 printf(\textcolor{stringliteral}{"Failed to truncate AOF\(\backslash\)n"});
+00218                 exit(1);
+00219             \} \textcolor{keywordflow}{else} \{
+00220                 printf(\textcolor{stringliteral}{"Successfully truncated AOF\(\backslash\)n"});
+00221             \}
+00222         \} \textcolor{keywordflow}{else} \{
+00223             printf(\textcolor{stringliteral}{"AOF is not valid. "}
+00224                    \textcolor{stringliteral}{"Use the --fix option to try fixing it.\(\backslash\)n"});
+00225             exit(1);
+00226         \}
+00227     \} \textcolor{keywordflow}{else} \{
+00228         printf(\textcolor{stringliteral}{"AOF is valid\(\backslash\)n"});
+00229     \}
+00230 
+00231     fclose(fp);
+00232     exit(0);
+00233 \}
+\end{DoxyCode}

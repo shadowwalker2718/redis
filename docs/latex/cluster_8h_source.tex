@@ -1,0 +1,277 @@
+\hypertarget{cluster_8h_source}{}\section{cluster.\+h}
+\label{cluster_8h_source}\index{src/cluster.\+h@{src/cluster.\+h}}
+
+\begin{DoxyCode}
+00001 \textcolor{preprocessor}{#}\textcolor{preprocessor}{ifndef} \textcolor{preprocessor}{\_\_CLUSTER\_H}
+00002 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{\_\_CLUSTER\_H}
+00003 
+00004 \textcolor{comment}{/*-----------------------------------------------------------------------------}
+00005 \textcolor{comment}{ * Redis cluster data structures, defines, exported API.}
+00006 \textcolor{comment}{ *----------------------------------------------------------------------------*/}
+00007 
+00008 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{CLUSTER\_SLOTS} 16384
+00009 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{CLUSTER\_OK} 0          \textcolor{comment}{/* Everything looks ok */}
+00010 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{CLUSTER\_FAIL} 1        \textcolor{comment}{/* The cluster can't work */}
+00011 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{CLUSTER\_NAMELEN} 40    \textcolor{comment}{/* sha1 hex length */}
+00012 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{CLUSTER\_PORT\_INCR} 10000 \textcolor{comment}{/* Cluster port = baseport + PORT\_INCR */}
+00013 
+00014 \textcolor{comment}{/* The following defines are amount of time, sometimes expressed as}
+00015 \textcolor{comment}{ * multiplicators of the node timeout value (when ending with MULT). */}
+00016 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{CLUSTER\_DEFAULT\_NODE\_TIMEOUT} 15000
+00017 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{CLUSTER\_DEFAULT\_SLAVE\_VALIDITY} 10 \textcolor{comment}{/* Slave max data age factor. */}
+00018 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{CLUSTER\_DEFAULT\_REQUIRE\_FULL\_COVERAGE} 1
+00019 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{CLUSTER\_FAIL\_REPORT\_VALIDITY\_MULT} 2 \textcolor{comment}{/* Fail report validity. */}
+00020 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{CLUSTER\_FAIL\_UNDO\_TIME\_MULT} 2 \textcolor{comment}{/* Undo fail if master is back. */}
+00021 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{CLUSTER\_FAIL\_UNDO\_TIME\_ADD} 10 \textcolor{comment}{/* Some additional time. */}
+00022 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{CLUSTER\_FAILOVER\_DELAY} 5 \textcolor{comment}{/* Seconds */}
+00023 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{CLUSTER\_DEFAULT\_MIGRATION\_BARRIER} 1
+00024 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{CLUSTER\_MF\_TIMEOUT} 5000 \textcolor{comment}{/* Milliseconds to do a manual failover. */}
+00025 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{CLUSTER\_MF\_PAUSE\_MULT} 2 \textcolor{comment}{/* Master pause manual failover mult. */}
+00026 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{CLUSTER\_SLAVE\_MIGRATION\_DELAY} 5000 \textcolor{comment}{/* Delay for slave migration. */}
+00027 
+00028 \textcolor{comment}{/* Redirection errors returned by getNodeByQuery(). */}
+00029 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{CLUSTER\_REDIR\_NONE} 0          \textcolor{comment}{/* Node can serve the request. */}
+00030 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{CLUSTER\_REDIR\_CROSS\_SLOT} 1    \textcolor{comment}{/* -CROSSSLOT request. */}
+00031 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{CLUSTER\_REDIR\_UNSTABLE} 2      \textcolor{comment}{/* -TRYAGAIN redirection required */}
+00032 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{CLUSTER\_REDIR\_ASK} 3           \textcolor{comment}{/* -ASK redirection required. */}
+00033 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{CLUSTER\_REDIR\_MOVED} 4         \textcolor{comment}{/* -MOVED redirection required. */}
+00034 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{CLUSTER\_REDIR\_DOWN\_STATE} 5    \textcolor{comment}{/* -CLUSTERDOWN, global state. */}
+00035 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{CLUSTER\_REDIR\_DOWN\_UNBOUND} 6  \textcolor{comment}{/* -CLUSTERDOWN, unbound slot. */}
+00036 
+00037 \textcolor{keyword}{struct} \hyperlink{structclusterNode}{clusterNode};
+00038 
+00039 \textcolor{comment}{/* clusterLink encapsulates everything needed to talk with a remote node. */}
+\Hypertarget{cluster_8h_source_l00040}\hyperlink{structclusterLink}{00040} \textcolor{keyword}{typedef} \textcolor{keyword}{struct} \hyperlink{structclusterLink}{clusterLink} \{
+00041     mstime\_t ctime;             \textcolor{comment}{/* Link creation time */}
+00042     \textcolor{keywordtype}{int} fd;                     \textcolor{comment}{/* TCP socket file descriptor */}
+00043     sds sndbuf;                 \textcolor{comment}{/* Packet send buffer */}
+00044     sds rcvbuf;                 \textcolor{comment}{/* Packet reception buffer */}
+00045     \textcolor{keyword}{struct} \hyperlink{structclusterNode}{clusterNode} *node;   \textcolor{comment}{/* Node related to this link if any, or NULL */}
+00046 \} clusterLink;
+00047 
+00048 \textcolor{comment}{/* Cluster node flags and macros. */}
+00049 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{CLUSTER\_NODE\_MASTER} 1     \textcolor{comment}{/* The node is a master */}
+00050 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{CLUSTER\_NODE\_SLAVE} 2      \textcolor{comment}{/* The node is a slave */}
+00051 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{CLUSTER\_NODE\_PFAIL} 4      \textcolor{comment}{/* Failure? Need acknowledge */}
+00052 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{CLUSTER\_NODE\_FAIL} 8       \textcolor{comment}{/* The node is believed to be malfunctioning */}
+00053 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{CLUSTER\_NODE\_MYSELF} 16    \textcolor{comment}{/* This node is myself */}
+00054 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{CLUSTER\_NODE\_HANDSHAKE} 32 \textcolor{comment}{/* We have still to exchange the first ping */}
+00055 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{CLUSTER\_NODE\_NOADDR}   64  \textcolor{comment}{/* We don't know the address of this node */}
+00056 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{CLUSTER\_NODE\_MEET} 128     \textcolor{comment}{/* Send a MEET message to this node */}
+00057 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{CLUSTER\_NODE\_MIGRATE\_TO} 256 \textcolor{comment}{/* Master elegible for replica migration. */}
+00058 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{CLUSTER\_NODE\_NULL\_NAME} \textcolor{stringliteral}{
+      "\(\backslash\)000\(\backslash\)000\(\backslash\)000\(\backslash\)000\(\backslash\)000\(\backslash\)000\(\backslash\)000\(\backslash\)000\(\backslash\)000\(\backslash\)000\(\backslash\)000\(\backslash\)000\(\backslash\)000\(\backslash\)000\(\backslash\)000\(\backslash\)000\(\backslash\)000\(\backslash\)000\(\backslash\)000\(\backslash\)000\(\backslash\)000\(\backslash\)000\(\backslash\)000\(\backslash\)000\(\backslash\)000\(\backslash\)000\(\backslash\)000\(\backslash\)000\(\backslash\)000\(\backslash\)000\(\backslash\)000\(\backslash\)000\(\backslash\)000\(\backslash\)000\(\backslash\)000\(\backslash\)000\(\backslash\)000\(\backslash\)000\(\backslash\)000\(\backslash\)000"}
+00059 
+00060 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{nodeIsMaster}\textcolor{preprocessor}{(}\textcolor{preprocessor}{n}\textcolor{preprocessor}{)} \textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{n}\textcolor{preprocessor}{)}\textcolor{preprocessor}{->}\textcolor{preprocessor}{flags} \textcolor{preprocessor}{&} \hyperlink{cluster_8h_a5dcea846e31b55b73244aa2e496a31bf}{CLUSTER\_NODE\_MASTER}\textcolor{preprocessor}{)}
+00061 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{nodeIsSlave}\textcolor{preprocessor}{(}\textcolor{preprocessor}{n}\textcolor{preprocessor}{)} \textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{n}\textcolor{preprocessor}{)}\textcolor{preprocessor}{->}\textcolor{preprocessor}{flags} \textcolor{preprocessor}{&} \hyperlink{cluster_8h_a34b7bfd1f810397be68c3b5d13d4d134}{CLUSTER\_NODE\_SLAVE}\textcolor{preprocessor}{)}
+00062 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{nodeInHandshake}\textcolor{preprocessor}{(}\textcolor{preprocessor}{n}\textcolor{preprocessor}{)} \textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{n}\textcolor{preprocessor}{)}\textcolor{preprocessor}{->}\textcolor{preprocessor}{flags} \textcolor{preprocessor}{&} \hyperlink{cluster_8h_a60571342a067f1e5772a04b36feff6a6}{CLUSTER\_NODE\_HANDSHAKE}\textcolor{preprocessor}{)}
+00063 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{nodeHasAddr}\textcolor{preprocessor}{(}\textcolor{preprocessor}{n}\textcolor{preprocessor}{)} \textcolor{preprocessor}{(}\textcolor{preprocessor}{!}\textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{n}\textcolor{preprocessor}{)}\textcolor{preprocessor}{->}\textcolor{preprocessor}{flags} \textcolor{preprocessor}{&} \hyperlink{cluster_8h_a2bbed8bf0615871a01ca8b7f691b56d8}{CLUSTER\_NODE\_NOADDR}\textcolor{preprocessor}{)}\textcolor{preprocessor}{)}
+00064 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{nodeWithoutAddr}\textcolor{preprocessor}{(}\textcolor{preprocessor}{n}\textcolor{preprocessor}{)} \textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{n}\textcolor{preprocessor}{)}\textcolor{preprocessor}{->}\textcolor{preprocessor}{flags} \textcolor{preprocessor}{&} \hyperlink{cluster_8h_a2bbed8bf0615871a01ca8b7f691b56d8}{CLUSTER\_NODE\_NOADDR}\textcolor{preprocessor}{)}
+00065 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{nodeTimedOut}\textcolor{preprocessor}{(}\textcolor{preprocessor}{n}\textcolor{preprocessor}{)} \textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{n}\textcolor{preprocessor}{)}\textcolor{preprocessor}{->}\textcolor{preprocessor}{flags} \textcolor{preprocessor}{&} \hyperlink{cluster_8h_a5306c1ae8988b8be0a1a02bd9162dfa1}{CLUSTER\_NODE\_PFAIL}\textcolor{preprocessor}{)}
+00066 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{nodeFailed}\textcolor{preprocessor}{(}\textcolor{preprocessor}{n}\textcolor{preprocessor}{)} \textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{n}\textcolor{preprocessor}{)}\textcolor{preprocessor}{->}\textcolor{preprocessor}{flags} \textcolor{preprocessor}{&} \hyperlink{cluster_8h_ad211e85c7baf8a5a59acd747e4e9005a}{CLUSTER\_NODE\_FAIL}\textcolor{preprocessor}{)}
+00067 
+00068 \textcolor{comment}{/* Reasons why a slave is not able to failover. */}
+00069 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{CLUSTER\_CANT\_FAILOVER\_NONE} 0
+00070 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{CLUSTER\_CANT\_FAILOVER\_DATA\_AGE} 1
+00071 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{CLUSTER\_CANT\_FAILOVER\_WAITING\_DELAY} 2
+00072 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{CLUSTER\_CANT\_FAILOVER\_EXPIRED} 3
+00073 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{CLUSTER\_CANT\_FAILOVER\_WAITING\_VOTES} 4
+00074 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{CLUSTER\_CANT\_FAILOVER\_RELOG\_PERIOD} \textcolor{preprocessor}{(}60\textcolor{preprocessor}{*}5\textcolor{preprocessor}{)} \textcolor{comment}{/* seconds. */}
+00075 
+00076 \textcolor{comment}{/* clusterState todo\_before\_sleep flags. */}
+00077 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{CLUSTER\_TODO\_HANDLE\_FAILOVER} \textcolor{preprocessor}{(}1\textcolor{preprocessor}{<<}0\textcolor{preprocessor}{)}
+00078 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{CLUSTER\_TODO\_UPDATE\_STATE} \textcolor{preprocessor}{(}1\textcolor{preprocessor}{<<}1\textcolor{preprocessor}{)}
+00079 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{CLUSTER\_TODO\_SAVE\_CONFIG} \textcolor{preprocessor}{(}1\textcolor{preprocessor}{<<}2\textcolor{preprocessor}{)}
+00080 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{CLUSTER\_TODO\_FSYNC\_CONFIG} \textcolor{preprocessor}{(}1\textcolor{preprocessor}{<<}3\textcolor{preprocessor}{)}
+00081 
+00082 \textcolor{comment}{/* Message types.}
+00083 \textcolor{comment}{ *}
+00084 \textcolor{comment}{ * Note that the PING, PONG and MEET messages are actually the same exact}
+00085 \textcolor{comment}{ * kind of packet. PONG is the reply to ping, in the exact format as a PING,}
+00086 \textcolor{comment}{ * while MEET is a special PING that forces the receiver to add the sender}
+00087 \textcolor{comment}{ * as a node (if it is not already in the list). */}
+00088 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{CLUSTERMSG\_TYPE\_PING} 0          \textcolor{comment}{/* Ping */}
+00089 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{CLUSTERMSG\_TYPE\_PONG} 1          \textcolor{comment}{/* Pong (reply to Ping) */}
+00090 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{CLUSTERMSG\_TYPE\_MEET} 2          \textcolor{comment}{/* Meet "let's join" message */}
+00091 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{CLUSTERMSG\_TYPE\_FAIL} 3          \textcolor{comment}{/* Mark node xxx as failing */}
+00092 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{CLUSTERMSG\_TYPE\_PUBLISH} 4       \textcolor{comment}{/* Pub/Sub Publish propagation */}
+00093 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{CLUSTERMSG\_TYPE\_FAILOVER\_AUTH\_REQUEST} 5 \textcolor{comment}{/* May I failover? */}
+00094 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{CLUSTERMSG\_TYPE\_FAILOVER\_AUTH\_ACK} 6     \textcolor{comment}{/* Yes, you have my vote */}
+00095 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{CLUSTERMSG\_TYPE\_UPDATE} 7        \textcolor{comment}{/* Another node slots configuration */}
+00096 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{CLUSTERMSG\_TYPE\_MFSTART} 8       \textcolor{comment}{/* Pause clients for manual failover */}
+00097 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{CLUSTERMSG\_TYPE\_COUNT} 9         \textcolor{comment}{/* Total number of message types. */}
+00098 
+00099 \textcolor{comment}{/* This structure represent elements of node->fail\_reports. */}
+\Hypertarget{cluster_8h_source_l00100}\hyperlink{structclusterNodeFailReport}{00100} \textcolor{keyword}{typedef} \textcolor{keyword}{struct} \hyperlink{structclusterNodeFailReport}{clusterNodeFailReport} \{
+00101     \textcolor{keyword}{struct} \hyperlink{structclusterNode}{clusterNode} *node;  \textcolor{comment}{/* Node reporting the failure condition. */}
+00102     mstime\_t time;             \textcolor{comment}{/* Time of the last report from this node. */}
+00103 \} clusterNodeFailReport;
+00104 
+\Hypertarget{cluster_8h_source_l00105}\hyperlink{structclusterNode}{00105} \textcolor{keyword}{typedef} \textcolor{keyword}{struct} \hyperlink{structclusterNode}{clusterNode} \{
+00106     mstime\_t ctime; \textcolor{comment}{/* Node object creation time. */}
+00107     \textcolor{keywordtype}{char} name[\hyperlink{cluster_8h_ace7a882972eff7149675252938643b6e}{CLUSTER\_NAMELEN}]; \textcolor{comment}{/* Node name, hex string, sha1-size */}
+00108     \textcolor{keywordtype}{int} flags;      \textcolor{comment}{/* CLUSTER\_NODE\_... */}
+00109     uint64\_t configEpoch; \textcolor{comment}{/* Last configEpoch observed for this node */}
+00110     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} slots[\hyperlink{cluster_8h_aa3e2cb951eebb16725ecc3f5beefd9fd}{CLUSTER\_SLOTS}/8]; \textcolor{comment}{/* slots handled by this node */}
+00111     \textcolor{keywordtype}{int} numslots;   \textcolor{comment}{/* Number of slots handled by this node */}
+00112     \textcolor{keywordtype}{int} numslaves;  \textcolor{comment}{/* Number of slave nodes, if this is a master */}
+00113     \textcolor{keyword}{struct} \hyperlink{structclusterNode}{clusterNode} **slaves; \textcolor{comment}{/* pointers to slave nodes */}
+00114     \textcolor{keyword}{struct} \hyperlink{structclusterNode}{clusterNode} *slaveof; \textcolor{comment}{/* pointer to the master node. Note that it}
+00115 \textcolor{comment}{                                    may be NULL even if the node is a slave}
+00116 \textcolor{comment}{                                    if we don't have the master node in our}
+00117 \textcolor{comment}{                                    tables. */}
+00118     mstime\_t ping\_sent;      \textcolor{comment}{/* Unix time we sent latest ping */}
+00119     mstime\_t pong\_received;  \textcolor{comment}{/* Unix time we received the pong */}
+00120     mstime\_t fail\_time;      \textcolor{comment}{/* Unix time when FAIL flag was set */}
+00121     mstime\_t voted\_time;     \textcolor{comment}{/* Last time we voted for a slave of this master */}
+00122     mstime\_t repl\_offset\_time;  \textcolor{comment}{/* Unix time we received offset for this node */}
+00123     mstime\_t orphaned\_time;     \textcolor{comment}{/* Starting time of orphaned master condition */}
+00124     \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} repl\_offset;      \textcolor{comment}{/* Last known repl offset for this node. */}
+00125     \textcolor{keywordtype}{char} ip[\hyperlink{server_8h_ad97c5405ed22a94e9fcc10fba577d6c0}{NET\_IP\_STR\_LEN}];  \textcolor{comment}{/* Latest known IP address of this node */}
+00126     \textcolor{keywordtype}{int} port;                   \textcolor{comment}{/* Latest known clients port of this node */}
+00127     \textcolor{keywordtype}{int} cport;                  \textcolor{comment}{/* Latest known cluster port of this node. */}
+00128     clusterLink *link;          \textcolor{comment}{/* TCP/IP link with this node */}
+00129     list *fail\_reports;         \textcolor{comment}{/* List of nodes signaling this as failing */}
+00130 \} clusterNode;
+00131 
+\Hypertarget{cluster_8h_source_l00132}\hyperlink{structclusterState}{00132} \textcolor{keyword}{typedef} \textcolor{keyword}{struct} \hyperlink{structclusterState}{clusterState} \{
+00133     clusterNode *myself;  \textcolor{comment}{/* This node */}
+00134     uint64\_t currentEpoch;
+00135     \textcolor{keywordtype}{int} state;            \textcolor{comment}{/* CLUSTER\_OK, CLUSTER\_FAIL, ... */}
+00136     \textcolor{keywordtype}{int} size;             \textcolor{comment}{/* Num of master nodes with at least one slot */}
+00137     dict *nodes;          \textcolor{comment}{/* Hash table of name -> clusterNode structures */}
+00138     dict *nodes\_black\_list; \textcolor{comment}{/* Nodes we don't re-add for a few seconds. */}
+00139     clusterNode *migrating\_slots\_to[\hyperlink{cluster_8h_aa3e2cb951eebb16725ecc3f5beefd9fd}{CLUSTER\_SLOTS}];
+00140     clusterNode *importing\_slots\_from[\hyperlink{cluster_8h_aa3e2cb951eebb16725ecc3f5beefd9fd}{CLUSTER\_SLOTS}];
+00141     clusterNode *slots[\hyperlink{cluster_8h_aa3e2cb951eebb16725ecc3f5beefd9fd}{CLUSTER\_SLOTS}];
+00142     uint64\_t slots\_keys\_count[\hyperlink{cluster_8h_aa3e2cb951eebb16725ecc3f5beefd9fd}{CLUSTER\_SLOTS}];
+00143     rax *slots\_to\_keys;
+00144     \textcolor{comment}{/* The following fields are used to take the slave state on elections. */}
+00145     mstime\_t failover\_auth\_time; \textcolor{comment}{/* Time of previous or next election. */}
+00146     \textcolor{keywordtype}{int} failover\_auth\_count;    \textcolor{comment}{/* Number of votes received so far. */}
+00147     \textcolor{keywordtype}{int} failover\_auth\_sent;     \textcolor{comment}{/* True if we already asked for votes. */}
+00148     \textcolor{keywordtype}{int} failover\_auth\_rank;     \textcolor{comment}{/* This slave rank for current auth request. */}
+00149     uint64\_t failover\_auth\_epoch; \textcolor{comment}{/* Epoch of the current election. */}
+00150     \textcolor{keywordtype}{int} cant\_failover\_reason;   \textcolor{comment}{/* Why a slave is currently not able to}
+00151 \textcolor{comment}{                                   failover. See the CANT\_FAILOVER\_* macros. */}
+00152     \textcolor{comment}{/* Manual failover state in common. */}
+00153     mstime\_t mf\_end;            \textcolor{comment}{/* Manual failover time limit (ms unixtime).}
+00154 \textcolor{comment}{                                   It is zero if there is no MF in progress. */}
+00155     \textcolor{comment}{/* Manual failover state of master. */}
+00156     clusterNode *mf\_slave;      \textcolor{comment}{/* Slave performing the manual failover. */}
+00157     \textcolor{comment}{/* Manual failover state of slave. */}
+00158     \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} mf\_master\_offset; \textcolor{comment}{/* Master offset the slave needs to start MF}
+00159 \textcolor{comment}{                                   or zero if stil not received. */}
+00160     \textcolor{keywordtype}{int} mf\_can\_start;           \textcolor{comment}{/* If non-zero signal that the manual failover}
+00161 \textcolor{comment}{                                   can start requesting masters vote. */}
+00162     \textcolor{comment}{/* The followign fields are used by masters to take state on elections. */}
+00163     uint64\_t lastVoteEpoch;     \textcolor{comment}{/* Epoch of the last vote granted. */}
+00164     \textcolor{keywordtype}{int} todo\_before\_sleep; \textcolor{comment}{/* Things to do in clusterBeforeSleep(). */}
+00165     \textcolor{comment}{/* Messages received and sent by type. */}
+00166     \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} stats\_bus\_messages\_sent[\hyperlink{cluster_8h_a6222c464c1f2125f42271d2abd63853e}{CLUSTERMSG\_TYPE\_COUNT}];
+00167     \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} stats\_bus\_messages\_received[\hyperlink{cluster_8h_a6222c464c1f2125f42271d2abd63853e}{CLUSTERMSG\_TYPE\_COUNT}];
+00168     \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} stats\_pfail\_nodes;    \textcolor{comment}{/* Number of nodes in PFAIL status,}
+00169 \textcolor{comment}{                                       excluding nodes without address. */}
+00170 \} clusterState;
+00171 
+00172 \textcolor{comment}{/* Redis cluster messages header */}
+00173 
+00174 \textcolor{comment}{/* Initially we don't know our "name", but we'll find it once we connect}
+00175 \textcolor{comment}{ * to the first node, using the getsockname() function. Then we'll use this}
+00176 \textcolor{comment}{ * address for all the next messages. */}
+\Hypertarget{cluster_8h_source_l00177}\hyperlink{structclusterMsgDataGossip}{00177} \textcolor{keyword}{typedef} \textcolor{keyword}{struct} \{
+00178     \textcolor{keywordtype}{char} nodename[\hyperlink{cluster_8h_ace7a882972eff7149675252938643b6e}{CLUSTER\_NAMELEN}];
+00179     uint32\_t ping\_sent;
+00180     uint32\_t pong\_received;
+00181     \textcolor{keywordtype}{char} ip[\hyperlink{server_8h_ad97c5405ed22a94e9fcc10fba577d6c0}{NET\_IP\_STR\_LEN}];  \textcolor{comment}{/* IP address last time it was seen */}
+00182     uint16\_t port;              \textcolor{comment}{/* base port last time it was seen */}
+00183     uint16\_t cport;             \textcolor{comment}{/* cluster port last time it was seen */}
+00184     uint16\_t flags;             \textcolor{comment}{/* node->flags copy */}
+00185     uint32\_t notused1;
+00186 \} clusterMsgDataGossip;
+00187 
+\Hypertarget{cluster_8h_source_l00188}\hyperlink{structclusterMsgDataFail}{00188} \textcolor{keyword}{typedef} \textcolor{keyword}{struct} \{
+00189     \textcolor{keywordtype}{char} nodename[\hyperlink{cluster_8h_ace7a882972eff7149675252938643b6e}{CLUSTER\_NAMELEN}];
+00190 \} clusterMsgDataFail;
+00191 
+\Hypertarget{cluster_8h_source_l00192}\hyperlink{structclusterMsgDataPublish}{00192} \textcolor{keyword}{typedef} \textcolor{keyword}{struct} \{
+00193     uint32\_t channel\_len;
+00194     uint32\_t message\_len;
+00195     \textcolor{comment}{/* We can't reclare bulk\_data as bulk\_data[] since this structure is}
+00196 \textcolor{comment}{     * nested. The 8 bytes are removed from the count during the message}
+00197 \textcolor{comment}{     * length computation. */}
+00198     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} bulk\_data[8];
+00199 \} clusterMsgDataPublish;
+00200 
+\Hypertarget{cluster_8h_source_l00201}\hyperlink{structclusterMsgDataUpdate}{00201} \textcolor{keyword}{typedef} \textcolor{keyword}{struct} \{
+00202     uint64\_t configEpoch; \textcolor{comment}{/* Config epoch of the specified instance. */}
+00203     \textcolor{keywordtype}{char} nodename[\hyperlink{cluster_8h_ace7a882972eff7149675252938643b6e}{CLUSTER\_NAMELEN}]; \textcolor{comment}{/* Name of the slots owner. */}
+00204     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} slots[\hyperlink{cluster_8h_aa3e2cb951eebb16725ecc3f5beefd9fd}{CLUSTER\_SLOTS}/8]; \textcolor{comment}{/* Slots bitmap. */}
+00205 \} clusterMsgDataUpdate;
+00206 
+\Hypertarget{cluster_8h_source_l00207}\hyperlink{unionclusterMsgData}{00207} \textcolor{keyword}{union} \hyperlink{unionclusterMsgData}{clusterMsgData} \{
+00208     \textcolor{comment}{/* PING, MEET and PONG */}
+\Hypertarget{cluster_8h_source_l00209}\hyperlink{structclusterMsgData_8ping}{00209}     \textcolor{keyword}{struct} \{
+00210         \textcolor{comment}{/* Array of N clusterMsgDataGossip structures */}
+00211         clusterMsgDataGossip gossip[1];
+00212     \} ping;
+00213 
+00214     \textcolor{comment}{/* FAIL */}
+\Hypertarget{cluster_8h_source_l00215}\hyperlink{structclusterMsgData_8fail}{00215}     \textcolor{keyword}{struct} \{
+00216         clusterMsgDataFail about;
+00217     \} fail;
+00218 
+00219     \textcolor{comment}{/* PUBLISH */}
+\Hypertarget{cluster_8h_source_l00220}\hyperlink{structclusterMsgData_8publish}{00220}     \textcolor{keyword}{struct} \{
+00221         clusterMsgDataPublish msg;
+00222     \} publish;
+00223 
+00224     \textcolor{comment}{/* UPDATE */}
+\Hypertarget{cluster_8h_source_l00225}\hyperlink{structclusterMsgData_8update}{00225}     \textcolor{keyword}{struct} \{
+00226         clusterMsgDataUpdate nodecfg;
+00227     \} update;
+00228 \};
+00229 
+00230 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{CLUSTER\_PROTO\_VER} 1 \textcolor{comment}{/* Cluster bus protocol version. */}
+00231 
+\Hypertarget{cluster_8h_source_l00232}\hyperlink{structclusterMsg}{00232} \textcolor{keyword}{typedef} \textcolor{keyword}{struct} \{
+00233     \textcolor{keywordtype}{char} sig[4];        \textcolor{comment}{/* Siganture "RCmb" (Redis Cluster message bus). */}
+00234     uint32\_t totlen;    \textcolor{comment}{/* Total length of this message */}
+00235     uint16\_t ver;       \textcolor{comment}{/* Protocol version, currently set to 1. */}
+00236     uint16\_t port;      \textcolor{comment}{/* TCP base port number. */}
+00237     uint16\_t type;      \textcolor{comment}{/* Message type */}
+00238     uint16\_t count;     \textcolor{comment}{/* Only used for some kind of messages. */}
+00239     uint64\_t currentEpoch;  \textcolor{comment}{/* The epoch accordingly to the sending node. */}
+00240     uint64\_t configEpoch;   \textcolor{comment}{/* The config epoch if it's a master, or the last}
+00241 \textcolor{comment}{                               epoch advertised by its master if it is a}
+00242 \textcolor{comment}{                               slave. */}
+00243     uint64\_t offset;    \textcolor{comment}{/* Master replication offset if node is a master or}
+00244 \textcolor{comment}{                           processed replication offset if node is a slave. */}
+00245     \textcolor{keywordtype}{char} sender[\hyperlink{cluster_8h_ace7a882972eff7149675252938643b6e}{CLUSTER\_NAMELEN}]; \textcolor{comment}{/* Name of the sender node */}
+00246     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} myslots[\hyperlink{cluster_8h_aa3e2cb951eebb16725ecc3f5beefd9fd}{CLUSTER\_SLOTS}/8];
+00247     \textcolor{keywordtype}{char} slaveof[\hyperlink{cluster_8h_ace7a882972eff7149675252938643b6e}{CLUSTER\_NAMELEN}];
+00248     \textcolor{keywordtype}{char} myip[\hyperlink{server_8h_ad97c5405ed22a94e9fcc10fba577d6c0}{NET\_IP\_STR\_LEN}];    \textcolor{comment}{/* Sender IP, if not all zeroed. */}
+00249     \textcolor{keywordtype}{char} notused1[34];  \textcolor{comment}{/* 34 bytes reserved for future usage. */}
+00250     uint16\_t cport;      \textcolor{comment}{/* Sender TCP cluster bus port */}
+00251     uint16\_t flags;      \textcolor{comment}{/* Sender node flags */}
+00252     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} state; \textcolor{comment}{/* Cluster state from the POV of the sender */}
+00253     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} mflags[3]; \textcolor{comment}{/* Message flags: CLUSTERMSG\_FLAG[012]\_... */}
+00254     \textcolor{keyword}{union} \hyperlink{unionclusterMsgData}{clusterMsgData} data;
+00255 \} clusterMsg;
+00256 
+00257 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{CLUSTERMSG\_MIN\_LEN} \textcolor{preprocessor}{(}\textcolor{keyword}{sizeof}\textcolor{preprocessor}{(}\textcolor{preprocessor}{clusterMsg}\textcolor{preprocessor}{)}\textcolor{preprocessor}{-}\textcolor{keyword}{sizeof}\textcolor{preprocessor}{(}\textcolor{keyword}{union} \textcolor{preprocessor}{clusterMsgData}\textcolor{preprocessor}{)}\textcolor{preprocessor}{)}
+00258 
+00259 \textcolor{comment}{/* Message flags better specify the packet content or are used to}
+00260 \textcolor{comment}{ * provide some information about the node state. */}
+00261 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{CLUSTERMSG\_FLAG0\_PAUSED} \textcolor{preprocessor}{(}1\textcolor{preprocessor}{<<}0\textcolor{preprocessor}{)} \textcolor{comment}{/* Master paused for manual failover. */}
+00262 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{CLUSTERMSG\_FLAG0\_FORCEACK} \textcolor{preprocessor}{(}1\textcolor{preprocessor}{<<}1\textcolor{preprocessor}{)} \textcolor{comment}{/* Give ACK to AUTH\_REQUEST even if}
+00263 \textcolor{comment}{                                            master is up. */}
+00264 
+00265 \textcolor{comment}{/* ---------------------- API exported outside cluster.c -------------------- */}
+00266 clusterNode *getNodeByQuery(\hyperlink{structclient}{client} *c, \textcolor{keyword}{struct} \hyperlink{structredisCommand}{redisCommand} *cmd, robj **argv, \textcolor{keywordtype}{int} 
+      argc, \textcolor{keywordtype}{int} *hashslot, \textcolor{keywordtype}{int} *ask);
+00267 \textcolor{keywordtype}{int} clusterRedirectBlockedClientIfNeeded(\hyperlink{structclient}{client} *c);
+00268 \textcolor{keywordtype}{void} clusterRedirectClient(\hyperlink{structclient}{client} *c, clusterNode *n, \textcolor{keywordtype}{int} hashslot, \textcolor{keywordtype}{int} error\_code);
+00269 
+00270 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif} \textcolor{comment}{/* \_\_CLUSTER\_H */}
+\end{DoxyCode}

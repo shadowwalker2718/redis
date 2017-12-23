@@ -1,0 +1,367 @@
+\hypertarget{adlist_8c_source}{}\section{adlist.\+c}
+\label{adlist_8c_source}\index{src/adlist.\+c@{src/adlist.\+c}}
+
+\begin{DoxyCode}
+00001 \textcolor{comment}{/* adlist.c - A generic doubly linked list implementation}
+00002 \textcolor{comment}{ *}
+00003 \textcolor{comment}{ * Copyright (c) 2006-2010, Salvatore Sanfilippo <antirez at gmail dot com>}
+00004 \textcolor{comment}{ * All rights reserved.}
+00005 \textcolor{comment}{ *}
+00006 \textcolor{comment}{ * Redistribution and use in source and binary forms, with or without}
+00007 \textcolor{comment}{ * modification, are permitted provided that the following conditions are met:}
+00008 \textcolor{comment}{ *}
+00009 \textcolor{comment}{ *   * Redistributions of source code must retain the above copyright notice,}
+00010 \textcolor{comment}{ *     this list of conditions and the following disclaimer.}
+00011 \textcolor{comment}{ *   * Redistributions in binary form must reproduce the above copyright}
+00012 \textcolor{comment}{ *     notice, this list of conditions and the following disclaimer in the}
+00013 \textcolor{comment}{ *     documentation and/or other materials provided with the distribution.}
+00014 \textcolor{comment}{ *   * Neither the name of Redis nor the names of its contributors may be used}
+00015 \textcolor{comment}{ *     to endorse or promote products derived from this software without}
+00016 \textcolor{comment}{ *     specific prior written permission.}
+00017 \textcolor{comment}{ *}
+00018 \textcolor{comment}{ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"}
+00019 \textcolor{comment}{ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE}
+00020 \textcolor{comment}{ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE}
+00021 \textcolor{comment}{ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE}
+00022 \textcolor{comment}{ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR}
+00023 \textcolor{comment}{ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF}
+00024 \textcolor{comment}{ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS}
+00025 \textcolor{comment}{ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN}
+00026 \textcolor{comment}{ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)}
+00027 \textcolor{comment}{ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE}
+00028 \textcolor{comment}{ * POSSIBILITY OF SUCH DAMAGE.}
+00029 \textcolor{comment}{ */}
+00030 
+00031 
+00032 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{stdlib}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00033 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \hyperlink{adlist_8h}{"adlist.h"}
+00034 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \hyperlink{zmalloc_8h}{"zmalloc.h"}
+00035 
+00036 \textcolor{comment}{/* Create a new list. The created list can be freed with}
+00037 \textcolor{comment}{ * AlFreeList(), but private value of every node need to be freed}
+00038 \textcolor{comment}{ * by the user before to call AlFreeList().}
+00039 \textcolor{comment}{ *}
+00040 \textcolor{comment}{ * On error, NULL is returned. Otherwise the pointer to the new list. */}
+00041 list *listCreate(\textcolor{keywordtype}{void})
+00042 \{
+00043     \textcolor{keyword}{struct} \hyperlink{structlist}{list} *list;
+00044 
+00045     \textcolor{keywordflow}{if} ((list = zmalloc(\textcolor{keyword}{sizeof}(*list))) == NULL)
+00046         \textcolor{keywordflow}{return} NULL;
+00047     list->head = list->tail = NULL;
+00048     list->len = 0;
+00049     list->dup = NULL;
+00050     list->free = NULL;
+00051     list->match = NULL;
+00052     \textcolor{keywordflow}{return} list;
+00053 \}
+00054 
+00055 \textcolor{comment}{/* Remove all the elements from the list without destroying the list itself. */}
+00056 \textcolor{keywordtype}{void} listEmpty(list *list)
+00057 \{
+00058     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} len;
+00059     listNode *current, *next;
+00060 
+00061     current = list->head;
+00062     len = list->len;
+00063     \textcolor{keywordflow}{while}(len--) \{
+00064         next = current->next;
+00065         \textcolor{keywordflow}{if} (list->free) list->free(current->value);
+00066         zfree(current);
+00067         current = next;
+00068     \}
+00069     list->head = list->tail = NULL;
+00070     list->len = 0;
+00071 \}
+00072 
+00073 \textcolor{comment}{/* Free the whole list.}
+00074 \textcolor{comment}{ *}
+00075 \textcolor{comment}{ * This function can't fail. */}
+00076 \textcolor{keywordtype}{void} listRelease(list *list)
+00077 \{
+00078     listEmpty(list);
+00079     zfree(list);
+00080 \}
+00081 
+00082 \textcolor{comment}{/* Add a new node to the list, to head, containing the specified 'value'}
+00083 \textcolor{comment}{ * pointer as value.}
+00084 \textcolor{comment}{ *}
+00085 \textcolor{comment}{ * On error, NULL is returned and no operation is performed (i.e. the}
+00086 \textcolor{comment}{ * list remains unaltered).}
+00087 \textcolor{comment}{ * On success the 'list' pointer you pass to the function is returned. */}
+00088 list *listAddNodeHead(list *list, \textcolor{keywordtype}{void} *value)
+00089 \{
+00090     listNode *node;
+00091 
+00092     \textcolor{keywordflow}{if} ((node = zmalloc(\textcolor{keyword}{sizeof}(*node))) == NULL)
+00093         \textcolor{keywordflow}{return} NULL;
+00094     node->value = value;
+00095     \textcolor{keywordflow}{if} (list->len == 0) \{
+00096         list->head = list->tail = node;
+00097         node->prev = node->next = NULL;
+00098     \} \textcolor{keywordflow}{else} \{
+00099         node->prev = NULL;
+00100         node->next = list->head;
+00101         list->head->prev = node;
+00102         list->head = node;
+00103     \}
+00104     list->len++;
+00105     \textcolor{keywordflow}{return} list;
+00106 \}
+00107 
+00108 \textcolor{comment}{/* Add a new node to the list, to tail, containing the specified 'value'}
+00109 \textcolor{comment}{ * pointer as value.}
+00110 \textcolor{comment}{ *}
+00111 \textcolor{comment}{ * On error, NULL is returned and no operation is performed (i.e. the}
+00112 \textcolor{comment}{ * list remains unaltered).}
+00113 \textcolor{comment}{ * On success the 'list' pointer you pass to the function is returned. */}
+00114 list *listAddNodeTail(list *list, \textcolor{keywordtype}{void} *value)
+00115 \{
+00116     listNode *node;
+00117 
+00118     \textcolor{keywordflow}{if} ((node = zmalloc(\textcolor{keyword}{sizeof}(*node))) == NULL)
+00119         \textcolor{keywordflow}{return} NULL;
+00120     node->value = value;
+00121     \textcolor{keywordflow}{if} (list->len == 0) \{
+00122         list->head = list->tail = node;
+00123         node->prev = node->next = NULL;
+00124     \} \textcolor{keywordflow}{else} \{
+00125         node->prev = list->tail;
+00126         node->next = NULL;
+00127         list->tail->next = node;
+00128         list->tail = node;
+00129     \}
+00130     list->len++;
+00131     \textcolor{keywordflow}{return} list;
+00132 \}
+00133 
+00134 list *listInsertNode(list *list, listNode *old\_node, \textcolor{keywordtype}{void} *value, \textcolor{keywordtype}{int} after) \{
+00135     listNode *node;
+00136 
+00137     \textcolor{keywordflow}{if} ((node = zmalloc(\textcolor{keyword}{sizeof}(*node))) == NULL)
+00138         \textcolor{keywordflow}{return} NULL;
+00139     node->value = value;
+00140     \textcolor{keywordflow}{if} (after) \{
+00141         node->prev = old\_node;
+00142         node->next = old\_node->next;
+00143         \textcolor{keywordflow}{if} (list->tail == old\_node) \{
+00144             list->tail = node;
+00145         \}
+00146     \} \textcolor{keywordflow}{else} \{
+00147         node->next = old\_node;
+00148         node->prev = old\_node->prev;
+00149         \textcolor{keywordflow}{if} (list->head == old\_node) \{
+00150             list->head = node;
+00151         \}
+00152     \}
+00153     \textcolor{keywordflow}{if} (node->prev != NULL) \{
+00154         node->prev->next = node;
+00155     \}
+00156     \textcolor{keywordflow}{if} (node->next != NULL) \{
+00157         node->next->prev = node;
+00158     \}
+00159     list->len++;
+00160     \textcolor{keywordflow}{return} list;
+00161 \}
+00162 
+00163 \textcolor{comment}{/* Remove the specified node from the specified list.}
+00164 \textcolor{comment}{ * It's up to the caller to free the private value of the node.}
+00165 \textcolor{comment}{ *}
+00166 \textcolor{comment}{ * This function can't fail. */}
+00167 \textcolor{keywordtype}{void} listDelNode(list *list, listNode *node)
+00168 \{
+00169     \textcolor{keywordflow}{if} (node->prev)
+00170         node->prev->next = node->next;
+00171     \textcolor{keywordflow}{else}
+00172         list->head = node->next;
+00173     \textcolor{keywordflow}{if} (node->next)
+00174         node->next->prev = node->prev;
+00175     \textcolor{keywordflow}{else}
+00176         list->tail = node->prev;
+00177     \textcolor{keywordflow}{if} (list->free) list->free(node->value);
+00178     zfree(node);
+00179     list->len--;
+00180 \}
+00181 
+00182 \textcolor{comment}{/* Returns a list iterator 'iter'. After the initialization every}
+00183 \textcolor{comment}{ * call to listNext() will return the next element of the list.}
+00184 \textcolor{comment}{ *}
+00185 \textcolor{comment}{ * This function can't fail. */}
+00186 listIter *listGetIterator(list *list, \textcolor{keywordtype}{int} direction)
+00187 \{
+00188     listIter *iter;
+00189 
+00190     \textcolor{keywordflow}{if} ((iter = zmalloc(\textcolor{keyword}{sizeof}(*iter))) == NULL) \textcolor{keywordflow}{return} NULL;
+00191     \textcolor{keywordflow}{if} (direction == \hyperlink{adlist_8h_a353f032fdd7e66abe9f194fa7c89560b}{AL\_START\_HEAD})
+00192         iter->next = list->head;
+00193     \textcolor{keywordflow}{else}
+00194         iter->next = list->tail;
+00195     iter->direction = direction;
+00196     \textcolor{keywordflow}{return} iter;
+00197 \}
+00198 
+00199 \textcolor{comment}{/* Release the iterator memory */}
+00200 \textcolor{keywordtype}{void} listReleaseIterator(listIter *iter) \{
+00201     zfree(iter);
+00202 \}
+00203 
+00204 \textcolor{comment}{/* Create an iterator in the list private iterator structure */}
+00205 \textcolor{keywordtype}{void} listRewind(list *list, listIter *li) \{
+00206     li->next = list->head;
+00207     li->direction = \hyperlink{adlist_8h_a353f032fdd7e66abe9f194fa7c89560b}{AL\_START\_HEAD};
+00208 \}
+00209 
+00210 \textcolor{keywordtype}{void} listRewindTail(list *list, listIter *li) \{
+00211     li->next = list->tail;
+00212     li->direction = \hyperlink{adlist_8h_a7d37e2046bb8d302b8ca5de4883a1c7f}{AL\_START\_TAIL};
+00213 \}
+00214 
+00215 \textcolor{comment}{/* Return the next element of an iterator.}
+00216 \textcolor{comment}{ * It's valid to remove the currently returned element using}
+00217 \textcolor{comment}{ * listDelNode(), but not to remove other elements.}
+00218 \textcolor{comment}{ *}
+00219 \textcolor{comment}{ * The function returns a pointer to the next element of the list,}
+00220 \textcolor{comment}{ * or NULL if there are no more elements, so the classical usage patter}
+00221 \textcolor{comment}{ * is:}
+00222 \textcolor{comment}{ *}
+00223 \textcolor{comment}{ * iter = listGetIterator(list,<direction>);}
+00224 \textcolor{comment}{ * while ((node = listNext(iter)) != NULL) \{}
+00225 \textcolor{comment}{ *     doSomethingWith(listNodeValue(node));}
+00226 \textcolor{comment}{ * \}}
+00227 \textcolor{comment}{ *}
+00228 \textcolor{comment}{ * */}
+00229 listNode *listNext(listIter *iter)
+00230 \{
+00231     listNode *current = iter->next;
+00232 
+00233     \textcolor{keywordflow}{if} (current != NULL) \{
+00234         \textcolor{keywordflow}{if} (iter->direction == \hyperlink{adlist_8h_a353f032fdd7e66abe9f194fa7c89560b}{AL\_START\_HEAD})
+00235             iter->next = current->next;
+00236         \textcolor{keywordflow}{else}
+00237             iter->next = current->prev;
+00238     \}
+00239     \textcolor{keywordflow}{return} current;
+00240 \}
+00241 
+00242 \textcolor{comment}{/* Duplicate the whole list. On out of memory NULL is returned.}
+00243 \textcolor{comment}{ * On success a copy of the original list is returned.}
+00244 \textcolor{comment}{ *}
+00245 \textcolor{comment}{ * The 'Dup' method set with listSetDupMethod() function is used}
+00246 \textcolor{comment}{ * to copy the node value. Otherwise the same pointer value of}
+00247 \textcolor{comment}{ * the original node is used as value of the copied node.}
+00248 \textcolor{comment}{ *}
+00249 \textcolor{comment}{ * The original list both on success or error is never modified. */}
+00250 list *listDup(list *orig)
+00251 \{
+00252     list *copy;
+00253     listIter iter;
+00254     listNode *node;
+00255 
+00256     \textcolor{keywordflow}{if} ((copy = listCreate()) == NULL)
+00257         \textcolor{keywordflow}{return} NULL;
+00258     copy->dup = orig->dup;
+00259     copy->free = orig->free;
+00260     copy->match = orig->match;
+00261     listRewind(orig, &iter);
+00262     \textcolor{keywordflow}{while}((node = listNext(&iter)) != NULL) \{
+00263         \textcolor{keywordtype}{void} *value;
+00264 
+00265         \textcolor{keywordflow}{if} (copy->dup) \{
+00266             value = copy->dup(node->value);
+00267             \textcolor{keywordflow}{if} (value == NULL) \{
+00268                 listRelease(copy);
+00269                 \textcolor{keywordflow}{return} NULL;
+00270             \}
+00271         \} \textcolor{keywordflow}{else}
+00272             value = node->value;
+00273         \textcolor{keywordflow}{if} (listAddNodeTail(copy, value) == NULL) \{
+00274             listRelease(copy);
+00275             \textcolor{keywordflow}{return} NULL;
+00276         \}
+00277     \}
+00278     \textcolor{keywordflow}{return} copy;
+00279 \}
+00280 
+00281 \textcolor{comment}{/* Search the list for a node matching a given key.}
+00282 \textcolor{comment}{ * The match is performed using the 'match' method}
+00283 \textcolor{comment}{ * set with listSetMatchMethod(). If no 'match' method}
+00284 \textcolor{comment}{ * is set, the 'value' pointer of every node is directly}
+00285 \textcolor{comment}{ * compared with the 'key' pointer.}
+00286 \textcolor{comment}{ *}
+00287 \textcolor{comment}{ * On success the first matching node pointer is returned}
+00288 \textcolor{comment}{ * (search starts from head). If no matching node exists}
+00289 \textcolor{comment}{ * NULL is returned. */}
+00290 listNode *listSearchKey(list *list, \textcolor{keywordtype}{void} *key)
+00291 \{
+00292     listIter iter;
+00293     listNode *node;
+00294 
+00295     listRewind(list, &iter);
+00296     \textcolor{keywordflow}{while}((node = listNext(&iter)) != NULL) \{
+00297         \textcolor{keywordflow}{if} (list->match) \{
+00298             \textcolor{keywordflow}{if} (list->match(node->value, key)) \{
+00299                 \textcolor{keywordflow}{return} node;
+00300             \}
+00301         \} \textcolor{keywordflow}{else} \{
+00302             \textcolor{keywordflow}{if} (key == node->value) \{
+00303                 \textcolor{keywordflow}{return} node;
+00304             \}
+00305         \}
+00306     \}
+00307     \textcolor{keywordflow}{return} NULL;
+00308 \}
+00309 
+00310 \textcolor{comment}{/* Return the element at the specified zero-based index}
+00311 \textcolor{comment}{ * where 0 is the head, 1 is the element next to head}
+00312 \textcolor{comment}{ * and so on. Negative integers are used in order to count}
+00313 \textcolor{comment}{ * from the tail, -1 is the last element, -2 the penultimate}
+00314 \textcolor{comment}{ * and so on. If the index is out of range NULL is returned. */}
+00315 listNode *listIndex(list *list, \textcolor{keywordtype}{long} index) \{
+00316     listNode *n;
+00317 
+00318     \textcolor{keywordflow}{if} (index < 0) \{
+00319         index = (-index)-1;
+00320         n = list->tail;
+00321         \textcolor{keywordflow}{while}(index-- && n) n = n->prev;
+00322     \} \textcolor{keywordflow}{else} \{
+00323         n = list->head;
+00324         \textcolor{keywordflow}{while}(index-- && n) n = n->next;
+00325     \}
+00326     \textcolor{keywordflow}{return} n;
+00327 \}
+00328 
+00329 \textcolor{comment}{/* Rotate the list removing the tail node and inserting it to the head. */}
+00330 \textcolor{keywordtype}{void} listRotate(list *list) \{
+00331     listNode *tail = list->tail;
+00332 
+00333     \textcolor{keywordflow}{if} (\hyperlink{adlist_8h_afde0ab079f934670e82119b43120e94b}{listLength}(list) <= 1) \textcolor{keywordflow}{return};
+00334 
+00335     \textcolor{comment}{/* Detach current tail */}
+00336     list->tail = tail->prev;
+00337     list->tail->next = NULL;
+00338     \textcolor{comment}{/* Move it as head */}
+00339     list->head->prev = tail;
+00340     tail->prev = NULL;
+00341     tail->next = list->head;
+00342     list->head = tail;
+00343 \}
+00344 
+00345 \textcolor{comment}{/* Add all the elements of the list 'o' at the end of the}
+00346 \textcolor{comment}{ * list 'l'. The list 'other' remains empty but otherwise valid. */}
+00347 \textcolor{keywordtype}{void} listJoin(list *l, list *o) \{
+00348     \textcolor{keywordflow}{if} (o->head)
+00349         o->head->prev = l->tail;
+00350 
+00351     \textcolor{keywordflow}{if} (l->tail)
+00352         l->tail->next = o->head;
+00353     \textcolor{keywordflow}{else}
+00354         l->head = o->head;
+00355 
+00356     \textcolor{keywordflow}{if} (o->tail) l->tail = o->tail;
+00357     l->len += o->len;
+00358 
+00359     \textcolor{comment}{/* Setup other as an empty list. */}
+00360     o->head = o->tail = NULL;
+00361     o->len = 0;
+00362 \}
+\end{DoxyCode}

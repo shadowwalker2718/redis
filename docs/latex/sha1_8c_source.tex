@@ -1,0 +1,235 @@
+\hypertarget{sha1_8c_source}{}\section{sha1.\+c}
+\label{sha1_8c_source}\index{src/sha1.\+c@{src/sha1.\+c}}
+
+\begin{DoxyCode}
+00001 
+00002 \textcolor{comment}{/* from valgrind tests */}
+00003 
+00004 \textcolor{comment}{/* ================ sha1.c ================ */}
+00005 \textcolor{comment}{/*}
+00006 \textcolor{comment}{SHA-1 in C}
+00007 \textcolor{comment}{By Steve Reid <steve@edmweb.com>}
+00008 \textcolor{comment}{100% Public Domain}
+00009 \textcolor{comment}{}
+00010 \textcolor{comment}{Test Vectors (from FIPS PUB 180-1)}
+00011 \textcolor{comment}{"abc"}
+00012 \textcolor{comment}{  A9993E36 4706816A BA3E2571 7850C26C 9CD0D89D}
+00013 \textcolor{comment}{"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"}
+00014 \textcolor{comment}{  84983E44 1C3BD26E BAAE4AA1 F95129E5 E54670F1}
+00015 \textcolor{comment}{A million repetitions of "a"}
+00016 \textcolor{comment}{  34AA973C D4C4DAA4 F61EEB2B DBAD2731 6534016F}
+00017 \textcolor{comment}{*/}
+00018 
+00019 \textcolor{comment}{/* #define LITTLE\_ENDIAN * This should be #define'd already, if true. */}
+00020 \textcolor{comment}{/* #define SHA1HANDSOFF * Copies data before messing with it. */}
+00021 
+00022 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{SHA1HANDSOFF}
+00023 
+00024 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{stdio}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00025 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{string}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00026 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{stdint}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00027 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \hyperlink{solarisfixes_8h}{"solarisfixes.h"}
+00028 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \hyperlink{sha1_8h}{"sha1.h"}
+00029 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \hyperlink{config_8h}{"config.h"}
+00030 
+00031 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{rol}\textcolor{preprocessor}{(}\textcolor{preprocessor}{value}\textcolor{preprocessor}{,} \textcolor{preprocessor}{bits}\textcolor{preprocessor}{)} \textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{value}\textcolor{preprocessor}{)} \textcolor{preprocessor}{<<} \textcolor{preprocessor}{(}\textcolor{preprocessor}{bits}\textcolor{preprocessor}{)}\textcolor{preprocessor}{)} \textcolor{preprocessor}{|} \textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{value}\textcolor{preprocessor}{)} \textcolor{preprocessor}{>>} \textcolor{preprocessor}{(}32 \textcolor{preprocessor}{-} \textcolor{preprocessor}{(}\textcolor{preprocessor}{bits}\textcolor{preprocessor}{)}\textcolor{preprocessor}{)}\textcolor{preprocessor}{)}\textcolor{preprocessor}{)}
+00032 
+00033 \textcolor{comment}{/* blk0() and blk() perform the initial expand. */}
+00034 \textcolor{comment}{/* I got the idea of expanding during the round function from SSLeay */}
+00035 \textcolor{preprocessor}{#}\textcolor{preprocessor}{if} BYTE\_ORDER \textcolor{preprocessor}{==} \hyperlink{config_8h_a8782a401fbf55261460863fc2f8df1ce}{LITTLE\_ENDIAN}
+00036 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{blk0}\textcolor{preprocessor}{(}\textcolor{preprocessor}{i}\textcolor{preprocessor}{)} \textcolor{preprocessor}{(}\textcolor{preprocessor}{block}\textcolor{preprocessor}{->}\textcolor{preprocessor}{l}\textcolor{preprocessor}{[}\textcolor{preprocessor}{i}\textcolor{preprocessor}{]} \textcolor{preprocessor}{=} \textcolor{preprocessor}{(}\hyperlink{sha1_8c_af1373930110e4f86cb1f4bc6d44a66ee}{rol}\textcolor{preprocessor}{(}\textcolor{preprocessor}{block}\textcolor{preprocessor}{->}\textcolor{preprocessor}{l}\textcolor{preprocessor}{[}\textcolor{preprocessor}{i}\textcolor{preprocessor}{]}\textcolor{preprocessor}{,}24\textcolor{preprocessor}{)}\textcolor{preprocessor}{&}0xFF00FF00\textcolor{preprocessor}{)}
+00037     \textcolor{preprocessor}{|}\textcolor{preprocessor}{(}\hyperlink{sha1_8c_af1373930110e4f86cb1f4bc6d44a66ee}{rol}\textcolor{preprocessor}{(}\textcolor{preprocessor}{block}\textcolor{preprocessor}{->}\textcolor{preprocessor}{l}\textcolor{preprocessor}{[}\textcolor{preprocessor}{i}\textcolor{preprocessor}{]}\textcolor{preprocessor}{,}8\textcolor{preprocessor}{)}\textcolor{preprocessor}{&}0x00FF00FF\textcolor{preprocessor}{)}\textcolor{preprocessor}{)}
+00038 \textcolor{preprocessor}{#}\textcolor{preprocessor}{elif} \textcolor{preprocessor}{BYTE\_ORDER} \textcolor{preprocessor}{==} \textcolor{preprocessor}{BIG\_ENDIAN}
+00039 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{blk0}\textcolor{preprocessor}{(}\textcolor{preprocessor}{i}\textcolor{preprocessor}{)} \textcolor{preprocessor}{block}\textcolor{preprocessor}{->}\textcolor{preprocessor}{l}\textcolor{preprocessor}{[}\textcolor{preprocessor}{i}\textcolor{preprocessor}{]}
+00040 \textcolor{preprocessor}{#}\textcolor{preprocessor}{else}
+00041 \textcolor{preprocessor}{#}\textcolor{preprocessor}{error} \textcolor{stringliteral}{"Endianness not defined!"}
+00042 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00043 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{blk}\textcolor{preprocessor}{(}\textcolor{preprocessor}{i}\textcolor{preprocessor}{)} \textcolor{preprocessor}{(}\textcolor{preprocessor}{block}\textcolor{preprocessor}{->}\textcolor{preprocessor}{l}\textcolor{preprocessor}{[}\textcolor{preprocessor}{i}\textcolor{preprocessor}{&}15\textcolor{preprocessor}{]} \textcolor{preprocessor}{=} \hyperlink{sha1_8c_af1373930110e4f86cb1f4bc6d44a66ee}{rol}\textcolor{preprocessor}{(}\textcolor{preprocessor}{block}\textcolor{preprocessor}{->}\textcolor{preprocessor}{l}\textcolor{preprocessor}{[}\textcolor{preprocessor}{(}\textcolor{preprocessor}{i}\textcolor{preprocessor}{+}13\textcolor{preprocessor}{)}\textcolor{preprocessor}{&}15\textcolor{preprocessor}{]}\textcolor{preprocessor}{^}\textcolor{preprocessor}{block}\textcolor{preprocessor}{->}\textcolor{preprocessor}{l}\textcolor{preprocessor}{[}\textcolor{preprocessor}{(}\textcolor{preprocessor}{i}\textcolor{preprocessor}{+}8\textcolor{preprocessor}{)}\textcolor{preprocessor}{&}15\textcolor{preprocessor}{]}
+00044     \textcolor{preprocessor}{^}\textcolor{preprocessor}{block}\textcolor{preprocessor}{->}\textcolor{preprocessor}{l}\textcolor{preprocessor}{[}\textcolor{preprocessor}{(}\textcolor{preprocessor}{i}\textcolor{preprocessor}{+}2\textcolor{preprocessor}{)}\textcolor{preprocessor}{&}15\textcolor{preprocessor}{]}\textcolor{preprocessor}{^}\textcolor{preprocessor}{block}\textcolor{preprocessor}{->}\textcolor{preprocessor}{l}\textcolor{preprocessor}{[}\textcolor{preprocessor}{i}\textcolor{preprocessor}{&}15\textcolor{preprocessor}{]}\textcolor{preprocessor}{,}1\textcolor{preprocessor}{)}\textcolor{preprocessor}{)}
+00045 
+00046 \textcolor{comment}{/* (R0+R1), R2, R3, R4 are the different operations used in SHA1 */}
+00047 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{R0}\textcolor{preprocessor}{(}\textcolor{preprocessor}{v}\textcolor{preprocessor}{,}\textcolor{preprocessor}{w}\textcolor{preprocessor}{,}\textcolor{preprocessor}{x}\textcolor{preprocessor}{,}\textcolor{preprocessor}{y}\textcolor{preprocessor}{,}\textcolor{preprocessor}{z}\textcolor{preprocessor}{,}\textcolor{preprocessor}{i}\textcolor{preprocessor}{)} \textcolor{preprocessor}{z}\textcolor{preprocessor}{+=}\textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{w}\textcolor{preprocessor}{&}\textcolor{preprocessor}{(}\textcolor{preprocessor}{x}\textcolor{preprocessor}{^}\textcolor{preprocessor}{y}\textcolor{preprocessor}{)}\textcolor{preprocessor}{)}\textcolor{preprocessor}{^}\textcolor{preprocessor}{y}\textcolor{preprocessor}{)}\textcolor{preprocessor}{+}blk0\textcolor{preprocessor}{(}\textcolor{preprocessor}{i}\textcolor{preprocessor}{)}\textcolor{preprocessor}{+}0x5A827999\textcolor{preprocessor}{+}\hyperlink{sha1_8c_af1373930110e4f86cb1f4bc6d44a66ee}{rol}\textcolor{preprocessor}{(}\textcolor{preprocessor}{v}\textcolor{preprocessor}{,}5\textcolor{preprocessor}{)}\textcolor{preprocessor}{;}\textcolor{preprocessor}{w}\textcolor{preprocessor}{=}
+      \hyperlink{sha1_8c_af1373930110e4f86cb1f4bc6d44a66ee}{rol}\textcolor{preprocessor}{(}\textcolor{preprocessor}{w}\textcolor{preprocessor}{,}30\textcolor{preprocessor}{)}\textcolor{preprocessor}{;}
+00048 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{R1}\textcolor{preprocessor}{(}\textcolor{preprocessor}{v}\textcolor{preprocessor}{,}\textcolor{preprocessor}{w}\textcolor{preprocessor}{,}\textcolor{preprocessor}{x}\textcolor{preprocessor}{,}\textcolor{preprocessor}{y}\textcolor{preprocessor}{,}\textcolor{preprocessor}{z}\textcolor{preprocessor}{,}\textcolor{preprocessor}{i}\textcolor{preprocessor}{)} \textcolor{preprocessor}{z}\textcolor{preprocessor}{+=}\textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{w}\textcolor{preprocessor}{&}\textcolor{preprocessor}{(}\textcolor{preprocessor}{x}\textcolor{preprocessor}{^}\textcolor{preprocessor}{y}\textcolor{preprocessor}{)}\textcolor{preprocessor}{)}\textcolor{preprocessor}{^}\textcolor{preprocessor}{y}\textcolor{preprocessor}{)}\textcolor{preprocessor}{+}\hyperlink{sha1_8c_abd06ff24e9f6f5f0a9c32a1cba4b0f9c}{blk}\textcolor{preprocessor}{(}\textcolor{preprocessor}{i}\textcolor{preprocessor}{)}\textcolor{preprocessor}{+}0x5A827999\textcolor{preprocessor}{+}\hyperlink{sha1_8c_af1373930110e4f86cb1f4bc6d44a66ee}{rol}\textcolor{preprocessor}{(}\textcolor{preprocessor}{v}\textcolor{preprocessor}{,}5\textcolor{preprocessor}{)}\textcolor{preprocessor}{;}\textcolor{preprocessor}{w}\textcolor{preprocessor}{=}
+      \hyperlink{sha1_8c_af1373930110e4f86cb1f4bc6d44a66ee}{rol}\textcolor{preprocessor}{(}\textcolor{preprocessor}{w}\textcolor{preprocessor}{,}30\textcolor{preprocessor}{)}\textcolor{preprocessor}{;}
+00049 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{R2}\textcolor{preprocessor}{(}\textcolor{preprocessor}{v}\textcolor{preprocessor}{,}\textcolor{preprocessor}{w}\textcolor{preprocessor}{,}\textcolor{preprocessor}{x}\textcolor{preprocessor}{,}\textcolor{preprocessor}{y}\textcolor{preprocessor}{,}\textcolor{preprocessor}{z}\textcolor{preprocessor}{,}\textcolor{preprocessor}{i}\textcolor{preprocessor}{)} \textcolor{preprocessor}{z}\textcolor{preprocessor}{+=}\textcolor{preprocessor}{(}\textcolor{preprocessor}{w}\textcolor{preprocessor}{^}\textcolor{preprocessor}{x}\textcolor{preprocessor}{^}\textcolor{preprocessor}{y}\textcolor{preprocessor}{)}\textcolor{preprocessor}{+}\hyperlink{sha1_8c_abd06ff24e9f6f5f0a9c32a1cba4b0f9c}{blk}\textcolor{preprocessor}{(}\textcolor{preprocessor}{i}\textcolor{preprocessor}{)}\textcolor{preprocessor}{+}0x6ED9EBA1\textcolor{preprocessor}{+}\hyperlink{sha1_8c_af1373930110e4f86cb1f4bc6d44a66ee}{rol}\textcolor{preprocessor}{(}\textcolor{preprocessor}{v}\textcolor{preprocessor}{,}5\textcolor{preprocessor}{)}\textcolor{preprocessor}{;}\textcolor{preprocessor}{w}\textcolor{preprocessor}{=}\hyperlink{sha1_8c_af1373930110e4f86cb1f4bc6d44a66ee}{rol}\textcolor{preprocessor}{(}\textcolor{preprocessor}{w}\textcolor{preprocessor}{,}30\textcolor{preprocessor}{)}\textcolor{preprocessor}{;}
+00050 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{R3}\textcolor{preprocessor}{(}\textcolor{preprocessor}{v}\textcolor{preprocessor}{,}\textcolor{preprocessor}{w}\textcolor{preprocessor}{,}\textcolor{preprocessor}{x}\textcolor{preprocessor}{,}\textcolor{preprocessor}{y}\textcolor{preprocessor}{,}\textcolor{preprocessor}{z}\textcolor{preprocessor}{,}\textcolor{preprocessor}{i}\textcolor{preprocessor}{)} \textcolor{preprocessor}{z}\textcolor{preprocessor}{+=}\textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{w}\textcolor{preprocessor}{|}\textcolor{preprocessor}{x}\textcolor{preprocessor}{)}\textcolor{preprocessor}{&}\textcolor{preprocessor}{y}\textcolor{preprocessor}{)}\textcolor{preprocessor}{|}\textcolor{preprocessor}{(}\textcolor{preprocessor}{w}\textcolor{preprocessor}{&}\textcolor{preprocessor}{x}\textcolor{preprocessor}{)}\textcolor{preprocessor}{)}\textcolor{preprocessor}{+}\hyperlink{sha1_8c_abd06ff24e9f6f5f0a9c32a1cba4b0f9c}{blk}\textcolor{preprocessor}{(}\textcolor{preprocessor}{i}\textcolor{preprocessor}{)}\textcolor{preprocessor}{+}0x8F1BBCDC\textcolor{preprocessor}{+}\hyperlink{sha1_8c_af1373930110e4f86cb1f4bc6d44a66ee}{rol}\textcolor{preprocessor}{(}\textcolor{preprocessor}{v}\textcolor{preprocessor}{,}5\textcolor{preprocessor}{)}\textcolor{preprocessor}{;}\textcolor{preprocessor}{w}\textcolor{preprocessor}{=}
+      \hyperlink{sha1_8c_af1373930110e4f86cb1f4bc6d44a66ee}{rol}\textcolor{preprocessor}{(}\textcolor{preprocessor}{w}\textcolor{preprocessor}{,}30\textcolor{preprocessor}{)}\textcolor{preprocessor}{;}
+00051 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{R4}\textcolor{preprocessor}{(}\textcolor{preprocessor}{v}\textcolor{preprocessor}{,}\textcolor{preprocessor}{w}\textcolor{preprocessor}{,}\textcolor{preprocessor}{x}\textcolor{preprocessor}{,}\textcolor{preprocessor}{y}\textcolor{preprocessor}{,}\textcolor{preprocessor}{z}\textcolor{preprocessor}{,}\textcolor{preprocessor}{i}\textcolor{preprocessor}{)} \textcolor{preprocessor}{z}\textcolor{preprocessor}{+=}\textcolor{preprocessor}{(}\textcolor{preprocessor}{w}\textcolor{preprocessor}{^}\textcolor{preprocessor}{x}\textcolor{preprocessor}{^}\textcolor{preprocessor}{y}\textcolor{preprocessor}{)}\textcolor{preprocessor}{+}\hyperlink{sha1_8c_abd06ff24e9f6f5f0a9c32a1cba4b0f9c}{blk}\textcolor{preprocessor}{(}\textcolor{preprocessor}{i}\textcolor{preprocessor}{)}\textcolor{preprocessor}{+}0xCA62C1D6\textcolor{preprocessor}{+}\hyperlink{sha1_8c_af1373930110e4f86cb1f4bc6d44a66ee}{rol}\textcolor{preprocessor}{(}\textcolor{preprocessor}{v}\textcolor{preprocessor}{,}5\textcolor{preprocessor}{)}\textcolor{preprocessor}{;}\textcolor{preprocessor}{w}\textcolor{preprocessor}{=}\hyperlink{sha1_8c_af1373930110e4f86cb1f4bc6d44a66ee}{rol}\textcolor{preprocessor}{(}\textcolor{preprocessor}{w}\textcolor{preprocessor}{,}30\textcolor{preprocessor}{)}\textcolor{preprocessor}{;}
+00052 
+00053 
+00054 \textcolor{comment}{/* Hash a single 512-bit block. This is the core of the algorithm. */}
+00055 
+00056 \textcolor{keywordtype}{void} SHA1Transform(uint32\_t state[5], \textcolor{keyword}{const} \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} buffer[64])
+00057 \{
+00058     uint32\_t a, b, c, d, e;
+00059     \textcolor{keyword}{typedef} \textcolor{keyword}{union} \{
+00060         \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} c[64];
+00061         uint32\_t l[16];
+00062     \} CHAR64LONG16;
+00063 \textcolor{preprocessor}{#}\textcolor{preprocessor}{ifdef} \hyperlink{sha1_8c_a9e2c8862606a4549edef298248089783}{SHA1HANDSOFF}
+00064     CHAR64LONG16 block[1];  \textcolor{comment}{/* use array to appear as a pointer */}
+00065     memcpy(block, buffer, 64);
+00066 \textcolor{preprocessor}{#}\textcolor{preprocessor}{else}
+00067     \textcolor{comment}{/* The following had better never be used because it causes the}
+00068 \textcolor{comment}{     * pointer-to-const buffer to be cast into a pointer to non-const.}
+00069 \textcolor{comment}{     * And the result is written through.  I threw a "const" in, hoping}
+00070 \textcolor{comment}{     * this will cause a diagnostic.}
+00071 \textcolor{comment}{     */}
+00072     CHAR64LONG16* block = (\textcolor{keyword}{const} CHAR64LONG16*)buffer;
+00073 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00074     \textcolor{comment}{/* Copy context->state[] to working vars */}
+00075     a = state[0];
+00076     b = state[1];
+00077     c = state[2];
+00078     d = state[3];
+00079     e = state[4];
+00080     \textcolor{comment}{/* 4 rounds of 20 operations each. Loop unrolled. */}
+00081     \hyperlink{sha1_8c_a8ac24a09e1273548828d3cc9436f9bc7}{R0}(a,b,c,d,e, 0); \hyperlink{sha1_8c_a8ac24a09e1273548828d3cc9436f9bc7}{R0}(e,a,b,c,d, 1); \hyperlink{sha1_8c_a8ac24a09e1273548828d3cc9436f9bc7}{R0}(d,e,a,b,c, 2); \hyperlink{sha1_8c_a8ac24a09e1273548828d3cc9436f9bc7}{R0}(c,d,e,a,b, 3);
+00082     \hyperlink{sha1_8c_a8ac24a09e1273548828d3cc9436f9bc7}{R0}(b,c,d,e,a, 4); \hyperlink{sha1_8c_a8ac24a09e1273548828d3cc9436f9bc7}{R0}(a,b,c,d,e, 5); \hyperlink{sha1_8c_a8ac24a09e1273548828d3cc9436f9bc7}{R0}(e,a,b,c,d, 6); \hyperlink{sha1_8c_a8ac24a09e1273548828d3cc9436f9bc7}{R0}(d,e,a,b,c, 7);
+00083     \hyperlink{sha1_8c_a8ac24a09e1273548828d3cc9436f9bc7}{R0}(c,d,e,a,b, 8); \hyperlink{sha1_8c_a8ac24a09e1273548828d3cc9436f9bc7}{R0}(b,c,d,e,a, 9); \hyperlink{sha1_8c_a8ac24a09e1273548828d3cc9436f9bc7}{R0}(a,b,c,d,e,10); \hyperlink{sha1_8c_a8ac24a09e1273548828d3cc9436f9bc7}{R0}(e,a,b,c,d,11);
+00084     \hyperlink{sha1_8c_a8ac24a09e1273548828d3cc9436f9bc7}{R0}(d,e,a,b,c,12); \hyperlink{sha1_8c_a8ac24a09e1273548828d3cc9436f9bc7}{R0}(c,d,e,a,b,13); \hyperlink{sha1_8c_a8ac24a09e1273548828d3cc9436f9bc7}{R0}(b,c,d,e,a,14); \hyperlink{sha1_8c_a8ac24a09e1273548828d3cc9436f9bc7}{R0}(a,b,c,d,e,15);
+00085     \hyperlink{sha1_8c_a2628f8af7bf67ca052200537279f855a}{R1}(e,a,b,c,d,16); \hyperlink{sha1_8c_a2628f8af7bf67ca052200537279f855a}{R1}(d,e,a,b,c,17); \hyperlink{sha1_8c_a2628f8af7bf67ca052200537279f855a}{R1}(c,d,e,a,b,18); \hyperlink{sha1_8c_a2628f8af7bf67ca052200537279f855a}{R1}(b,c,d,e,a,19);
+00086     \hyperlink{sha1_8c_a774229b80509be0e9e0a1d9819580224}{R2}(a,b,c,d,e,20); \hyperlink{sha1_8c_a774229b80509be0e9e0a1d9819580224}{R2}(e,a,b,c,d,21); \hyperlink{sha1_8c_a774229b80509be0e9e0a1d9819580224}{R2}(d,e,a,b,c,22); \hyperlink{sha1_8c_a774229b80509be0e9e0a1d9819580224}{R2}(c,d,e,a,b,23);
+00087     \hyperlink{sha1_8c_a774229b80509be0e9e0a1d9819580224}{R2}(b,c,d,e,a,24); \hyperlink{sha1_8c_a774229b80509be0e9e0a1d9819580224}{R2}(a,b,c,d,e,25); \hyperlink{sha1_8c_a774229b80509be0e9e0a1d9819580224}{R2}(e,a,b,c,d,26); \hyperlink{sha1_8c_a774229b80509be0e9e0a1d9819580224}{R2}(d,e,a,b,c,27);
+00088     \hyperlink{sha1_8c_a774229b80509be0e9e0a1d9819580224}{R2}(c,d,e,a,b,28); \hyperlink{sha1_8c_a774229b80509be0e9e0a1d9819580224}{R2}(b,c,d,e,a,29); \hyperlink{sha1_8c_a774229b80509be0e9e0a1d9819580224}{R2}(a,b,c,d,e,30); \hyperlink{sha1_8c_a774229b80509be0e9e0a1d9819580224}{R2}(e,a,b,c,d,31);
+00089     \hyperlink{sha1_8c_a774229b80509be0e9e0a1d9819580224}{R2}(d,e,a,b,c,32); \hyperlink{sha1_8c_a774229b80509be0e9e0a1d9819580224}{R2}(c,d,e,a,b,33); \hyperlink{sha1_8c_a774229b80509be0e9e0a1d9819580224}{R2}(b,c,d,e,a,34); \hyperlink{sha1_8c_a774229b80509be0e9e0a1d9819580224}{R2}(a,b,c,d,e,35);
+00090     \hyperlink{sha1_8c_a774229b80509be0e9e0a1d9819580224}{R2}(e,a,b,c,d,36); \hyperlink{sha1_8c_a774229b80509be0e9e0a1d9819580224}{R2}(d,e,a,b,c,37); \hyperlink{sha1_8c_a774229b80509be0e9e0a1d9819580224}{R2}(c,d,e,a,b,38); \hyperlink{sha1_8c_a774229b80509be0e9e0a1d9819580224}{R2}(b,c,d,e,a,39);
+00091     \hyperlink{sha1_8c_ac0b8b342432d17717ff1020d10cf0eea}{R3}(a,b,c,d,e,40); \hyperlink{sha1_8c_ac0b8b342432d17717ff1020d10cf0eea}{R3}(e,a,b,c,d,41); \hyperlink{sha1_8c_ac0b8b342432d17717ff1020d10cf0eea}{R3}(d,e,a,b,c,42); \hyperlink{sha1_8c_ac0b8b342432d17717ff1020d10cf0eea}{R3}(c,d,e,a,b,43);
+00092     \hyperlink{sha1_8c_ac0b8b342432d17717ff1020d10cf0eea}{R3}(b,c,d,e,a,44); \hyperlink{sha1_8c_ac0b8b342432d17717ff1020d10cf0eea}{R3}(a,b,c,d,e,45); \hyperlink{sha1_8c_ac0b8b342432d17717ff1020d10cf0eea}{R3}(e,a,b,c,d,46); \hyperlink{sha1_8c_ac0b8b342432d17717ff1020d10cf0eea}{R3}(d,e,a,b,c,47);
+00093     \hyperlink{sha1_8c_ac0b8b342432d17717ff1020d10cf0eea}{R3}(c,d,e,a,b,48); \hyperlink{sha1_8c_ac0b8b342432d17717ff1020d10cf0eea}{R3}(b,c,d,e,a,49); \hyperlink{sha1_8c_ac0b8b342432d17717ff1020d10cf0eea}{R3}(a,b,c,d,e,50); \hyperlink{sha1_8c_ac0b8b342432d17717ff1020d10cf0eea}{R3}(e,a,b,c,d,51);
+00094     \hyperlink{sha1_8c_ac0b8b342432d17717ff1020d10cf0eea}{R3}(d,e,a,b,c,52); \hyperlink{sha1_8c_ac0b8b342432d17717ff1020d10cf0eea}{R3}(c,d,e,a,b,53); \hyperlink{sha1_8c_ac0b8b342432d17717ff1020d10cf0eea}{R3}(b,c,d,e,a,54); \hyperlink{sha1_8c_ac0b8b342432d17717ff1020d10cf0eea}{R3}(a,b,c,d,e,55);
+00095     \hyperlink{sha1_8c_ac0b8b342432d17717ff1020d10cf0eea}{R3}(e,a,b,c,d,56); \hyperlink{sha1_8c_ac0b8b342432d17717ff1020d10cf0eea}{R3}(d,e,a,b,c,57); \hyperlink{sha1_8c_ac0b8b342432d17717ff1020d10cf0eea}{R3}(c,d,e,a,b,58); \hyperlink{sha1_8c_ac0b8b342432d17717ff1020d10cf0eea}{R3}(b,c,d,e,a,59);
+00096     \hyperlink{sha1_8c_af77ddc8894422d2af2adbd4e71e55d1f}{R4}(a,b,c,d,e,60); \hyperlink{sha1_8c_af77ddc8894422d2af2adbd4e71e55d1f}{R4}(e,a,b,c,d,61); \hyperlink{sha1_8c_af77ddc8894422d2af2adbd4e71e55d1f}{R4}(d,e,a,b,c,62); \hyperlink{sha1_8c_af77ddc8894422d2af2adbd4e71e55d1f}{R4}(c,d,e,a,b,63);
+00097     \hyperlink{sha1_8c_af77ddc8894422d2af2adbd4e71e55d1f}{R4}(b,c,d,e,a,64); \hyperlink{sha1_8c_af77ddc8894422d2af2adbd4e71e55d1f}{R4}(a,b,c,d,e,65); \hyperlink{sha1_8c_af77ddc8894422d2af2adbd4e71e55d1f}{R4}(e,a,b,c,d,66); \hyperlink{sha1_8c_af77ddc8894422d2af2adbd4e71e55d1f}{R4}(d,e,a,b,c,67);
+00098     \hyperlink{sha1_8c_af77ddc8894422d2af2adbd4e71e55d1f}{R4}(c,d,e,a,b,68); \hyperlink{sha1_8c_af77ddc8894422d2af2adbd4e71e55d1f}{R4}(b,c,d,e,a,69); \hyperlink{sha1_8c_af77ddc8894422d2af2adbd4e71e55d1f}{R4}(a,b,c,d,e,70); \hyperlink{sha1_8c_af77ddc8894422d2af2adbd4e71e55d1f}{R4}(e,a,b,c,d,71);
+00099     \hyperlink{sha1_8c_af77ddc8894422d2af2adbd4e71e55d1f}{R4}(d,e,a,b,c,72); \hyperlink{sha1_8c_af77ddc8894422d2af2adbd4e71e55d1f}{R4}(c,d,e,a,b,73); \hyperlink{sha1_8c_af77ddc8894422d2af2adbd4e71e55d1f}{R4}(b,c,d,e,a,74); \hyperlink{sha1_8c_af77ddc8894422d2af2adbd4e71e55d1f}{R4}(a,b,c,d,e,75);
+00100     \hyperlink{sha1_8c_af77ddc8894422d2af2adbd4e71e55d1f}{R4}(e,a,b,c,d,76); \hyperlink{sha1_8c_af77ddc8894422d2af2adbd4e71e55d1f}{R4}(d,e,a,b,c,77); \hyperlink{sha1_8c_af77ddc8894422d2af2adbd4e71e55d1f}{R4}(c,d,e,a,b,78); \hyperlink{sha1_8c_af77ddc8894422d2af2adbd4e71e55d1f}{R4}(b,c,d,e,a,79);
+00101     \textcolor{comment}{/* Add the working vars back into context.state[] */}
+00102     state[0] += a;
+00103     state[1] += b;
+00104     state[2] += c;
+00105     state[3] += d;
+00106     state[4] += e;
+00107     \textcolor{comment}{/* Wipe variables */}
+00108     a = b = c = d = e = 0;
+00109 \textcolor{preprocessor}{#}\textcolor{preprocessor}{ifdef} \hyperlink{sha1_8c_a9e2c8862606a4549edef298248089783}{SHA1HANDSOFF}
+00110     memset(block, \textcolor{stringliteral}{'\(\backslash\)0'}, \textcolor{keyword}{sizeof}(block));
+00111 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00112 \}
+00113 
+00114 
+00115 \textcolor{comment}{/* SHA1Init - Initialize new context */}
+00116 
+00117 \textcolor{keywordtype}{void} SHA1Init(SHA1\_CTX* context)
+00118 \{
+00119     \textcolor{comment}{/* SHA1 initialization constants */}
+00120     context->state[0] = 0x67452301;
+00121     context->state[1] = 0xEFCDAB89;
+00122     context->state[2] = 0x98BADCFE;
+00123     context->state[3] = 0x10325476;
+00124     context->state[4] = 0xC3D2E1F0;
+00125     context->count[0] = context->count[1] = 0;
+00126 \}
+00127 
+00128 
+00129 \textcolor{comment}{/* Run your data through this. */}
+00130 
+00131 \textcolor{keywordtype}{void} SHA1Update(SHA1\_CTX* context, \textcolor{keyword}{const} \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char}* data, uint32\_t len)
+00132 \{
+00133     uint32\_t i, j;
+00134 
+00135     j = context->count[0];
+00136     \textcolor{keywordflow}{if} ((context->count[0] += len << 3) < j)
+00137         context->count[1]++;
+00138     context->count[1] += (len>>29);
+00139     j = (j >> 3) & 63;
+00140     \textcolor{keywordflow}{if} ((j + len) > 63) \{
+00141         memcpy(&context->buffer[j], data, (i = 64-j));
+00142         SHA1Transform(context->state, context->buffer);
+00143         \textcolor{keywordflow}{for} ( ; i + 63 < len; i += 64) \{
+00144             SHA1Transform(context->state, &data[i]);
+00145         \}
+00146         j = 0;
+00147     \}
+00148     \textcolor{keywordflow}{else} i = 0;
+00149     memcpy(&context->buffer[j], &data[i], len - i);
+00150 \}
+00151 
+00152 
+00153 \textcolor{comment}{/* Add padding and return the message digest. */}
+00154 
+00155 \textcolor{keywordtype}{void} SHA1Final(\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} digest[20], SHA1\_CTX* context)
+00156 \{
+00157     \textcolor{keywordtype}{unsigned} i;
+00158     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} finalcount[8];
+00159     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} c;
+00160 
+00161 \textcolor{preprocessor}{#}\textcolor{preprocessor}{if} 0   \textcolor{comment}{/* untested "improvement" by DHR */}
+00162     \textcolor{comment}{/* Convert context->count to a sequence of bytes}
+00163 \textcolor{comment}{     * in finalcount.  Second element first, but}
+00164 \textcolor{comment}{     * big-endian order within element.}
+00165 \textcolor{comment}{     * But we do it all backwards.}
+00166 \textcolor{comment}{     */}
+00167     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *fcp = &finalcount[8];
+00168 
+00169     \textcolor{keywordflow}{for} (i = 0; i < 2; i++)
+00170        \{
+00171         uint32\_t t = context->count[i];
+00172         \textcolor{keywordtype}{int} j;
+00173 
+00174         \textcolor{keywordflow}{for} (j = 0; j < 4; t >>= 8, j++)
+00175               *--fcp = (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char}) t;
+00176     \}
+00177 \textcolor{preprocessor}{#}\textcolor{preprocessor}{else}
+00178     \textcolor{keywordflow}{for} (i = 0; i < 8; i++) \{
+00179         finalcount[i] = (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char})((context->count[(i >= 4 ? 0 : 1)]
+00180          >> ((3-(i & 3)) * 8) ) & 255);  \textcolor{comment}{/* Endian independent */}
+00181     \}
+00182 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00183     c = 0200;
+00184     SHA1Update(context, &c, 1);
+00185     \textcolor{keywordflow}{while} ((context->count[0] & 504) != 448) \{
+00186     c = 0000;
+00187         SHA1Update(context, &c, 1);
+00188     \}
+00189     SHA1Update(context, finalcount, 8);  \textcolor{comment}{/* Should cause a SHA1Transform() */}
+00190     \textcolor{keywordflow}{for} (i = 0; i < 20; i++) \{
+00191         digest[i] = (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char})
+00192          ((context->state[i>>2] >> ((3-(i & 3)) * 8) ) & 255);
+00193     \}
+00194     \textcolor{comment}{/* Wipe variables */}
+00195     memset(context, \textcolor{stringliteral}{'\(\backslash\)0'}, \textcolor{keyword}{sizeof}(*context));
+00196     memset(&finalcount, \textcolor{stringliteral}{'\(\backslash\)0'}, \textcolor{keyword}{sizeof}(finalcount));
+00197 \}
+00198 \textcolor{comment}{/* ================ end of sha1.c ================ */}
+00199 
+00200 \textcolor{preprocessor}{#}\textcolor{preprocessor}{ifdef} \textcolor{preprocessor}{REDIS\_TEST}
+00201 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{BUFSIZE} 4096
+00202 
+00203 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{UNUSED}\textcolor{preprocessor}{(}\textcolor{preprocessor}{x}\textcolor{preprocessor}{)} \textcolor{preprocessor}{(}\textcolor{preprocessor}{void}\textcolor{preprocessor}{)}\textcolor{preprocessor}{(}\textcolor{preprocessor}{x}\textcolor{preprocessor}{)}
+00204 \textcolor{keywordtype}{int} sha1Test(\textcolor{keywordtype}{int} argc, \textcolor{keywordtype}{char} **argv)
+00205 \{
+00206     SHA1\_CTX ctx;
+00207     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} hash[20], buf[BUFSIZE];
+00208     \textcolor{keywordtype}{int} i;
+00209 
+00210     UNUSED(argc);
+00211     UNUSED(argv);
+00212 
+00213     \textcolor{keywordflow}{for}(i=0;i<BUFSIZE;i++)
+00214         buf[i] = i;
+00215 
+00216     SHA1Init(&ctx);
+00217     \textcolor{keywordflow}{for}(i=0;i<1000;i++)
+00218         SHA1Update(&ctx, buf, BUFSIZE);
+00219     SHA1Final(hash, &ctx);
+00220 
+00221     printf(\textcolor{stringliteral}{"SHA1="});
+00222     \textcolor{keywordflow}{for}(i=0;i<20;i++)
+00223         printf(\textcolor{stringliteral}{"%02x"}, hash[i]);
+00224     printf(\textcolor{stringliteral}{"\(\backslash\)n"});
+00225     \textcolor{keywordflow}{return} 0;
+00226 \}
+00227 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+\end{DoxyCode}

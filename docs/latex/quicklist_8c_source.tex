@@ -1,0 +1,2657 @@
+\hypertarget{quicklist_8c_source}{}\section{quicklist.\+c}
+\label{quicklist_8c_source}\index{src/quicklist.\+c@{src/quicklist.\+c}}
+
+\begin{DoxyCode}
+00001 \textcolor{comment}{/* quicklist.c - A doubly linked list of ziplists}
+00002 \textcolor{comment}{ *}
+00003 \textcolor{comment}{ * Copyright (c) 2014, Matt Stancliff <matt@genges.com>}
+00004 \textcolor{comment}{ * All rights reserved.}
+00005 \textcolor{comment}{ *}
+00006 \textcolor{comment}{ * Redistribution and use in source and binary forms, with or without}
+00007 \textcolor{comment}{ * modification, are permitted provided that the following conditions are met:}
+00008 \textcolor{comment}{ *}
+00009 \textcolor{comment}{ *   * Redistributions of source code must start the above copyright notice,}
+00010 \textcolor{comment}{ *     this quicklist of conditions and the following disclaimer.}
+00011 \textcolor{comment}{ *   * Redistributions in binary form must reproduce the above copyright}
+00012 \textcolor{comment}{ *     notice, this quicklist of conditions and the following disclaimer in the}
+00013 \textcolor{comment}{ *     documentation and/or other materials provided with the distribution.}
+00014 \textcolor{comment}{ *   * Neither the name of Redis nor the names of its contributors may be used}
+00015 \textcolor{comment}{ *     to endorse or promote products derived from this software without}
+00016 \textcolor{comment}{ *     specific prior written permission.}
+00017 \textcolor{comment}{ *}
+00018 \textcolor{comment}{ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"}
+00019 \textcolor{comment}{ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE}
+00020 \textcolor{comment}{ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE}
+00021 \textcolor{comment}{ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE}
+00022 \textcolor{comment}{ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR}
+00023 \textcolor{comment}{ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF}
+00024 \textcolor{comment}{ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS}
+00025 \textcolor{comment}{ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN}
+00026 \textcolor{comment}{ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)}
+00027 \textcolor{comment}{ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE}
+00028 \textcolor{comment}{ * POSSIBILITY OF SUCH DAMAGE.}
+00029 \textcolor{comment}{ */}
+00030 
+00031 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{string}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>} \textcolor{comment}{/* for memcpy */}
+00032 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \hyperlink{quicklist_8h}{"quicklist.h"}
+00033 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \hyperlink{zmalloc_8h}{"zmalloc.h"}
+00034 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \hyperlink{ziplist_8h}{"ziplist.h"}
+00035 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \hyperlink{util_8h}{"util.h"}         \textcolor{comment}{/* for ll2string */}
+00036 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \hyperlink{lzf_8h}{"lzf.h"}
+00037 
+00038 \textcolor{preprocessor}{#}\textcolor{preprocessor}{if} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{REDIS\_TEST}\textcolor{preprocessor}{)} \textcolor{preprocessor}{||} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{REDIS\_TEST\_VERBOSE}\textcolor{preprocessor}{)}
+00039 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{stdio}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>} \textcolor{comment}{/* for printf (debug printing), snprintf (genstr) */}
+00040 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00041 
+00042 \textcolor{preprocessor}{#}\textcolor{preprocessor}{ifndef} \textcolor{preprocessor}{REDIS\_STATIC}
+00043 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{REDIS\_STATIC} \textcolor{keyword}{static}
+00044 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00045 
+00046 \textcolor{comment}{/* Optimization levels for size-based filling */}
+00047 \textcolor{keyword}{static} \textcolor{keyword}{const} size\_t optimization\_level[] = \{4096, 8192, 16384, 32768, 65536\};
+00048 
+00049 \textcolor{comment}{/* Maximum size in bytes of any multi-element ziplist.}
+00050 \textcolor{comment}{ * Larger values will live in their own isolated ziplists. */}
+00051 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{SIZE\_SAFETY\_LIMIT} 8192
+00052 
+00053 \textcolor{comment}{/* Minimum ziplist size in bytes for attempting compression. */}
+00054 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{MIN\_COMPRESS\_BYTES} 48
+00055 
+00056 \textcolor{comment}{/* Minimum size reduction in bytes to store compressed quicklistNode data.}
+00057 \textcolor{comment}{ * This also prevents us from storing compression if the compression}
+00058 \textcolor{comment}{ * resulted in a larger size than the original data. */}
+00059 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{MIN\_COMPRESS\_IMPROVE} 8
+00060 
+00061 \textcolor{comment}{/* If not verbose testing, remove all debug printing. */}
+00062 \textcolor{preprocessor}{#}\textcolor{preprocessor}{ifndef} \textcolor{preprocessor}{REDIS\_TEST\_VERBOSE}
+00063 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{D}\textcolor{preprocessor}{(}\textcolor{preprocessor}{...}\textcolor{preprocessor}{)}
+00064 \textcolor{preprocessor}{#}\textcolor{preprocessor}{else}
+00065 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{D}\textcolor{preprocessor}{(}\textcolor{preprocessor}{...}\textcolor{preprocessor}{)}
+00066     \textcolor{preprocessor}{do} \textcolor{preprocessor}{\{}
+00067         \textcolor{preprocessor}{printf}\textcolor{preprocessor}{(}\textcolor{stringliteral}{"%s:%s:%d:\(\backslash\)t"}\textcolor{preprocessor}{,} \textcolor{preprocessor}{\_\_FILE\_\_}\textcolor{preprocessor}{,} \textcolor{preprocessor}{\_\_FUNCTION\_\_}\textcolor{preprocessor}{,} \textcolor{preprocessor}{\_\_LINE\_\_}\textcolor{preprocessor}{)}\textcolor{preprocessor}{;}
+00068         \textcolor{preprocessor}{printf}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_\_VA\_ARGS\_\_}\textcolor{preprocessor}{)}\textcolor{preprocessor}{;}
+00069         \textcolor{preprocessor}{printf}\textcolor{preprocessor}{(}\textcolor{stringliteral}{"\(\backslash\)n"}\textcolor{preprocessor}{)}\textcolor{preprocessor}{;}
+00070     \textcolor{preprocessor}{\}} \textcolor{preprocessor}{while} \textcolor{preprocessor}{(}0\textcolor{preprocessor}{)}\textcolor{preprocessor}{;}
+00071 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00072 
+00073 \textcolor{comment}{/* Simple way to give quicklistEntry structs default values with one call. */}
+00074 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{initEntry}\textcolor{preprocessor}{(}\textcolor{preprocessor}{e}\textcolor{preprocessor}{)}
+00075     \textcolor{keywordflow}{do} \textcolor{preprocessor}{\{}
+00076         \textcolor{preprocessor}{(}\textcolor{preprocessor}{e}\textcolor{preprocessor}{)}\textcolor{preprocessor}{->}\textcolor{preprocessor}{zi} \textcolor{preprocessor}{=} \textcolor{preprocessor}{(}\textcolor{preprocessor}{e}\textcolor{preprocessor}{)}\textcolor{preprocessor}{->}\textcolor{preprocessor}{value} \textcolor{preprocessor}{=} \textcolor{preprocessor}{NULL}\textcolor{preprocessor}{;}
+00077         \textcolor{preprocessor}{(}\textcolor{preprocessor}{e}\textcolor{preprocessor}{)}\textcolor{preprocessor}{->}\textcolor{preprocessor}{longval} \textcolor{preprocessor}{=} \textcolor{preprocessor}{-}123456789\textcolor{preprocessor}{;}
+00078         \textcolor{preprocessor}{(}\textcolor{preprocessor}{e}\textcolor{preprocessor}{)}\textcolor{preprocessor}{->}\textcolor{preprocessor}{quicklist} \textcolor{preprocessor}{=} \textcolor{preprocessor}{NULL}\textcolor{preprocessor}{;}
+00079         \textcolor{preprocessor}{(}\textcolor{preprocessor}{e}\textcolor{preprocessor}{)}\textcolor{preprocessor}{->}\textcolor{preprocessor}{node} \textcolor{preprocessor}{=} \textcolor{preprocessor}{NULL}\textcolor{preprocessor}{;}
+00080         \textcolor{preprocessor}{(}\textcolor{preprocessor}{e}\textcolor{preprocessor}{)}\textcolor{preprocessor}{->}\textcolor{preprocessor}{offset} \textcolor{preprocessor}{=} 123456789\textcolor{preprocessor}{;}
+00081         \textcolor{preprocessor}{(}\textcolor{preprocessor}{e}\textcolor{preprocessor}{)}\textcolor{preprocessor}{->}\textcolor{preprocessor}{sz} \textcolor{preprocessor}{=} 0\textcolor{preprocessor}{;}
+00082     \textcolor{preprocessor}{\}} \textcolor{keywordflow}{while} \textcolor{preprocessor}{(}0\textcolor{preprocessor}{)}
+00083 
+00084 \textcolor{preprocessor}{#}\textcolor{preprocessor}{if} \_\_GNUC\_\_ \textcolor{preprocessor}{>=} 3
+00085 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{likely}\textcolor{preprocessor}{(}\textcolor{preprocessor}{x}\textcolor{preprocessor}{)} \textcolor{preprocessor}{\_\_builtin\_expect}\textcolor{preprocessor}{(}\textcolor{preprocessor}{!}\textcolor{preprocessor}{!}\textcolor{preprocessor}{(}\textcolor{preprocessor}{x}\textcolor{preprocessor}{)}\textcolor{preprocessor}{,} 1\textcolor{preprocessor}{)}
+00086 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{unlikely}\textcolor{preprocessor}{(}\textcolor{preprocessor}{x}\textcolor{preprocessor}{)} \textcolor{preprocessor}{\_\_builtin\_expect}\textcolor{preprocessor}{(}\textcolor{preprocessor}{!}\textcolor{preprocessor}{!}\textcolor{preprocessor}{(}\textcolor{preprocessor}{x}\textcolor{preprocessor}{)}\textcolor{preprocessor}{,} 0\textcolor{preprocessor}{)}
+00087 \textcolor{preprocessor}{#}\textcolor{preprocessor}{else}
+00088 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{likely}\textcolor{preprocessor}{(}\textcolor{preprocessor}{x}\textcolor{preprocessor}{)} \textcolor{preprocessor}{(}\textcolor{preprocessor}{x}\textcolor{preprocessor}{)}
+00089 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{unlikely}\textcolor{preprocessor}{(}\textcolor{preprocessor}{x}\textcolor{preprocessor}{)} \textcolor{preprocessor}{(}\textcolor{preprocessor}{x}\textcolor{preprocessor}{)}
+00090 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00091 
+00092 \textcolor{comment}{/* Create a new quicklist.}
+00093 \textcolor{comment}{ * Free with quicklistRelease(). */}
+00094 quicklist *quicklistCreate(\textcolor{keywordtype}{void}) \{
+00095     \textcolor{keyword}{struct} \hyperlink{structquicklist}{quicklist} *quicklist;
+00096 
+00097     quicklist = zmalloc(\textcolor{keyword}{sizeof}(*quicklist));
+00098     quicklist->head = quicklist->tail = NULL;
+00099     quicklist->len = 0;
+00100     quicklist->count = 0;
+00101     quicklist->compress = 0;
+00102     quicklist->fill = -2;
+00103     \textcolor{keywordflow}{return} quicklist;
+00104 \}
+00105 
+00106 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{COMPRESS\_MAX} \textcolor{preprocessor}{(}1 \textcolor{preprocessor}{<<} 16\textcolor{preprocessor}{)}
+00107 \textcolor{keywordtype}{void} quicklistSetCompressDepth(quicklist *quicklist, \textcolor{keywordtype}{int} compress) \{
+00108     \textcolor{keywordflow}{if} (compress > \hyperlink{quicklist_8c_ad61a8b6ae21c3cf5c4a7d6e81b95b6d7}{COMPRESS\_MAX}) \{
+00109         compress = \hyperlink{quicklist_8c_ad61a8b6ae21c3cf5c4a7d6e81b95b6d7}{COMPRESS\_MAX};
+00110     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (compress < 0) \{
+00111         compress = 0;
+00112     \}
+00113     quicklist->compress = compress;
+00114 \}
+00115 
+00116 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{FILL\_MAX} \textcolor{preprocessor}{(}1 \textcolor{preprocessor}{<<} 15\textcolor{preprocessor}{)}
+00117 \textcolor{keywordtype}{void} quicklistSetFill(quicklist *quicklist, \textcolor{keywordtype}{int} fill) \{
+00118     \textcolor{keywordflow}{if} (fill > \hyperlink{quicklist_8c_a6872709e1a4dbf58b844c3fcd5c2f6ee}{FILL\_MAX}) \{
+00119         fill = \hyperlink{quicklist_8c_a6872709e1a4dbf58b844c3fcd5c2f6ee}{FILL\_MAX};
+00120     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (fill < -5) \{
+00121         fill = -5;
+00122     \}
+00123     quicklist->fill = fill;
+00124 \}
+00125 
+00126 \textcolor{keywordtype}{void} quicklistSetOptions(quicklist *quicklist, \textcolor{keywordtype}{int} fill, \textcolor{keywordtype}{int} depth) \{
+00127     quicklistSetFill(quicklist, fill);
+00128     quicklistSetCompressDepth(quicklist, depth);
+00129 \}
+00130 
+00131 \textcolor{comment}{/* Create a new quicklist with some default parameters. */}
+00132 quicklist *quicklistNew(\textcolor{keywordtype}{int} fill, \textcolor{keywordtype}{int} compress) \{
+00133     quicklist *quicklist = quicklistCreate();
+00134     quicklistSetOptions(quicklist, fill, compress);
+00135     \textcolor{keywordflow}{return} quicklist;
+00136 \}
+00137 
+00138 \hyperlink{quicklist_8c_a9c22c9c899458021930a552a4f94d317}{REDIS\_STATIC} quicklistNode *quicklistCreateNode(\textcolor{keywordtype}{void}) \{
+00139     quicklistNode *node;
+00140     node = zmalloc(\textcolor{keyword}{sizeof}(*node));
+00141     node->zl = NULL;
+00142     node->count = 0;
+00143     node->sz = 0;
+00144     node->next = node->prev = NULL;
+00145     node->encoding = \hyperlink{quicklist_8h_a064c051a8fda9aa87dc3556b9cafc911}{QUICKLIST\_NODE\_ENCODING\_RAW};
+00146     node->container = \hyperlink{quicklist_8h_a4ff5316f03ab8f9afa4228a440f8ddf4}{QUICKLIST\_NODE\_CONTAINER\_ZIPLIST};
+00147     node->recompress = 0;
+00148     \textcolor{keywordflow}{return} node;
+00149 \}
+00150 
+00151 \textcolor{comment}{/* Return cached quicklist count */}
+00152 \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} quicklistCount(\textcolor{keyword}{const} quicklist *ql) \{ \textcolor{keywordflow}{return} ql->count; \}
+00153 
+00154 \textcolor{comment}{/* Free entire quicklist. */}
+00155 \textcolor{keywordtype}{void} quicklistRelease(quicklist *quicklist) \{
+00156     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} len;
+00157     quicklistNode *current, *next;
+00158 
+00159     current = quicklist->head;
+00160     len = quicklist->len;
+00161     \textcolor{keywordflow}{while} (len--) \{
+00162         next = current->next;
+00163 
+00164         zfree(current->zl);
+00165         quicklist->count -= current->count;
+00166 
+00167         zfree(current);
+00168 
+00169         quicklist->len--;
+00170         current = next;
+00171     \}
+00172     zfree(quicklist);
+00173 \}
+00174 
+00175 \textcolor{comment}{/* Compress the ziplist in 'node' and update encoding details.}
+00176 \textcolor{comment}{ * Returns 1 if ziplist compressed successfully.}
+00177 \textcolor{comment}{ * Returns 0 if compression failed or if ziplist too small to compress. */}
+00178 \hyperlink{quicklist_8c_a9c22c9c899458021930a552a4f94d317}{REDIS\_STATIC} \textcolor{keywordtype}{int} \_\_quicklistCompressNode(quicklistNode *node) \{
+00179 \textcolor{preprocessor}{#}\textcolor{preprocessor}{ifdef} \textcolor{preprocessor}{REDIS\_TEST}
+00180     node->attempted\_compress = 1;
+00181 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00182 
+00183     \textcolor{comment}{/* Don't bother compressing small values */}
+00184     \textcolor{keywordflow}{if} (node->sz < \hyperlink{quicklist_8c_a989cf7105ffb35b180ab70754f7afd85}{MIN\_COMPRESS\_BYTES})
+00185         \textcolor{keywordflow}{return} 0;
+00186 
+00187     quicklistLZF *lzf = zmalloc(\textcolor{keyword}{sizeof}(*lzf) + node->sz);
+00188 
+00189     \textcolor{comment}{/* Cancel if compression fails or doesn't compress small enough */}
+00190     \textcolor{keywordflow}{if} (((lzf->sz = lzf\_compress(node->zl, node->sz, lzf->compressed,
+00191                                  node->sz)) == 0) ||
+00192         lzf->sz + \hyperlink{quicklist_8c_a70ca98f16c31d31db1ff733799d31a41}{MIN\_COMPRESS\_IMPROVE} >= node->sz) \{
+00193         \textcolor{comment}{/* lzf\_compress aborts/rejects compression if value not compressable. */}
+00194         zfree(lzf);
+00195         \textcolor{keywordflow}{return} 0;
+00196     \}
+00197     lzf = zrealloc(lzf, \textcolor{keyword}{sizeof}(*lzf) + lzf->sz);
+00198     zfree(node->zl);
+00199     node->zl = (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *)lzf;
+00200     node->encoding = \hyperlink{quicklist_8h_a6ce238912d4049e020b686def25c9566}{QUICKLIST\_NODE\_ENCODING\_LZF};
+00201     node->recompress = 0;
+00202     \textcolor{keywordflow}{return} 1;
+00203 \}
+00204 
+00205 \textcolor{comment}{/* Compress only uncompressed nodes. */}
+00206 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{quicklistCompressNode}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_node}\textcolor{preprocessor}{)}
+00207     \textcolor{keywordflow}{do} \textcolor{preprocessor}{\{}
+00208         \textcolor{keywordflow}{if} \textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_node}\textcolor{preprocessor}{)} \textcolor{preprocessor}{&&} \textcolor{preprocessor}{(}\textcolor{preprocessor}{\_node}\textcolor{preprocessor}{)}\textcolor{preprocessor}{->}\textcolor{preprocessor}{encoding} \textcolor{preprocessor}{==} \hyperlink{quicklist_8h_a064c051a8fda9aa87dc3556b9cafc911}{QUICKLIST\_NODE\_ENCODING\_RAW}\textcolor{preprocessor}{)} \textcolor{preprocessor}{\{}
+00209             \textcolor{preprocessor}{\_\_quicklistCompressNode}\textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_node}\textcolor{preprocessor}{)}\textcolor{preprocessor}{)}\textcolor{preprocessor}{;}
+00210         \textcolor{preprocessor}{\}}
+00211     \textcolor{preprocessor}{\}} \textcolor{keywordflow}{while} \textcolor{preprocessor}{(}0\textcolor{preprocessor}{)}
+00212 
+00213 \textcolor{comment}{/* Uncompress the ziplist in 'node' and update encoding details.}
+00214 \textcolor{comment}{ * Returns 1 on successful decode, 0 on failure to decode. */}
+00215 \hyperlink{quicklist_8c_a9c22c9c899458021930a552a4f94d317}{REDIS\_STATIC} \textcolor{keywordtype}{int} \_\_quicklistDecompressNode(quicklistNode *node) \{
+00216 \textcolor{preprocessor}{#}\textcolor{preprocessor}{ifdef} \textcolor{preprocessor}{REDIS\_TEST}
+00217     node->attempted\_compress = 0;
+00218 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00219 
+00220     \textcolor{keywordtype}{void} *decompressed = zmalloc(node->sz);
+00221     quicklistLZF *lzf = (quicklistLZF *)node->zl;
+00222     \textcolor{keywordflow}{if} (lzf\_decompress(lzf->compressed, lzf->sz, decompressed, node->sz) == 0) \{
+00223         \textcolor{comment}{/* Someone requested decompress, but we can't decompress.  Not good. */}
+00224         zfree(decompressed);
+00225         \textcolor{keywordflow}{return} 0;
+00226     \}
+00227     zfree(lzf);
+00228     node->zl = decompressed;
+00229     node->encoding = \hyperlink{quicklist_8h_a064c051a8fda9aa87dc3556b9cafc911}{QUICKLIST\_NODE\_ENCODING\_RAW};
+00230     \textcolor{keywordflow}{return} 1;
+00231 \}
+00232 
+00233 \textcolor{comment}{/* Decompress only compressed nodes. */}
+00234 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{quicklistDecompressNode}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_node}\textcolor{preprocessor}{)}
+00235     \textcolor{keywordflow}{do} \textcolor{preprocessor}{\{}
+00236         \textcolor{keywordflow}{if} \textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_node}\textcolor{preprocessor}{)} \textcolor{preprocessor}{&&} \textcolor{preprocessor}{(}\textcolor{preprocessor}{\_node}\textcolor{preprocessor}{)}\textcolor{preprocessor}{->}\textcolor{preprocessor}{encoding} \textcolor{preprocessor}{==} \hyperlink{quicklist_8h_a6ce238912d4049e020b686def25c9566}{QUICKLIST\_NODE\_ENCODING\_LZF}\textcolor{preprocessor}{)} \textcolor{preprocessor}{\{}
+00237             \textcolor{preprocessor}{\_\_quicklistDecompressNode}\textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_node}\textcolor{preprocessor}{)}\textcolor{preprocessor}{)}\textcolor{preprocessor}{;}
+00238         \textcolor{preprocessor}{\}}
+00239     \textcolor{preprocessor}{\}} \textcolor{keywordflow}{while} \textcolor{preprocessor}{(}0\textcolor{preprocessor}{)}
+00240 
+00241 \textcolor{comment}{/* Force node to not be immediately re-compresable */}
+00242 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{quicklistDecompressNodeForUse}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_node}\textcolor{preprocessor}{)}
+00243     \textcolor{keywordflow}{do} \textcolor{preprocessor}{\{}
+00244         \textcolor{keywordflow}{if} \textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_node}\textcolor{preprocessor}{)} \textcolor{preprocessor}{&&} \textcolor{preprocessor}{(}\textcolor{preprocessor}{\_node}\textcolor{preprocessor}{)}\textcolor{preprocessor}{->}\textcolor{preprocessor}{encoding} \textcolor{preprocessor}{==} \hyperlink{quicklist_8h_a6ce238912d4049e020b686def25c9566}{QUICKLIST\_NODE\_ENCODING\_LZF}\textcolor{preprocessor}{)} \textcolor{preprocessor}{\{}
+00245             \textcolor{preprocessor}{\_\_quicklistDecompressNode}\textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_node}\textcolor{preprocessor}{)}\textcolor{preprocessor}{)}\textcolor{preprocessor}{;}
+00246             \textcolor{preprocessor}{(}\textcolor{preprocessor}{\_node}\textcolor{preprocessor}{)}\textcolor{preprocessor}{->}\textcolor{preprocessor}{recompress} \textcolor{preprocessor}{=} 1\textcolor{preprocessor}{;}
+00247         \textcolor{preprocessor}{\}}
+00248     \textcolor{preprocessor}{\}} \textcolor{keywordflow}{while} \textcolor{preprocessor}{(}0\textcolor{preprocessor}{)}
+00249 
+00250 \textcolor{comment}{/* Extract the raw LZF data from this quicklistNode.}
+00251 \textcolor{comment}{ * Pointer to LZF data is assigned to '*data'.}
+00252 \textcolor{comment}{ * Return value is the length of compressed LZF data. */}
+00253 size\_t quicklistGetLzf(\textcolor{keyword}{const} quicklistNode *node, \textcolor{keywordtype}{void} **data) \{
+00254     quicklistLZF *lzf = (quicklistLZF *)node->zl;
+00255     *data = lzf->compressed;
+00256     \textcolor{keywordflow}{return} lzf->sz;
+00257 \}
+00258 
+00259 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{quicklistAllowsCompression}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_ql}\textcolor{preprocessor}{)} \textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_ql}\textcolor{preprocessor}{)}\textcolor{preprocessor}{->}\textcolor{preprocessor}{compress} \textcolor{preprocessor}{!=} 0\textcolor{preprocessor}{)}
+00260 
+00261 \textcolor{comment}{/* Force 'quicklist' to meet compression guidelines set by compress depth.}
+00262 \textcolor{comment}{ * The only way to guarantee interior nodes get compressed is to iterate}
+00263 \textcolor{comment}{ * to our "interior" compress depth then compress the next node we find.}
+00264 \textcolor{comment}{ * If compress depth is larger than the entire list, we return immediately. */}
+00265 \hyperlink{quicklist_8c_a9c22c9c899458021930a552a4f94d317}{REDIS\_STATIC} \textcolor{keywordtype}{void} \_\_quicklistCompress(\textcolor{keyword}{const} quicklist *quicklist,
+00266                                       quicklistNode *node) \{
+00267     \textcolor{comment}{/* If length is less than our compress depth (from both sides),}
+00268 \textcolor{comment}{     * we can't compress anything. */}
+00269     \textcolor{keywordflow}{if} (!\hyperlink{quicklist_8c_afb150d2af7dee66dc2d3303ea5663a6a}{quicklistAllowsCompression}(quicklist) ||
+00270         quicklist->len < (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{int})(quicklist->compress * 2))
+00271         \textcolor{keywordflow}{return};
+00272 
+00273 \textcolor{preprocessor}{#}\textcolor{preprocessor}{if} 0
+00274     \textcolor{comment}{/* Optimized cases for small depth counts */}
+00275     \textcolor{keywordflow}{if} (quicklist->compress == 1) \{
+00276         quicklistNode *h = quicklist->head, *t = quicklist->tail;
+00277         quicklistDecompressNode(h);
+00278         quicklistDecompressNode(t);
+00279         \textcolor{keywordflow}{if} (h != node && t != node)
+00280             quicklistCompressNode(node);
+00281         \textcolor{keywordflow}{return};
+00282     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (quicklist->compress == 2) \{
+00283         quicklistNode *h = quicklist->head, *hn = h->next, *hnn = hn->next;
+00284         quicklistNode *t = quicklist->tail, *tp = t->prev, *tpp = tp->prev;
+00285         quicklistDecompressNode(h);
+00286         quicklistDecompressNode(hn);
+00287         quicklistDecompressNode(t);
+00288         quicklistDecompressNode(tp);
+00289         \textcolor{keywordflow}{if} (h != node && hn != node && t != node && tp != node) \{
+00290             quicklistCompressNode(node);
+00291         \}
+00292         \textcolor{keywordflow}{if} (hnn != t) \{
+00293             quicklistCompressNode(hnn);
+00294         \}
+00295         \textcolor{keywordflow}{if} (tpp != h) \{
+00296             quicklistCompressNode(tpp);
+00297         \}
+00298         \textcolor{keywordflow}{return};
+00299     \}
+00300 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00301 
+00302     \textcolor{comment}{/* Iterate until we reach compress depth for both sides of the list.a}
+00303 \textcolor{comment}{     * Note: because we do length checks at the *top* of this function,}
+00304 \textcolor{comment}{     *       we can skip explicit null checks below. Everything exists. */}
+00305     quicklistNode *forward = quicklist->head;
+00306     quicklistNode *reverse = quicklist->tail;
+00307     \textcolor{keywordtype}{int} depth = 0;
+00308     \textcolor{keywordtype}{int} in\_depth = 0;
+00309     \textcolor{keywordflow}{while} (depth++ < quicklist->compress) \{
+00310         \hyperlink{quicklist_8c_ad36c703b3140d19a69301890a903f890}{quicklistDecompressNode}(forward);
+00311         \hyperlink{quicklist_8c_ad36c703b3140d19a69301890a903f890}{quicklistDecompressNode}(reverse);
+00312 
+00313         \textcolor{keywordflow}{if} (forward == node || reverse == node)
+00314             in\_depth = 1;
+00315 
+00316         \textcolor{keywordflow}{if} (forward == reverse)
+00317             \textcolor{keywordflow}{return};
+00318 
+00319         forward = forward->next;
+00320         reverse = reverse->prev;
+00321     \}
+00322 
+00323     \textcolor{keywordflow}{if} (!in\_depth)
+00324         \hyperlink{quicklist_8c_a8f91173182833dbe55fe0de444e3d7d7}{quicklistCompressNode}(node);
+00325 
+00326     \textcolor{keywordflow}{if} (depth > 2) \{
+00327         \textcolor{comment}{/* At this point, forward and reverse are one node beyond depth */}
+00328         \hyperlink{quicklist_8c_a8f91173182833dbe55fe0de444e3d7d7}{quicklistCompressNode}(forward);
+00329         \hyperlink{quicklist_8c_a8f91173182833dbe55fe0de444e3d7d7}{quicklistCompressNode}(reverse);
+00330     \}
+00331 \}
+00332 
+00333 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{quicklistCompress}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_ql}\textcolor{preprocessor}{,} \textcolor{preprocessor}{\_node}\textcolor{preprocessor}{)}
+00334     \textcolor{keywordflow}{do} \textcolor{preprocessor}{\{}
+00335         \textcolor{keywordflow}{if} \textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_node}\textcolor{preprocessor}{)}\textcolor{preprocessor}{->}\textcolor{preprocessor}{recompress}\textcolor{preprocessor}{)}
+00336             \hyperlink{quicklist_8c_a8f91173182833dbe55fe0de444e3d7d7}{quicklistCompressNode}\textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_node}\textcolor{preprocessor}{)}\textcolor{preprocessor}{)}\textcolor{preprocessor}{;}
+00337         \textcolor{keywordflow}{else}
+00338             \textcolor{preprocessor}{\_\_quicklistCompress}\textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_ql}\textcolor{preprocessor}{)}\textcolor{preprocessor}{,} \textcolor{preprocessor}{(}\textcolor{preprocessor}{\_node}\textcolor{preprocessor}{)}\textcolor{preprocessor}{)}\textcolor{preprocessor}{;}
+00339     \textcolor{preprocessor}{\}} \textcolor{keywordflow}{while} \textcolor{preprocessor}{(}0\textcolor{preprocessor}{)}
+00340 
+00341 \textcolor{comment}{/* If we previously used quicklistDecompressNodeForUse(), just recompress. */}
+00342 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{quicklistRecompressOnly}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_ql}\textcolor{preprocessor}{,} \textcolor{preprocessor}{\_node}\textcolor{preprocessor}{)}
+00343     \textcolor{keywordflow}{do} \textcolor{preprocessor}{\{}
+00344         \textcolor{keywordflow}{if} \textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_node}\textcolor{preprocessor}{)}\textcolor{preprocessor}{->}\textcolor{preprocessor}{recompress}\textcolor{preprocessor}{)}
+00345             \hyperlink{quicklist_8c_a8f91173182833dbe55fe0de444e3d7d7}{quicklistCompressNode}\textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_node}\textcolor{preprocessor}{)}\textcolor{preprocessor}{)}\textcolor{preprocessor}{;}
+00346     \textcolor{preprocessor}{\}} \textcolor{keywordflow}{while} \textcolor{preprocessor}{(}0\textcolor{preprocessor}{)}
+00347 
+00348 \textcolor{comment}{/* Insert 'new\_node' after 'old\_node' if 'after' is 1.}
+00349 \textcolor{comment}{ * Insert 'new\_node' before 'old\_node' if 'after' is 0.}
+00350 \textcolor{comment}{ * Note: 'new\_node' is *always* uncompressed, so if we assign it to}
+00351 \textcolor{comment}{ *       head or tail, we do not need to uncompress it. */}
+00352 \hyperlink{quicklist_8c_a9c22c9c899458021930a552a4f94d317}{REDIS\_STATIC} \textcolor{keywordtype}{void} \_\_quicklistInsertNode(quicklist *quicklist,
+00353                                         quicklistNode *old\_node,
+00354                                         quicklistNode *new\_node, \textcolor{keywordtype}{int} after) \{
+00355     \textcolor{keywordflow}{if} (after) \{
+00356         new\_node->prev = old\_node;
+00357         \textcolor{keywordflow}{if} (old\_node) \{
+00358             new\_node->next = old\_node->next;
+00359             \textcolor{keywordflow}{if} (old\_node->next)
+00360                 old\_node->next->prev = new\_node;
+00361             old\_node->next = new\_node;
+00362         \}
+00363         \textcolor{keywordflow}{if} (quicklist->tail == old\_node)
+00364             quicklist->tail = new\_node;
+00365     \} \textcolor{keywordflow}{else} \{
+00366         new\_node->next = old\_node;
+00367         \textcolor{keywordflow}{if} (old\_node) \{
+00368             new\_node->prev = old\_node->prev;
+00369             \textcolor{keywordflow}{if} (old\_node->prev)
+00370                 old\_node->prev->next = new\_node;
+00371             old\_node->prev = new\_node;
+00372         \}
+00373         \textcolor{keywordflow}{if} (quicklist->head == old\_node)
+00374             quicklist->head = new\_node;
+00375     \}
+00376     \textcolor{comment}{/* If this insert creates the only element so far, initialize head/tail. */}
+00377     \textcolor{keywordflow}{if} (quicklist->len == 0) \{
+00378         quicklist->head = quicklist->tail = new\_node;
+00379     \}
+00380 
+00381     \textcolor{keywordflow}{if} (old\_node)
+00382         \hyperlink{quicklist_8c_a4711a946d258d25f4bedace1458a2a1c}{quicklistCompress}(quicklist, old\_node);
+00383 
+00384     quicklist->len++;
+00385 \}
+00386 
+00387 \textcolor{comment}{/* Wrappers for node inserting around existing node. */}
+00388 \hyperlink{quicklist_8c_a9c22c9c899458021930a552a4f94d317}{REDIS\_STATIC} \textcolor{keywordtype}{void} \_quicklistInsertNodeBefore(quicklist *quicklist,
+00389                                              quicklistNode *old\_node,
+00390                                              quicklistNode *new\_node) \{
+00391     \_\_quicklistInsertNode(quicklist, old\_node, new\_node, 0);
+00392 \}
+00393 
+00394 \hyperlink{quicklist_8c_a9c22c9c899458021930a552a4f94d317}{REDIS\_STATIC} \textcolor{keywordtype}{void} \_quicklistInsertNodeAfter(quicklist *quicklist,
+00395                                             quicklistNode *old\_node,
+00396                                             quicklistNode *new\_node) \{
+00397     \_\_quicklistInsertNode(quicklist, old\_node, new\_node, 1);
+00398 \}
+00399 
+00400 \hyperlink{quicklist_8c_a9c22c9c899458021930a552a4f94d317}{REDIS\_STATIC} \textcolor{keywordtype}{int}
+00401 \_quicklistNodeSizeMeetsOptimizationRequirement(\textcolor{keyword}{const} size\_t sz,
+00402                                                \textcolor{keyword}{const} \textcolor{keywordtype}{int} fill) \{
+00403     \textcolor{keywordflow}{if} (fill >= 0)
+00404         \textcolor{keywordflow}{return} 0;
+00405 
+00406     size\_t offset = (-fill) - 1;
+00407     \textcolor{keywordflow}{if} (offset < (\textcolor{keyword}{sizeof}(optimization\_level) / \textcolor{keyword}{sizeof}(*optimization\_level))) \{
+00408         \textcolor{keywordflow}{if} (sz <= optimization\_level[offset]) \{
+00409             \textcolor{keywordflow}{return} 1;
+00410         \} \textcolor{keywordflow}{else} \{
+00411             \textcolor{keywordflow}{return} 0;
+00412         \}
+00413     \} \textcolor{keywordflow}{else} \{
+00414         \textcolor{keywordflow}{return} 0;
+00415     \}
+00416 \}
+00417 
+00418 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{sizeMeetsSafetyLimit}\textcolor{preprocessor}{(}\textcolor{preprocessor}{sz}\textcolor{preprocessor}{)} \textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{sz}\textcolor{preprocessor}{)} \textcolor{preprocessor}{<=} \hyperlink{quicklist_8c_ae95e4d31b16c0e50720b8310df428c0e}{SIZE\_SAFETY\_LIMIT}\textcolor{preprocessor}{)}
+00419 
+00420 \hyperlink{quicklist_8c_a9c22c9c899458021930a552a4f94d317}{REDIS\_STATIC} \textcolor{keywordtype}{int} \_quicklistNodeAllowInsert(\textcolor{keyword}{const} quicklistNode *node,
+00421                                            \textcolor{keyword}{const} \textcolor{keywordtype}{int} fill, \textcolor{keyword}{const} size\_t sz) \{
+00422     \textcolor{keywordflow}{if} (\hyperlink{quicklist_8c_ac6c45889010c1bd68631771b64f18101}{unlikely}(!node))
+00423         \textcolor{keywordflow}{return} 0;
+00424 
+00425     \textcolor{keywordtype}{int} ziplist\_overhead;
+00426     \textcolor{comment}{/* size of previous offset */}
+00427     \textcolor{keywordflow}{if} (sz < 254)
+00428         ziplist\_overhead = 1;
+00429     \textcolor{keywordflow}{else}
+00430         ziplist\_overhead = 5;
+00431 
+00432     \textcolor{comment}{/* size of forward offset */}
+00433     \textcolor{keywordflow}{if} (sz < 64)
+00434         ziplist\_overhead += 1;
+00435     \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (\hyperlink{quicklist_8c_a217a0bd562b98ae8c2ffce44935351e1}{likely}(sz < 16384))
+00436         ziplist\_overhead += 2;
+00437     \textcolor{keywordflow}{else}
+00438         ziplist\_overhead += 5;
+00439 
+00440     \textcolor{comment}{/* new\_sz overestimates if 'sz' encodes to an integer type */}
+00441     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{int} new\_sz = node->sz + sz + ziplist\_overhead;
+00442     \textcolor{keywordflow}{if} (\hyperlink{quicklist_8c_a217a0bd562b98ae8c2ffce44935351e1}{likely}(\_quicklistNodeSizeMeetsOptimizationRequirement(new\_sz, fill)))
+00443         \textcolor{keywordflow}{return} 1;
+00444     \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!\hyperlink{quicklist_8c_ab77edec9f8d4ebc2917da86841a5f202}{sizeMeetsSafetyLimit}(new\_sz))
+00445         \textcolor{keywordflow}{return} 0;
+00446     \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} ((\textcolor{keywordtype}{int})node->count < fill)
+00447         \textcolor{keywordflow}{return} 1;
+00448     \textcolor{keywordflow}{else}
+00449         \textcolor{keywordflow}{return} 0;
+00450 \}
+00451 
+00452 \hyperlink{quicklist_8c_a9c22c9c899458021930a552a4f94d317}{REDIS\_STATIC} \textcolor{keywordtype}{int} \_quicklistNodeAllowMerge(\textcolor{keyword}{const} quicklistNode *a,
+00453                                           \textcolor{keyword}{const} quicklistNode *b,
+00454                                           \textcolor{keyword}{const} \textcolor{keywordtype}{int} fill) \{
+00455     \textcolor{keywordflow}{if} (!a || !b)
+00456         \textcolor{keywordflow}{return} 0;
+00457 
+00458     \textcolor{comment}{/* approximate merged ziplist size (- 11 to remove one ziplist}
+00459 \textcolor{comment}{     * header/trailer) */}
+00460     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{int} merge\_sz = a->sz + b->sz - 11;
+00461     \textcolor{keywordflow}{if} (\hyperlink{quicklist_8c_a217a0bd562b98ae8c2ffce44935351e1}{likely}(\_quicklistNodeSizeMeetsOptimizationRequirement(merge\_sz, fill)))
+00462         \textcolor{keywordflow}{return} 1;
+00463     \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!\hyperlink{quicklist_8c_ab77edec9f8d4ebc2917da86841a5f202}{sizeMeetsSafetyLimit}(merge\_sz))
+00464         \textcolor{keywordflow}{return} 0;
+00465     \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} ((\textcolor{keywordtype}{int})(a->count + b->count) <= fill)
+00466         \textcolor{keywordflow}{return} 1;
+00467     \textcolor{keywordflow}{else}
+00468         \textcolor{keywordflow}{return} 0;
+00469 \}
+00470 
+00471 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{quicklistNodeUpdateSz}\textcolor{preprocessor}{(}\textcolor{preprocessor}{node}\textcolor{preprocessor}{)}
+00472     \textcolor{keywordflow}{do} \textcolor{preprocessor}{\{}
+00473         \textcolor{preprocessor}{(}\textcolor{preprocessor}{node}\textcolor{preprocessor}{)}\textcolor{preprocessor}{->}\textcolor{preprocessor}{sz} \textcolor{preprocessor}{=} \textcolor{preprocessor}{ziplistBlobLen}\textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{node}\textcolor{preprocessor}{)}\textcolor{preprocessor}{->}\textcolor{preprocessor}{zl}\textcolor{preprocessor}{)}\textcolor{preprocessor}{;}
+00474     \textcolor{preprocessor}{\}} \textcolor{keywordflow}{while} \textcolor{preprocessor}{(}0\textcolor{preprocessor}{)}
+00475 
+00476 \textcolor{comment}{/* Add new entry to head node of quicklist.}
+00477 \textcolor{comment}{ *}
+00478 \textcolor{comment}{ * Returns 0 if used existing head.}
+00479 \textcolor{comment}{ * Returns 1 if new head created. */}
+00480 \textcolor{keywordtype}{int} quicklistPushHead(quicklist *quicklist, \textcolor{keywordtype}{void} *value, size\_t sz) \{
+00481     quicklistNode *orig\_head = quicklist->head;
+00482     \textcolor{keywordflow}{if} (\hyperlink{quicklist_8c_a217a0bd562b98ae8c2ffce44935351e1}{likely}(
+00483             \_quicklistNodeAllowInsert(quicklist->head, quicklist->fill, sz))) \{
+00484         quicklist->head->zl =
+00485             ziplistPush(quicklist->head->zl, value, sz, \hyperlink{ziplist_8h_a88d32e547c509220e1c50cd9306186ba}{ZIPLIST\_HEAD});
+00486         \hyperlink{quicklist_8c_a03a3947a9423d234923343702619c553}{quicklistNodeUpdateSz}(quicklist->head);
+00487     \} \textcolor{keywordflow}{else} \{
+00488         quicklistNode *node = quicklistCreateNode();
+00489         node->zl = ziplistPush(ziplistNew(), value, sz, \hyperlink{ziplist_8h_a88d32e547c509220e1c50cd9306186ba}{ZIPLIST\_HEAD});
+00490 
+00491         \hyperlink{quicklist_8c_a03a3947a9423d234923343702619c553}{quicklistNodeUpdateSz}(node);
+00492         \_quicklistInsertNodeBefore(quicklist, quicklist->head, node);
+00493     \}
+00494     quicklist->count++;
+00495     quicklist->head->count++;
+00496     \textcolor{keywordflow}{return} (orig\_head != quicklist->head);
+00497 \}
+00498 
+00499 \textcolor{comment}{/* Add new entry to tail node of quicklist.}
+00500 \textcolor{comment}{ *}
+00501 \textcolor{comment}{ * Returns 0 if used existing tail.}
+00502 \textcolor{comment}{ * Returns 1 if new tail created. */}
+00503 \textcolor{keywordtype}{int} quicklistPushTail(quicklist *quicklist, \textcolor{keywordtype}{void} *value, size\_t sz) \{
+00504     quicklistNode *orig\_tail = quicklist->tail;
+00505     \textcolor{keywordflow}{if} (\hyperlink{quicklist_8c_a217a0bd562b98ae8c2ffce44935351e1}{likely}(
+00506             \_quicklistNodeAllowInsert(quicklist->tail, quicklist->fill, sz))) \{
+00507         quicklist->tail->zl =
+00508             ziplistPush(quicklist->tail->zl, value, sz, \hyperlink{ziplist_8h_a25d058a2c2c0db0f131f84d23ede6ba2}{ZIPLIST\_TAIL});
+00509         \hyperlink{quicklist_8c_a03a3947a9423d234923343702619c553}{quicklistNodeUpdateSz}(quicklist->tail);
+00510     \} \textcolor{keywordflow}{else} \{
+00511         quicklistNode *node = quicklistCreateNode();
+00512         node->zl = ziplistPush(ziplistNew(), value, sz, \hyperlink{ziplist_8h_a25d058a2c2c0db0f131f84d23ede6ba2}{ZIPLIST\_TAIL});
+00513 
+00514         \hyperlink{quicklist_8c_a03a3947a9423d234923343702619c553}{quicklistNodeUpdateSz}(node);
+00515         \_quicklistInsertNodeAfter(quicklist, quicklist->tail, node);
+00516     \}
+00517     quicklist->count++;
+00518     quicklist->tail->count++;
+00519     \textcolor{keywordflow}{return} (orig\_tail != quicklist->tail);
+00520 \}
+00521 
+00522 \textcolor{comment}{/* Create new node consisting of a pre-formed ziplist.}
+00523 \textcolor{comment}{ * Used for loading RDBs where entire ziplists have been stored}
+00524 \textcolor{comment}{ * to be retrieved later. */}
+00525 \textcolor{keywordtype}{void} quicklistAppendZiplist(quicklist *quicklist, \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *zl) \{
+00526     quicklistNode *node = quicklistCreateNode();
+00527 
+00528     node->zl = zl;
+00529     node->count = ziplistLen(node->zl);
+00530     node->sz = ziplistBlobLen(zl);
+00531 
+00532     \_quicklistInsertNodeAfter(quicklist, quicklist->tail, node);
+00533     quicklist->count += node->count;
+00534 \}
+00535 
+00536 \textcolor{comment}{/* Append all values of ziplist 'zl' individually into 'quicklist'.}
+00537 \textcolor{comment}{ *}
+00538 \textcolor{comment}{ * This allows us to restore old RDB ziplists into new quicklists}
+00539 \textcolor{comment}{ * with smaller ziplist sizes than the saved RDB ziplist.}
+00540 \textcolor{comment}{ *}
+00541 \textcolor{comment}{ * Returns 'quicklist' argument. Frees passed-in ziplist 'zl' */}
+00542 quicklist *quicklistAppendValuesFromZiplist(quicklist *quicklist,
+00543                                             \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *zl) \{
+00544     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *value;
+00545     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{int} sz;
+00546     \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} longval;
+00547     \textcolor{keywordtype}{char} longstr[32] = \{0\};
+00548 
+00549     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *p = ziplistIndex(zl, 0);
+00550     \textcolor{keywordflow}{while} (ziplistGet(p, &value, &sz, &longval)) \{
+00551         \textcolor{keywordflow}{if} (!value) \{
+00552             \textcolor{comment}{/* Write the longval as a string so we can re-add it */}
+00553             sz = ll2string(longstr, \textcolor{keyword}{sizeof}(longstr), longval);
+00554             value = (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *)longstr;
+00555         \}
+00556         quicklistPushTail(quicklist, value, sz);
+00557         p = ziplistNext(zl, p);
+00558     \}
+00559     zfree(zl);
+00560     \textcolor{keywordflow}{return} quicklist;
+00561 \}
+00562 
+00563 \textcolor{comment}{/* Create new (potentially multi-node) quicklist from a single existing ziplist.}
+00564 \textcolor{comment}{ *}
+00565 \textcolor{comment}{ * Returns new quicklist.  Frees passed-in ziplist 'zl'. */}
+00566 quicklist *quicklistCreateFromZiplist(\textcolor{keywordtype}{int} fill, \textcolor{keywordtype}{int} compress,
+00567                                       \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *zl) \{
+00568     \textcolor{keywordflow}{return} quicklistAppendValuesFromZiplist(quicklistNew(fill, compress), zl);
+00569 \}
+00570 
+00571 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{quicklistDeleteIfEmpty}\textcolor{preprocessor}{(}\textcolor{preprocessor}{ql}\textcolor{preprocessor}{,} \textcolor{preprocessor}{n}\textcolor{preprocessor}{)}
+00572     \textcolor{keywordflow}{do} \textcolor{preprocessor}{\{}
+00573         \textcolor{keywordflow}{if} \textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{n}\textcolor{preprocessor}{)}\textcolor{preprocessor}{->}\textcolor{preprocessor}{count} \textcolor{preprocessor}{==} 0\textcolor{preprocessor}{)} \textcolor{preprocessor}{\{}
+00574             \textcolor{preprocessor}{\_\_quicklistDelNode}\textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{ql}\textcolor{preprocessor}{)}\textcolor{preprocessor}{,} \textcolor{preprocessor}{(}\textcolor{preprocessor}{n}\textcolor{preprocessor}{)}\textcolor{preprocessor}{)}\textcolor{preprocessor}{;}
+00575             \textcolor{preprocessor}{(}\textcolor{preprocessor}{n}\textcolor{preprocessor}{)} \textcolor{preprocessor}{=} \textcolor{preprocessor}{NULL}\textcolor{preprocessor}{;}
+00576         \textcolor{preprocessor}{\}}
+00577     \textcolor{preprocessor}{\}} \textcolor{keywordflow}{while} \textcolor{preprocessor}{(}0\textcolor{preprocessor}{)}
+00578 
+00579 \hyperlink{quicklist_8c_a9c22c9c899458021930a552a4f94d317}{REDIS\_STATIC} \textcolor{keywordtype}{void} \_\_quicklistDelNode(quicklist *quicklist,
+00580                                      quicklistNode *node) \{
+00581     \textcolor{keywordflow}{if} (node->next)
+00582         node->next->prev = node->prev;
+00583     \textcolor{keywordflow}{if} (node->prev)
+00584         node->prev->next = node->next;
+00585 
+00586     \textcolor{keywordflow}{if} (node == quicklist->tail) \{
+00587         quicklist->tail = node->prev;
+00588     \}
+00589 
+00590     \textcolor{keywordflow}{if} (node == quicklist->head) \{
+00591         quicklist->head = node->next;
+00592     \}
+00593 
+00594     \textcolor{comment}{/* If we deleted a node within our compress depth, we}
+00595 \textcolor{comment}{     * now have compressed nodes needing to be decompressed. */}
+00596     \_\_quicklistCompress(quicklist, NULL);
+00597 
+00598     quicklist->count -= node->count;
+00599 
+00600     zfree(node->zl);
+00601     zfree(node);
+00602     quicklist->len--;
+00603 \}
+00604 
+00605 \textcolor{comment}{/* Delete one entry from list given the node for the entry and a pointer}
+00606 \textcolor{comment}{ * to the entry in the node.}
+00607 \textcolor{comment}{ *}
+00608 \textcolor{comment}{ * Note: quicklistDelIndex() *requires* uncompressed nodes because you}
+00609 \textcolor{comment}{ *       already had to get *p from an uncompressed node somewhere.}
+00610 \textcolor{comment}{ *}
+00611 \textcolor{comment}{ * Returns 1 if the entire node was deleted, 0 if node still exists.}
+00612 \textcolor{comment}{ * Also updates in/out param 'p' with the next offset in the ziplist. */}
+00613 \hyperlink{quicklist_8c_a9c22c9c899458021930a552a4f94d317}{REDIS\_STATIC} \textcolor{keywordtype}{int} quicklistDelIndex(quicklist *quicklist, quicklistNode *node,
+00614                                    \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} **p) \{
+00615     \textcolor{keywordtype}{int} gone = 0;
+00616 
+00617     node->zl = ziplistDelete(node->zl, p);
+00618     node->count--;
+00619     \textcolor{keywordflow}{if} (node->count == 0) \{
+00620         gone = 1;
+00621         \_\_quicklistDelNode(quicklist, node);
+00622     \} \textcolor{keywordflow}{else} \{
+00623         \hyperlink{quicklist_8c_a03a3947a9423d234923343702619c553}{quicklistNodeUpdateSz}(node);
+00624     \}
+00625     quicklist->count--;
+00626     \textcolor{comment}{/* If we deleted the node, the original node is no longer valid */}
+00627     \textcolor{keywordflow}{return} gone ? 1 : 0;
+00628 \}
+00629 
+00630 \textcolor{comment}{/* Delete one element represented by 'entry'}
+00631 \textcolor{comment}{ *}
+00632 \textcolor{comment}{ * 'entry' stores enough metadata to delete the proper position in}
+00633 \textcolor{comment}{ * the correct ziplist in the correct quicklist node. */}
+00634 \textcolor{keywordtype}{void} quicklistDelEntry(quicklistIter *iter, quicklistEntry *entry) \{
+00635     quicklistNode *prev = entry->node->prev;
+00636     quicklistNode *next = entry->node->next;
+00637     \textcolor{keywordtype}{int} deleted\_node = quicklistDelIndex((quicklist *)entry->quicklist,
+00638                                          entry->node, &entry->zi);
+00639 
+00640     \textcolor{comment}{/* after delete, the zi is now invalid for any future usage. */}
+00641     iter->zi = NULL;
+00642 
+00643     \textcolor{comment}{/* If current node is deleted, we must update iterator node and offset. */}
+00644     \textcolor{keywordflow}{if} (deleted\_node) \{
+00645         \textcolor{keywordflow}{if} (iter->direction == \hyperlink{adlist_8h_a353f032fdd7e66abe9f194fa7c89560b}{AL\_START\_HEAD}) \{
+00646             iter->current = next;
+00647             iter->offset = 0;
+00648         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (iter->direction == \hyperlink{adlist_8h_a7d37e2046bb8d302b8ca5de4883a1c7f}{AL\_START\_TAIL}) \{
+00649             iter->current = prev;
+00650             iter->offset = -1;
+00651         \}
+00652     \}
+00653     \textcolor{comment}{/* else if (!deleted\_node), no changes needed.}
+00654 \textcolor{comment}{     * we already reset iter->zi above, and the existing iter->offset}
+00655 \textcolor{comment}{     * doesn't move again because:}
+00656 \textcolor{comment}{     *   - [1, 2, 3] => delete offset 1 => [1, 3]: next element still offset 1}
+00657 \textcolor{comment}{     *   - [1, 2, 3] => delete offset 0 => [2, 3]: next element still offset 0}
+00658 \textcolor{comment}{     *  if we deleted the last element at offet N and now}
+00659 \textcolor{comment}{     *  length of this ziplist is N-1, the next call into}
+00660 \textcolor{comment}{     *  quicklistNext() will jump to the next node. */}
+00661 \}
+00662 
+00663 \textcolor{comment}{/* Replace quicklist entry at offset 'index' by 'data' with length 'sz'.}
+00664 \textcolor{comment}{ *}
+00665 \textcolor{comment}{ * Returns 1 if replace happened.}
+00666 \textcolor{comment}{ * Returns 0 if replace failed and no changes happened. */}
+00667 \textcolor{keywordtype}{int} quicklistReplaceAtIndex(quicklist *quicklist, \textcolor{keywordtype}{long} index, \textcolor{keywordtype}{void} *data,
+00668                             \textcolor{keywordtype}{int} sz) \{
+00669     quicklistEntry entry;
+00670     \textcolor{keywordflow}{if} (\hyperlink{quicklist_8c_a217a0bd562b98ae8c2ffce44935351e1}{likely}(quicklistIndex(quicklist, index, &entry))) \{
+00671         \textcolor{comment}{/* quicklistIndex provides an uncompressed node */}
+00672         entry.node->zl = ziplistDelete(entry.node->zl, &entry.zi);
+00673         entry.node->zl = ziplistInsert(entry.node->zl, entry.zi, data, sz);
+00674         \hyperlink{quicklist_8c_a03a3947a9423d234923343702619c553}{quicklistNodeUpdateSz}(entry.node);
+00675         \hyperlink{quicklist_8c_a4711a946d258d25f4bedace1458a2a1c}{quicklistCompress}(quicklist, entry.node);
+00676         \textcolor{keywordflow}{return} 1;
+00677     \} \textcolor{keywordflow}{else} \{
+00678         \textcolor{keywordflow}{return} 0;
+00679     \}
+00680 \}
+00681 
+00682 \textcolor{comment}{/* Given two nodes, try to merge their ziplists.}
+00683 \textcolor{comment}{ *}
+00684 \textcolor{comment}{ * This helps us not have a quicklist with 3 element ziplists if}
+00685 \textcolor{comment}{ * our fill factor can handle much higher levels.}
+00686 \textcolor{comment}{ *}
+00687 \textcolor{comment}{ * Note: 'a' must be to the LEFT of 'b'.}
+00688 \textcolor{comment}{ *}
+00689 \textcolor{comment}{ * After calling this function, both 'a' and 'b' should be considered}
+00690 \textcolor{comment}{ * unusable.  The return value from this function must be used}
+00691 \textcolor{comment}{ * instead of re-using any of the quicklistNode input arguments.}
+00692 \textcolor{comment}{ *}
+00693 \textcolor{comment}{ * Returns the input node picked to merge against or NULL if}
+00694 \textcolor{comment}{ * merging was not possible. */}
+00695 \hyperlink{quicklist_8c_a9c22c9c899458021930a552a4f94d317}{REDIS\_STATIC} quicklistNode *\_quicklistZiplistMerge(quicklist *quicklist,
+00696                                                    quicklistNode *a,
+00697                                                    quicklistNode *b) \{
+00698     \hyperlink{debugmacro_8h_a74021f021dcdfbb22891787b79c5529d}{D}(\textcolor{stringliteral}{"Requested merge (a,b) (%u, %u)"}, a->count, b->count);
+00699 
+00700     \hyperlink{quicklist_8c_ad36c703b3140d19a69301890a903f890}{quicklistDecompressNode}(a);
+00701     \hyperlink{quicklist_8c_ad36c703b3140d19a69301890a903f890}{quicklistDecompressNode}(b);
+00702     \textcolor{keywordflow}{if} ((ziplistMerge(&a->zl, &b->zl))) \{
+00703         \textcolor{comment}{/* We merged ziplists! Now remove the unused quicklistNode. */}
+00704         quicklistNode *keep = NULL, *nokeep = NULL;
+00705         \textcolor{keywordflow}{if} (!a->zl) \{
+00706             nokeep = a;
+00707             keep = b;
+00708         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!b->zl) \{
+00709             nokeep = b;
+00710             keep = a;
+00711         \}
+00712         keep->count = ziplistLen(keep->zl);
+00713         \hyperlink{quicklist_8c_a03a3947a9423d234923343702619c553}{quicklistNodeUpdateSz}(keep);
+00714 
+00715         nokeep->count = 0;
+00716         \_\_quicklistDelNode(quicklist, nokeep);
+00717         \hyperlink{quicklist_8c_a4711a946d258d25f4bedace1458a2a1c}{quicklistCompress}(quicklist, keep);
+00718         \textcolor{keywordflow}{return} keep;
+00719     \} \textcolor{keywordflow}{else} \{
+00720         \textcolor{comment}{/* else, the merge returned NULL and nothing changed. */}
+00721         \textcolor{keywordflow}{return} NULL;
+00722     \}
+00723 \}
+00724 
+00725 \textcolor{comment}{/* Attempt to merge ziplists within two nodes on either side of 'center'.}
+00726 \textcolor{comment}{ *}
+00727 \textcolor{comment}{ * We attempt to merge:}
+00728 \textcolor{comment}{ *   - (center->prev->prev, center->prev)}
+00729 \textcolor{comment}{ *   - (center->next, center->next->next)}
+00730 \textcolor{comment}{ *   - (center->prev, center)}
+00731 \textcolor{comment}{ *   - (center, center->next)}
+00732 \textcolor{comment}{ */}
+00733 \hyperlink{quicklist_8c_a9c22c9c899458021930a552a4f94d317}{REDIS\_STATIC} \textcolor{keywordtype}{void} \_quicklistMergeNodes(quicklist *quicklist,
+00734                                        quicklistNode *center) \{
+00735     \textcolor{keywordtype}{int} fill = quicklist->fill;
+00736     quicklistNode *prev, *prev\_prev, *next, *next\_next, *target;
+00737     prev = prev\_prev = next = next\_next = target = NULL;
+00738 
+00739     \textcolor{keywordflow}{if} (center->prev) \{
+00740         prev = center->prev;
+00741         \textcolor{keywordflow}{if} (center->prev->prev)
+00742             prev\_prev = center->prev->prev;
+00743     \}
+00744 
+00745     \textcolor{keywordflow}{if} (center->next) \{
+00746         next = center->next;
+00747         \textcolor{keywordflow}{if} (center->next->next)
+00748             next\_next = center->next->next;
+00749     \}
+00750 
+00751     \textcolor{comment}{/* Try to merge prev\_prev and prev */}
+00752     \textcolor{keywordflow}{if} (\_quicklistNodeAllowMerge(prev, prev\_prev, fill)) \{
+00753         \_quicklistZiplistMerge(quicklist, prev\_prev, prev);
+00754         prev\_prev = prev = NULL; \textcolor{comment}{/* they could have moved, invalidate them. */}
+00755     \}
+00756 
+00757     \textcolor{comment}{/* Try to merge next and next\_next */}
+00758     \textcolor{keywordflow}{if} (\_quicklistNodeAllowMerge(next, next\_next, fill)) \{
+00759         \_quicklistZiplistMerge(quicklist, next, next\_next);
+00760         next = next\_next = NULL; \textcolor{comment}{/* they could have moved, invalidate them. */}
+00761     \}
+00762 
+00763     \textcolor{comment}{/* Try to merge center node and previous node */}
+00764     \textcolor{keywordflow}{if} (\_quicklistNodeAllowMerge(center, center->prev, fill)) \{
+00765         target = \_quicklistZiplistMerge(quicklist, center->prev, center);
+00766         center = NULL; \textcolor{comment}{/* center could have been deleted, invalidate it. */}
+00767     \} \textcolor{keywordflow}{else} \{
+00768         \textcolor{comment}{/* else, we didn't merge here, but target needs to be valid below. */}
+00769         target = center;
+00770     \}
+00771 
+00772     \textcolor{comment}{/* Use result of center merge (or original) to merge with next node. */}
+00773     \textcolor{keywordflow}{if} (\_quicklistNodeAllowMerge(target, target->next, fill)) \{
+00774         \_quicklistZiplistMerge(quicklist, target, target->next);
+00775     \}
+00776 \}
+00777 
+00778 \textcolor{comment}{/* Split 'node' into two parts, parameterized by 'offset' and 'after'.}
+00779 \textcolor{comment}{ *}
+00780 \textcolor{comment}{ * The 'after' argument controls which quicklistNode gets returned.}
+00781 \textcolor{comment}{ * If 'after'==1, returned node has elements after 'offset'.}
+00782 \textcolor{comment}{ *                input node keeps elements up to 'offset', including 'offset'.}
+00783 \textcolor{comment}{ * If 'after'==0, returned node has elements up to 'offset', including 'offset'.}
+00784 \textcolor{comment}{ *                input node keeps elements after 'offset'.}
+00785 \textcolor{comment}{ *}
+00786 \textcolor{comment}{ * If 'after'==1, returned node will have elements \_after\_ 'offset'.}
+00787 \textcolor{comment}{ *                The returned node will have elements [OFFSET+1, END].}
+00788 \textcolor{comment}{ *                The input node keeps elements [0, OFFSET].}
+00789 \textcolor{comment}{ *}
+00790 \textcolor{comment}{ * If 'after'==0, returned node will keep elements up to and including 'offset'.}
+00791 \textcolor{comment}{ *                The returned node will have elements [0, OFFSET].}
+00792 \textcolor{comment}{ *                The input node keeps elements [OFFSET+1, END].}
+00793 \textcolor{comment}{ *}
+00794 \textcolor{comment}{ * The input node keeps all elements not taken by the returned node.}
+00795 \textcolor{comment}{ *}
+00796 \textcolor{comment}{ * Returns newly created node or NULL if split not possible. */}
+00797 \hyperlink{quicklist_8c_a9c22c9c899458021930a552a4f94d317}{REDIS\_STATIC} quicklistNode *\_quicklistSplitNode(quicklistNode *node, \textcolor{keywordtype}{int} offset,
+00798                                                 \textcolor{keywordtype}{int} after) \{
+00799     size\_t zl\_sz = node->sz;
+00800 
+00801     quicklistNode *new\_node = quicklistCreateNode();
+00802     new\_node->zl = zmalloc(zl\_sz);
+00803 
+00804     \textcolor{comment}{/* Copy original ziplist so we can split it */}
+00805     memcpy(new\_node->zl, node->zl, zl\_sz);
+00806 
+00807     \textcolor{comment}{/* -1 here means "continue deleting until the list ends" */}
+00808     \textcolor{keywordtype}{int} orig\_start = after ? offset + 1 : 0;
+00809     \textcolor{keywordtype}{int} orig\_extent = after ? -1 : offset;
+00810     \textcolor{keywordtype}{int} new\_start = after ? 0 : offset;
+00811     \textcolor{keywordtype}{int} new\_extent = after ? offset + 1 : -1;
+00812 
+00813     \hyperlink{debugmacro_8h_a74021f021dcdfbb22891787b79c5529d}{D}(\textcolor{stringliteral}{"After %d (%d); ranges: [%d, %d], [%d, %d]"}, after, offset, orig\_start,
+00814       orig\_extent, new\_start, new\_extent);
+00815 
+00816     node->zl = ziplistDeleteRange(node->zl, orig\_start, orig\_extent);
+00817     node->count = ziplistLen(node->zl);
+00818     \hyperlink{quicklist_8c_a03a3947a9423d234923343702619c553}{quicklistNodeUpdateSz}(node);
+00819 
+00820     new\_node->zl = ziplistDeleteRange(new\_node->zl, new\_start, new\_extent);
+00821     new\_node->count = ziplistLen(new\_node->zl);
+00822     \hyperlink{quicklist_8c_a03a3947a9423d234923343702619c553}{quicklistNodeUpdateSz}(new\_node);
+00823 
+00824     \hyperlink{debugmacro_8h_a74021f021dcdfbb22891787b79c5529d}{D}(\textcolor{stringliteral}{"After split lengths: orig (%d), new (%d)"}, node->count, new\_node->count);
+00825     \textcolor{keywordflow}{return} new\_node;
+00826 \}
+00827 
+00828 \textcolor{comment}{/* Insert a new entry before or after existing entry 'entry'.}
+00829 \textcolor{comment}{ *}
+00830 \textcolor{comment}{ * If after==1, the new value is inserted after 'entry', otherwise}
+00831 \textcolor{comment}{ * the new value is inserted before 'entry'. */}
+00832 \hyperlink{quicklist_8c_a9c22c9c899458021930a552a4f94d317}{REDIS\_STATIC} \textcolor{keywordtype}{void} \_quicklistInsert(quicklist *quicklist, quicklistEntry *entry,
+00833                                    \textcolor{keywordtype}{void} *value, \textcolor{keyword}{const} size\_t sz, \textcolor{keywordtype}{int} after) \{
+00834     \textcolor{keywordtype}{int} full = 0, at\_tail = 0, at\_head = 0, full\_next = 0, full\_prev = 0;
+00835     \textcolor{keywordtype}{int} fill = quicklist->fill;
+00836     quicklistNode *node = entry->node;
+00837     quicklistNode *new\_node = NULL;
+00838 
+00839     \textcolor{keywordflow}{if} (!node) \{
+00840         \textcolor{comment}{/* we have no reference node, so let's create only node in the list */}
+00841         \hyperlink{debugmacro_8h_a74021f021dcdfbb22891787b79c5529d}{D}(\textcolor{stringliteral}{"No node given!"});
+00842         new\_node = quicklistCreateNode();
+00843         new\_node->zl = ziplistPush(ziplistNew(), value, sz, \hyperlink{ziplist_8h_a88d32e547c509220e1c50cd9306186ba}{ZIPLIST\_HEAD});
+00844         \_\_quicklistInsertNode(quicklist, NULL, new\_node, after);
+00845         new\_node->count++;
+00846         quicklist->count++;
+00847         \textcolor{keywordflow}{return};
+00848     \}
+00849 
+00850     \textcolor{comment}{/* Populate accounting flags for easier boolean checks later */}
+00851     \textcolor{keywordflow}{if} (!\_quicklistNodeAllowInsert(node, fill, sz)) \{
+00852         \hyperlink{debugmacro_8h_a74021f021dcdfbb22891787b79c5529d}{D}(\textcolor{stringliteral}{"Current node is full with count %d with requested fill %lu"},
+00853           node->count, fill);
+00854         full = 1;
+00855     \}
+00856 
+00857     \textcolor{keywordflow}{if} (after && (entry->offset == node->count)) \{
+00858         \hyperlink{debugmacro_8h_a74021f021dcdfbb22891787b79c5529d}{D}(\textcolor{stringliteral}{"At Tail of current ziplist"});
+00859         at\_tail = 1;
+00860         \textcolor{keywordflow}{if} (!\_quicklistNodeAllowInsert(node->next, fill, sz)) \{
+00861             \hyperlink{debugmacro_8h_a74021f021dcdfbb22891787b79c5529d}{D}(\textcolor{stringliteral}{"Next node is full too."});
+00862             full\_next = 1;
+00863         \}
+00864     \}
+00865 
+00866     \textcolor{keywordflow}{if} (!after && (entry->offset == 0)) \{
+00867         \hyperlink{debugmacro_8h_a74021f021dcdfbb22891787b79c5529d}{D}(\textcolor{stringliteral}{"At Head"});
+00868         at\_head = 1;
+00869         \textcolor{keywordflow}{if} (!\_quicklistNodeAllowInsert(node->prev, fill, sz)) \{
+00870             \hyperlink{debugmacro_8h_a74021f021dcdfbb22891787b79c5529d}{D}(\textcolor{stringliteral}{"Prev node is full too."});
+00871             full\_prev = 1;
+00872         \}
+00873     \}
+00874 
+00875     \textcolor{comment}{/* Now determine where and how to insert the new element */}
+00876     \textcolor{keywordflow}{if} (!full && after) \{
+00877         \hyperlink{debugmacro_8h_a74021f021dcdfbb22891787b79c5529d}{D}(\textcolor{stringliteral}{"Not full, inserting after current position."});
+00878         \hyperlink{quicklist_8c_a2f30e6f482d51059f06fa34df69734e1}{quicklistDecompressNodeForUse}(node);
+00879         \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *next = ziplistNext(node->zl, entry->zi);
+00880         \textcolor{keywordflow}{if} (next == NULL) \{
+00881             node->zl = ziplistPush(node->zl, value, sz, \hyperlink{ziplist_8h_a25d058a2c2c0db0f131f84d23ede6ba2}{ZIPLIST\_TAIL});
+00882         \} \textcolor{keywordflow}{else} \{
+00883             node->zl = ziplistInsert(node->zl, next, value, sz);
+00884         \}
+00885         node->count++;
+00886         \hyperlink{quicklist_8c_a03a3947a9423d234923343702619c553}{quicklistNodeUpdateSz}(node);
+00887         \hyperlink{quicklist_8c_a75672a682e90fe973934910f3ee866a3}{quicklistRecompressOnly}(quicklist, node);
+00888     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!full && !after) \{
+00889         \hyperlink{debugmacro_8h_a74021f021dcdfbb22891787b79c5529d}{D}(\textcolor{stringliteral}{"Not full, inserting before current position."});
+00890         \hyperlink{quicklist_8c_a2f30e6f482d51059f06fa34df69734e1}{quicklistDecompressNodeForUse}(node);
+00891         node->zl = ziplistInsert(node->zl, entry->zi, value, sz);
+00892         node->count++;
+00893         \hyperlink{quicklist_8c_a03a3947a9423d234923343702619c553}{quicklistNodeUpdateSz}(node);
+00894         \hyperlink{quicklist_8c_a75672a682e90fe973934910f3ee866a3}{quicklistRecompressOnly}(quicklist, node);
+00895     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (full && at\_tail && node->next && !full\_next && after) \{
+00896         \textcolor{comment}{/* If we are: at tail, next has free space, and inserting after:}
+00897 \textcolor{comment}{         *   - insert entry at head of next node. */}
+00898         \hyperlink{debugmacro_8h_a74021f021dcdfbb22891787b79c5529d}{D}(\textcolor{stringliteral}{"Full and tail, but next isn't full; inserting next node head"});
+00899         new\_node = node->next;
+00900         \hyperlink{quicklist_8c_a2f30e6f482d51059f06fa34df69734e1}{quicklistDecompressNodeForUse}(new\_node);
+00901         new\_node->zl = ziplistPush(new\_node->zl, value, sz, \hyperlink{ziplist_8h_a88d32e547c509220e1c50cd9306186ba}{ZIPLIST\_HEAD});
+00902         new\_node->count++;
+00903         \hyperlink{quicklist_8c_a03a3947a9423d234923343702619c553}{quicklistNodeUpdateSz}(new\_node);
+00904         \hyperlink{quicklist_8c_a75672a682e90fe973934910f3ee866a3}{quicklistRecompressOnly}(quicklist, new\_node);
+00905     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (full && at\_head && node->prev && !full\_prev && !after) \{
+00906         \textcolor{comment}{/* If we are: at head, previous has free space, and inserting before:}
+00907 \textcolor{comment}{         *   - insert entry at tail of previous node. */}
+00908         \hyperlink{debugmacro_8h_a74021f021dcdfbb22891787b79c5529d}{D}(\textcolor{stringliteral}{"Full and head, but prev isn't full, inserting prev node tail"});
+00909         new\_node = node->prev;
+00910         \hyperlink{quicklist_8c_a2f30e6f482d51059f06fa34df69734e1}{quicklistDecompressNodeForUse}(new\_node);
+00911         new\_node->zl = ziplistPush(new\_node->zl, value, sz, \hyperlink{ziplist_8h_a25d058a2c2c0db0f131f84d23ede6ba2}{ZIPLIST\_TAIL});
+00912         new\_node->count++;
+00913         \hyperlink{quicklist_8c_a03a3947a9423d234923343702619c553}{quicklistNodeUpdateSz}(new\_node);
+00914         \hyperlink{quicklist_8c_a75672a682e90fe973934910f3ee866a3}{quicklistRecompressOnly}(quicklist, new\_node);
+00915     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (full && ((at\_tail && node->next && full\_next && after) ||
+00916                         (at\_head && node->prev && full\_prev && !after))) \{
+00917         \textcolor{comment}{/* If we are: full, and our prev/next is full, then:}
+00918 \textcolor{comment}{         *   - create new node and attach to quicklist */}
+00919         \hyperlink{debugmacro_8h_a74021f021dcdfbb22891787b79c5529d}{D}(\textcolor{stringliteral}{"\(\backslash\)tprovisioning new node..."});
+00920         new\_node = quicklistCreateNode();
+00921         new\_node->zl = ziplistPush(ziplistNew(), value, sz, \hyperlink{ziplist_8h_a88d32e547c509220e1c50cd9306186ba}{ZIPLIST\_HEAD});
+00922         new\_node->count++;
+00923         \hyperlink{quicklist_8c_a03a3947a9423d234923343702619c553}{quicklistNodeUpdateSz}(new\_node);
+00924         \_\_quicklistInsertNode(quicklist, node, new\_node, after);
+00925     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (full) \{
+00926         \textcolor{comment}{/* else, node is full we need to split it. */}
+00927         \textcolor{comment}{/* covers both after and !after cases */}
+00928         \hyperlink{debugmacro_8h_a74021f021dcdfbb22891787b79c5529d}{D}(\textcolor{stringliteral}{"\(\backslash\)tsplitting node..."});
+00929         \hyperlink{quicklist_8c_a2f30e6f482d51059f06fa34df69734e1}{quicklistDecompressNodeForUse}(node);
+00930         new\_node = \_quicklistSplitNode(node, entry->offset, after);
+00931         new\_node->zl = ziplistPush(new\_node->zl, value, sz,
+00932                                    after ? \hyperlink{ziplist_8h_a88d32e547c509220e1c50cd9306186ba}{ZIPLIST\_HEAD} : 
+      \hyperlink{ziplist_8h_a25d058a2c2c0db0f131f84d23ede6ba2}{ZIPLIST\_TAIL});
+00933         new\_node->count++;
+00934         \hyperlink{quicklist_8c_a03a3947a9423d234923343702619c553}{quicklistNodeUpdateSz}(new\_node);
+00935         \_\_quicklistInsertNode(quicklist, node, new\_node, after);
+00936         \_quicklistMergeNodes(quicklist, node);
+00937     \}
+00938 
+00939     quicklist->count++;
+00940 \}
+00941 
+00942 \textcolor{keywordtype}{void} quicklistInsertBefore(quicklist *quicklist, quicklistEntry *entry,
+00943                            \textcolor{keywordtype}{void} *value, \textcolor{keyword}{const} size\_t sz) \{
+00944     \_quicklistInsert(quicklist, entry, value, sz, 0);
+00945 \}
+00946 
+00947 \textcolor{keywordtype}{void} quicklistInsertAfter(quicklist *quicklist, quicklistEntry *entry,
+00948                           \textcolor{keywordtype}{void} *value, \textcolor{keyword}{const} size\_t sz) \{
+00949     \_quicklistInsert(quicklist, entry, value, sz, 1);
+00950 \}
+00951 
+00952 \textcolor{comment}{/* Delete a range of elements from the quicklist.}
+00953 \textcolor{comment}{ *}
+00954 \textcolor{comment}{ * elements may span across multiple quicklistNodes, so we}
+00955 \textcolor{comment}{ * have to be careful about tracking where we start and end.}
+00956 \textcolor{comment}{ *}
+00957 \textcolor{comment}{ * Returns 1 if entries were deleted, 0 if nothing was deleted. */}
+00958 \textcolor{keywordtype}{int} quicklistDelRange(quicklist *quicklist, \textcolor{keyword}{const} \textcolor{keywordtype}{long} start,
+00959                       \textcolor{keyword}{const} \textcolor{keywordtype}{long} count) \{
+00960     \textcolor{keywordflow}{if} (count <= 0)
+00961         \textcolor{keywordflow}{return} 0;
+00962 
+00963     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} extent = count; \textcolor{comment}{/* range is inclusive of start position */}
+00964 
+00965     \textcolor{keywordflow}{if} (start >= 0 && extent > (quicklist->count - start)) \{
+00966         \textcolor{comment}{/* if requesting delete more elements than exist, limit to list size. */}
+00967         extent = quicklist->count - start;
+00968     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (start < 0 && extent > (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long})(-start)) \{
+00969         \textcolor{comment}{/* else, if at negative offset, limit max size to rest of list. */}
+00970         extent = -start; \textcolor{comment}{/* c.f. LREM -29 29; just delete until end. */}
+00971     \}
+00972 
+00973     quicklistEntry entry;
+00974     \textcolor{keywordflow}{if} (!quicklistIndex(quicklist, start, &entry))
+00975         \textcolor{keywordflow}{return} 0;
+00976 
+00977     \hyperlink{debugmacro_8h_a74021f021dcdfbb22891787b79c5529d}{D}(\textcolor{stringliteral}{"Quicklist delete request for start %ld, count %ld, extent: %ld"}, start,
+00978       count, extent);
+00979     quicklistNode *node = entry.node;
+00980 
+00981     \textcolor{comment}{/* iterate over next nodes until everything is deleted. */}
+00982     \textcolor{keywordflow}{while} (extent) \{
+00983         quicklistNode *next = node->next;
+00984 
+00985         \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} del;
+00986         \textcolor{keywordtype}{int} delete\_entire\_node = 0;
+00987         \textcolor{keywordflow}{if} (entry.offset == 0 && extent >= node->count) \{
+00988             \textcolor{comment}{/* If we are deleting more than the count of this node, we}
+00989 \textcolor{comment}{             * can just delete the entire node without ziplist math. */}
+00990             delete\_entire\_node = 1;
+00991             del = node->count;
+00992         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (entry.offset >= 0 && extent >= node->count) \{
+00993             \textcolor{comment}{/* If deleting more nodes after this one, calculate delete based}
+00994 \textcolor{comment}{             * on size of current node. */}
+00995             del = node->count - entry.offset;
+00996         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (entry.offset < 0) \{
+00997             \textcolor{comment}{/* If offset is negative, we are in the first run of this loop}
+00998 \textcolor{comment}{             * and we are deleting the entire range}
+00999 \textcolor{comment}{             * from this start offset to end of list.  Since the Negative}
+01000 \textcolor{comment}{             * offset is the number of elements until the tail of the list,}
+01001 \textcolor{comment}{             * just use it directly as the deletion count. */}
+01002             del = -entry.offset;
+01003 
+01004             \textcolor{comment}{/* If the positive offset is greater than the remaining extent,}
+01005 \textcolor{comment}{             * we only delete the remaining extent, not the entire offset.}
+01006 \textcolor{comment}{             */}
+01007             \textcolor{keywordflow}{if} (del > extent)
+01008                 del = extent;
+01009         \} \textcolor{keywordflow}{else} \{
+01010             \textcolor{comment}{/* else, we are deleting less than the extent of this node, so}
+01011 \textcolor{comment}{             * use extent directly. */}
+01012             del = extent;
+01013         \}
+01014 
+01015         \hyperlink{debugmacro_8h_a74021f021dcdfbb22891787b79c5529d}{D}(\textcolor{stringliteral}{"[%ld]: asking to del: %ld because offset: %d; (ENTIRE NODE: %d), "}
+01016           \textcolor{stringliteral}{"node count: %u"},
+01017           extent, del, entry.offset, delete\_entire\_node, node->count);
+01018 
+01019         \textcolor{keywordflow}{if} (delete\_entire\_node) \{
+01020             \_\_quicklistDelNode(quicklist, node);
+01021         \} \textcolor{keywordflow}{else} \{
+01022             \hyperlink{quicklist_8c_a2f30e6f482d51059f06fa34df69734e1}{quicklistDecompressNodeForUse}(node);
+01023             node->zl = ziplistDeleteRange(node->zl, entry.offset, del);
+01024             \hyperlink{quicklist_8c_a03a3947a9423d234923343702619c553}{quicklistNodeUpdateSz}(node);
+01025             node->count -= del;
+01026             quicklist->count -= del;
+01027             \hyperlink{quicklist_8c_a07248675edc895a03df4c9dddced0740}{quicklistDeleteIfEmpty}(quicklist, node);
+01028             \textcolor{keywordflow}{if} (node)
+01029                 \hyperlink{quicklist_8c_a75672a682e90fe973934910f3ee866a3}{quicklistRecompressOnly}(quicklist, node);
+01030         \}
+01031 
+01032         extent -= del;
+01033 
+01034         node = next;
+01035 
+01036         entry.offset = 0;
+01037     \}
+01038     \textcolor{keywordflow}{return} 1;
+01039 \}
+01040 
+01041 \textcolor{comment}{/* Passthrough to ziplistCompare() */}
+01042 \textcolor{keywordtype}{int} quicklistCompare(\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *p1, \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *p2, \textcolor{keywordtype}{int} p2\_len) \{
+01043     \textcolor{keywordflow}{return} ziplistCompare(p1, p2, p2\_len);
+01044 \}
+01045 
+01046 \textcolor{comment}{/* Returns a quicklist iterator 'iter'. After the initialization every}
+01047 \textcolor{comment}{ * call to quicklistNext() will return the next element of the quicklist. */}
+01048 quicklistIter *quicklistGetIterator(\textcolor{keyword}{const} quicklist *quicklist, \textcolor{keywordtype}{int} direction) \{
+01049     quicklistIter *iter;
+01050 
+01051     iter = zmalloc(\textcolor{keyword}{sizeof}(*iter));
+01052 
+01053     \textcolor{keywordflow}{if} (direction == \hyperlink{adlist_8h_a353f032fdd7e66abe9f194fa7c89560b}{AL\_START\_HEAD}) \{
+01054         iter->current = quicklist->head;
+01055         iter->offset = 0;
+01056     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (direction == \hyperlink{adlist_8h_a7d37e2046bb8d302b8ca5de4883a1c7f}{AL\_START\_TAIL}) \{
+01057         iter->current = quicklist->tail;
+01058         iter->offset = -1;
+01059     \}
+01060 
+01061     iter->direction = direction;
+01062     iter->quicklist = quicklist;
+01063 
+01064     iter->zi = NULL;
+01065 
+01066     \textcolor{keywordflow}{return} iter;
+01067 \}
+01068 
+01069 \textcolor{comment}{/* Initialize an iterator at a specific offset 'idx' and make the iterator}
+01070 \textcolor{comment}{ * return nodes in 'direction' direction. */}
+01071 quicklistIter *quicklistGetIteratorAtIdx(\textcolor{keyword}{const} quicklist *quicklist,
+01072                                          \textcolor{keyword}{const} \textcolor{keywordtype}{int} direction,
+01073                                          \textcolor{keyword}{const} \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} idx) \{
+01074     quicklistEntry entry;
+01075 
+01076     \textcolor{keywordflow}{if} (quicklistIndex(quicklist, idx, &entry)) \{
+01077         quicklistIter *base = quicklistGetIterator(quicklist, direction);
+01078         base->zi = NULL;
+01079         base->current = entry.node;
+01080         base->offset = entry.offset;
+01081         \textcolor{keywordflow}{return} base;
+01082     \} \textcolor{keywordflow}{else} \{
+01083         \textcolor{keywordflow}{return} NULL;
+01084     \}
+01085 \}
+01086 
+01087 \textcolor{comment}{/* Release iterator.}
+01088 \textcolor{comment}{ * If we still have a valid current node, then re-encode current node. */}
+01089 \textcolor{keywordtype}{void} quicklistReleaseIterator(quicklistIter *iter) \{
+01090     \textcolor{keywordflow}{if} (iter->current)
+01091         \hyperlink{quicklist_8c_a4711a946d258d25f4bedace1458a2a1c}{quicklistCompress}(iter->quicklist, iter->current);
+01092 
+01093     zfree(iter);
+01094 \}
+01095 
+01096 \textcolor{comment}{/* Get next element in iterator.}
+01097 \textcolor{comment}{ *}
+01098 \textcolor{comment}{ * Note: You must NOT insert into the list while iterating over it.}
+01099 \textcolor{comment}{ * You *may* delete from the list while iterating using the}
+01100 \textcolor{comment}{ * quicklistDelEntry() function.}
+01101 \textcolor{comment}{ * If you insert into the quicklist while iterating, you should}
+01102 \textcolor{comment}{ * re-create the iterator after your addition.}
+01103 \textcolor{comment}{ *}
+01104 \textcolor{comment}{ * iter = quicklistGetIterator(quicklist,<direction>);}
+01105 \textcolor{comment}{ * quicklistEntry entry;}
+01106 \textcolor{comment}{ * while (quicklistNext(iter, &entry)) \{}
+01107 \textcolor{comment}{ *     if (entry.value)}
+01108 \textcolor{comment}{ *          [[ use entry.value with entry.sz ]]}
+01109 \textcolor{comment}{ *     else}
+01110 \textcolor{comment}{ *          [[ use entry.longval ]]}
+01111 \textcolor{comment}{ * \}}
+01112 \textcolor{comment}{ *}
+01113 \textcolor{comment}{ * Populates 'entry' with values for this iteration.}
+01114 \textcolor{comment}{ * Returns 0 when iteration is complete or if iteration not possible.}
+01115 \textcolor{comment}{ * If return value is 0, the contents of 'entry' are not valid.}
+01116 \textcolor{comment}{ */}
+01117 \textcolor{keywordtype}{int} quicklistNext(quicklistIter *iter, quicklistEntry *entry) \{
+01118     \hyperlink{quicklist_8c_abe57c7a46b2e8ec8e138de8cbe5e660a}{initEntry}(entry);
+01119 
+01120     \textcolor{keywordflow}{if} (!iter) \{
+01121         \hyperlink{debugmacro_8h_a74021f021dcdfbb22891787b79c5529d}{D}(\textcolor{stringliteral}{"Returning because no iter!"});
+01122         \textcolor{keywordflow}{return} 0;
+01123     \}
+01124 
+01125     entry->quicklist = iter->quicklist;
+01126     entry->node = iter->current;
+01127 
+01128     \textcolor{keywordflow}{if} (!iter->current) \{
+01129         \hyperlink{debugmacro_8h_a74021f021dcdfbb22891787b79c5529d}{D}(\textcolor{stringliteral}{"Returning because current node is NULL"})
+01130         \textcolor{keywordflow}{return} 0;
+01131     \}
+01132 
+01133     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *(*nextFn)(\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *, \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *) = NULL;
+01134     \textcolor{keywordtype}{int} offset\_update = 0;
+01135 
+01136     \textcolor{keywordflow}{if} (!iter->zi) \{
+01137         \textcolor{comment}{/* If !zi, use current index. */}
+01138         \hyperlink{quicklist_8c_a2f30e6f482d51059f06fa34df69734e1}{quicklistDecompressNodeForUse}(iter->current);
+01139         iter->zi = ziplistIndex(iter->current->zl, iter->offset);
+01140     \} \textcolor{keywordflow}{else} \{
+01141         \textcolor{comment}{/* else, use existing iterator offset and get prev/next as necessary. */}
+01142         \textcolor{keywordflow}{if} (iter->direction == \hyperlink{adlist_8h_a353f032fdd7e66abe9f194fa7c89560b}{AL\_START\_HEAD}) \{
+01143             nextFn = ziplistNext;
+01144             offset\_update = 1;
+01145         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (iter->direction == \hyperlink{adlist_8h_a7d37e2046bb8d302b8ca5de4883a1c7f}{AL\_START\_TAIL}) \{
+01146             nextFn = ziplistPrev;
+01147             offset\_update = -1;
+01148         \}
+01149         iter->zi = nextFn(iter->current->zl, iter->zi);
+01150         iter->offset += offset\_update;
+01151     \}
+01152 
+01153     entry->zi = iter->zi;
+01154     entry->offset = iter->offset;
+01155 
+01156     \textcolor{keywordflow}{if} (iter->zi) \{
+01157         \textcolor{comment}{/* Populate value from existing ziplist position */}
+01158         ziplistGet(entry->zi, &entry->value, &entry->sz, &entry->longval);
+01159         \textcolor{keywordflow}{return} 1;
+01160     \} \textcolor{keywordflow}{else} \{
+01161         \textcolor{comment}{/* We ran out of ziplist entries.}
+01162 \textcolor{comment}{         * Pick next node, update offset, then re-run retrieval. */}
+01163         \hyperlink{quicklist_8c_a4711a946d258d25f4bedace1458a2a1c}{quicklistCompress}(iter->quicklist, iter->current);
+01164         \textcolor{keywordflow}{if} (iter->direction == \hyperlink{adlist_8h_a353f032fdd7e66abe9f194fa7c89560b}{AL\_START\_HEAD}) \{
+01165             \textcolor{comment}{/* Forward traversal */}
+01166             \hyperlink{debugmacro_8h_a74021f021dcdfbb22891787b79c5529d}{D}(\textcolor{stringliteral}{"Jumping to start of next node"});
+01167             iter->current = iter->current->next;
+01168             iter->offset = 0;
+01169         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (iter->direction == \hyperlink{adlist_8h_a7d37e2046bb8d302b8ca5de4883a1c7f}{AL\_START\_TAIL}) \{
+01170             \textcolor{comment}{/* Reverse traversal */}
+01171             \hyperlink{debugmacro_8h_a74021f021dcdfbb22891787b79c5529d}{D}(\textcolor{stringliteral}{"Jumping to end of previous node"});
+01172             iter->current = iter->current->prev;
+01173             iter->offset = -1;
+01174         \}
+01175         iter->zi = NULL;
+01176         \textcolor{keywordflow}{return} quicklistNext(iter, entry);
+01177     \}
+01178 \}
+01179 
+01180 \textcolor{comment}{/* Duplicate the quicklist.}
+01181 \textcolor{comment}{ * On success a copy of the original quicklist is returned.}
+01182 \textcolor{comment}{ *}
+01183 \textcolor{comment}{ * The original quicklist both on success or error is never modified.}
+01184 \textcolor{comment}{ *}
+01185 \textcolor{comment}{ * Returns newly allocated quicklist. */}
+01186 quicklist *quicklistDup(quicklist *orig) \{
+01187     quicklist *copy;
+01188 
+01189     copy = quicklistNew(orig->fill, orig->compress);
+01190 
+01191     \textcolor{keywordflow}{for} (quicklistNode *current = orig->head; current;
+01192          current = current->next) \{
+01193         quicklistNode *node = quicklistCreateNode();
+01194 
+01195         \textcolor{keywordflow}{if} (current->encoding == \hyperlink{quicklist_8h_a6ce238912d4049e020b686def25c9566}{QUICKLIST\_NODE\_ENCODING\_LZF}) \{
+01196             quicklistLZF *lzf = (quicklistLZF *)current->zl;
+01197             size\_t lzf\_sz = \textcolor{keyword}{sizeof}(*lzf) + lzf->sz;
+01198             node->zl = zmalloc(lzf\_sz);
+01199             memcpy(node->zl, current->zl, lzf\_sz);
+01200         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (current->encoding == \hyperlink{quicklist_8h_a064c051a8fda9aa87dc3556b9cafc911}{QUICKLIST\_NODE\_ENCODING\_RAW}) \{
+01201             node->zl = zmalloc(current->sz);
+01202             memcpy(node->zl, current->zl, current->sz);
+01203         \}
+01204 
+01205         node->count = current->count;
+01206         copy->count += node->count;
+01207         node->sz = current->sz;
+01208         node->encoding = current->encoding;
+01209 
+01210         \_quicklistInsertNodeAfter(copy, copy->tail, node);
+01211     \}
+01212 
+01213     \textcolor{comment}{/* copy->count must equal orig->count here */}
+01214     \textcolor{keywordflow}{return} copy;
+01215 \}
+01216 
+01217 \textcolor{comment}{/* Populate 'entry' with the element at the specified zero-based index}
+01218 \textcolor{comment}{ * where 0 is the head, 1 is the element next to head}
+01219 \textcolor{comment}{ * and so on. Negative integers are used in order to count}
+01220 \textcolor{comment}{ * from the tail, -1 is the last element, -2 the penultimate}
+01221 \textcolor{comment}{ * and so on. If the index is out of range 0 is returned.}
+01222 \textcolor{comment}{ *}
+01223 \textcolor{comment}{ * Returns 1 if element found}
+01224 \textcolor{comment}{ * Returns 0 if element not found */}
+01225 \textcolor{keywordtype}{int} quicklistIndex(\textcolor{keyword}{const} quicklist *quicklist, \textcolor{keyword}{const} \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} idx,
+01226                    quicklistEntry *entry) \{
+01227     quicklistNode *n;
+01228     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} accum = 0;
+01229     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} index;
+01230     \textcolor{keywordtype}{int} forward = idx < 0 ? 0 : 1; \textcolor{comment}{/* < 0 -> reverse, 0+ -> forward */}
+01231 
+01232     \hyperlink{quicklist_8c_abe57c7a46b2e8ec8e138de8cbe5e660a}{initEntry}(entry);
+01233     entry->quicklist = quicklist;
+01234 
+01235     \textcolor{keywordflow}{if} (!forward) \{
+01236         index = (-idx) - 1;
+01237         n = quicklist->tail;
+01238     \} \textcolor{keywordflow}{else} \{
+01239         index = idx;
+01240         n = quicklist->head;
+01241     \}
+01242 
+01243     \textcolor{keywordflow}{if} (index >= quicklist->count)
+01244         \textcolor{keywordflow}{return} 0;
+01245 
+01246     \textcolor{keywordflow}{while} (\hyperlink{quicklist_8c_a217a0bd562b98ae8c2ffce44935351e1}{likely}(n)) \{
+01247         \textcolor{keywordflow}{if} ((accum + n->count) > index) \{
+01248             \textcolor{keywordflow}{break};
+01249         \} \textcolor{keywordflow}{else} \{
+01250             \hyperlink{debugmacro_8h_a74021f021dcdfbb22891787b79c5529d}{D}(\textcolor{stringliteral}{"Skipping over (%p) %u at accum %lld"}, (\textcolor{keywordtype}{void} *)n, n->count,
+01251               accum);
+01252             accum += n->count;
+01253             n = forward ? n->next : n->prev;
+01254         \}
+01255     \}
+01256 
+01257     \textcolor{keywordflow}{if} (!n)
+01258         \textcolor{keywordflow}{return} 0;
+01259 
+01260     \hyperlink{debugmacro_8h_a74021f021dcdfbb22891787b79c5529d}{D}(\textcolor{stringliteral}{"Found node: %p at accum %llu, idx %llu, sub+ %llu, sub- %llu"}, (\textcolor{keywordtype}{void} *)n,
+01261       accum, index, index - accum, (-index) - 1 + accum);
+01262 
+01263     entry->node = n;
+01264     \textcolor{keywordflow}{if} (forward) \{
+01265         \textcolor{comment}{/* forward = normal head-to-tail offset. */}
+01266         entry->offset = index - accum;
+01267     \} \textcolor{keywordflow}{else} \{
+01268         \textcolor{comment}{/* reverse = need negative offset for tail-to-head, so undo}
+01269 \textcolor{comment}{         * the result of the original if (index < 0) above. */}
+01270         entry->offset = (-index) - 1 + accum;
+01271     \}
+01272 
+01273     \hyperlink{quicklist_8c_a2f30e6f482d51059f06fa34df69734e1}{quicklistDecompressNodeForUse}(entry->node);
+01274     entry->zi = ziplistIndex(entry->node->zl, entry->offset);
+01275     ziplistGet(entry->zi, &entry->value, &entry->sz, &entry->longval);
+01276     \textcolor{comment}{/* The caller will use our result, so we don't re-compress here.}
+01277 \textcolor{comment}{     * The caller can recompress or delete the node as needed. */}
+01278     \textcolor{keywordflow}{return} 1;
+01279 \}
+01280 
+01281 \textcolor{comment}{/* Rotate quicklist by moving the tail element to the head. */}
+01282 \textcolor{keywordtype}{void} quicklistRotate(quicklist *quicklist) \{
+01283     \textcolor{keywordflow}{if} (quicklist->count <= 1)
+01284         \textcolor{keywordflow}{return};
+01285 
+01286     \textcolor{comment}{/* First, get the tail entry */}
+01287     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *p = ziplistIndex(quicklist->tail->zl, -1);
+01288     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *value;
+01289     \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} longval;
+01290     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{int} sz;
+01291     \textcolor{keywordtype}{char} longstr[32] = \{0\};
+01292     ziplistGet(p, &value, &sz, &longval);
+01293 
+01294     \textcolor{comment}{/* If value found is NULL, then ziplistGet populated longval instead */}
+01295     \textcolor{keywordflow}{if} (!value) \{
+01296         \textcolor{comment}{/* Write the longval as a string so we can re-add it */}
+01297         sz = ll2string(longstr, \textcolor{keyword}{sizeof}(longstr), longval);
+01298         value = (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *)longstr;
+01299     \}
+01300 
+01301     \textcolor{comment}{/* Add tail entry to head (must happen before tail is deleted). */}
+01302     quicklistPushHead(quicklist, value, sz);
+01303 
+01304     \textcolor{comment}{/* If quicklist has only one node, the head ziplist is also the}
+01305 \textcolor{comment}{     * tail ziplist and PushHead() could have reallocated our single ziplist,}
+01306 \textcolor{comment}{     * which would make our pre-existing 'p' unusable. */}
+01307     \textcolor{keywordflow}{if} (quicklist->len == 1) \{
+01308         p = ziplistIndex(quicklist->tail->zl, -1);
+01309     \}
+01310 
+01311     \textcolor{comment}{/* Remove tail entry. */}
+01312     quicklistDelIndex(quicklist, quicklist->tail, &p);
+01313 \}
+01314 
+01315 \textcolor{comment}{/* pop from quicklist and return result in 'data' ptr.  Value of 'data'}
+01316 \textcolor{comment}{ * is the return value of 'saver' function pointer if the data is NOT a number.}
+01317 \textcolor{comment}{ *}
+01318 \textcolor{comment}{ * If the quicklist element is a long long, then the return value is returned in}
+01319 \textcolor{comment}{ * 'sval'.}
+01320 \textcolor{comment}{ *}
+01321 \textcolor{comment}{ * Return value of 0 means no elements available.}
+01322 \textcolor{comment}{ * Return value of 1 means check 'data' and 'sval' for values.}
+01323 \textcolor{comment}{ * If 'data' is set, use 'data' and 'sz'.  Otherwise, use 'sval'. */}
+01324 \textcolor{keywordtype}{int} quicklistPopCustom(quicklist *quicklist, \textcolor{keywordtype}{int} where, \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} **data,
+01325                        \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{int} *sz, \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} *sval,
+01326                        \textcolor{keywordtype}{void} *(*saver)(\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *data, \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{int} sz)) \{
+01327     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *p;
+01328     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *vstr;
+01329     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{int} vlen;
+01330     \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} vlong;
+01331     \textcolor{keywordtype}{int} pos = (where == \hyperlink{quicklist_8h_a4cbe05838d62e8d1c8bfa46c9f1b083a}{QUICKLIST\_HEAD}) ? 0 : -1;
+01332 
+01333     \textcolor{keywordflow}{if} (quicklist->count == 0)
+01334         \textcolor{keywordflow}{return} 0;
+01335 
+01336     \textcolor{keywordflow}{if} (data)
+01337         *data = NULL;
+01338     \textcolor{keywordflow}{if} (sz)
+01339         *sz = 0;
+01340     \textcolor{keywordflow}{if} (sval)
+01341         *sval = -123456789;
+01342 
+01343     quicklistNode *node;
+01344     \textcolor{keywordflow}{if} (where == \hyperlink{quicklist_8h_a4cbe05838d62e8d1c8bfa46c9f1b083a}{QUICKLIST\_HEAD} && quicklist->head) \{
+01345         node = quicklist->head;
+01346     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (where == \hyperlink{quicklist_8h_a602bad1be3a6abb2a66ef87387cb7698}{QUICKLIST\_TAIL} && quicklist->tail) \{
+01347         node = quicklist->tail;
+01348     \} \textcolor{keywordflow}{else} \{
+01349         \textcolor{keywordflow}{return} 0;
+01350     \}
+01351 
+01352     p = ziplistIndex(node->zl, pos);
+01353     \textcolor{keywordflow}{if} (ziplistGet(p, &vstr, &vlen, &vlong)) \{
+01354         \textcolor{keywordflow}{if} (vstr) \{
+01355             \textcolor{keywordflow}{if} (data)
+01356                 *data = saver(vstr, vlen);
+01357             \textcolor{keywordflow}{if} (sz)
+01358                 *sz = vlen;
+01359         \} \textcolor{keywordflow}{else} \{
+01360             \textcolor{keywordflow}{if} (data)
+01361                 *data = NULL;
+01362             \textcolor{keywordflow}{if} (sval)
+01363                 *sval = vlong;
+01364         \}
+01365         quicklistDelIndex(quicklist, node, &p);
+01366         \textcolor{keywordflow}{return} 1;
+01367     \}
+01368     \textcolor{keywordflow}{return} 0;
+01369 \}
+01370 
+01371 \textcolor{comment}{/* Return a malloc'd copy of data passed in */}
+01372 \hyperlink{quicklist_8c_a9c22c9c899458021930a552a4f94d317}{REDIS\_STATIC} \textcolor{keywordtype}{void} *\_quicklistSaver(\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *data, \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{int} sz) \{
+01373     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *vstr;
+01374     \textcolor{keywordflow}{if} (data) \{
+01375         vstr = zmalloc(sz);
+01376         memcpy(vstr, data, sz);
+01377         \textcolor{keywordflow}{return} vstr;
+01378     \}
+01379     \textcolor{keywordflow}{return} NULL;
+01380 \}
+01381 
+01382 \textcolor{comment}{/* Default pop function}
+01383 \textcolor{comment}{ *}
+01384 \textcolor{comment}{ * Returns malloc'd value from quicklist */}
+01385 \textcolor{keywordtype}{int} quicklistPop(quicklist *quicklist, \textcolor{keywordtype}{int} where, \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} **data,
+01386                  \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{int} *sz, \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} *slong) \{
+01387     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *vstr;
+01388     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{int} vlen;
+01389     \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} vlong;
+01390     \textcolor{keywordflow}{if} (quicklist->count == 0)
+01391         \textcolor{keywordflow}{return} 0;
+01392     \textcolor{keywordtype}{int} ret = quicklistPopCustom(quicklist, where, &vstr, &vlen, &vlong,
+01393                                  \_quicklistSaver);
+01394     \textcolor{keywordflow}{if} (data)
+01395         *data = vstr;
+01396     \textcolor{keywordflow}{if} (slong)
+01397         *slong = vlong;
+01398     \textcolor{keywordflow}{if} (sz)
+01399         *sz = vlen;
+01400     \textcolor{keywordflow}{return} ret;
+01401 \}
+01402 
+01403 \textcolor{comment}{/* Wrapper to allow argument-based switching between HEAD/TAIL pop */}
+01404 \textcolor{keywordtype}{void} quicklistPush(quicklist *quicklist, \textcolor{keywordtype}{void} *value, \textcolor{keyword}{const} size\_t sz,
+01405                    \textcolor{keywordtype}{int} where) \{
+01406     \textcolor{keywordflow}{if} (where == \hyperlink{quicklist_8h_a4cbe05838d62e8d1c8bfa46c9f1b083a}{QUICKLIST\_HEAD}) \{
+01407         quicklistPushHead(quicklist, value, sz);
+01408     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (where == \hyperlink{quicklist_8h_a602bad1be3a6abb2a66ef87387cb7698}{QUICKLIST\_TAIL}) \{
+01409         quicklistPushTail(quicklist, value, sz);
+01410     \}
+01411 \}
+01412 
+01413 \textcolor{comment}{/* The rest of this file is test cases and test helpers. */}
+01414 \textcolor{preprocessor}{#}\textcolor{preprocessor}{ifdef} \textcolor{preprocessor}{REDIS\_TEST}
+01415 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{stdint}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+01416 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{sys}\textcolor{preprocessor}{/}\textcolor{preprocessor}{time}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+01417 
+01418 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{assert}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_e}\textcolor{preprocessor}{)}
+01419     \textcolor{preprocessor}{do} \textcolor{preprocessor}{\{}
+01420         \textcolor{preprocessor}{if} \textcolor{preprocessor}{(}\textcolor{preprocessor}{!}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_e}\textcolor{preprocessor}{)}\textcolor{preprocessor}{)} \textcolor{preprocessor}{\{}
+01421             \textcolor{preprocessor}{printf}\textcolor{preprocessor}{(}\textcolor{stringliteral}{"\(\backslash\)n\(\backslash\)n=== ASSERTION FAILED ===\(\backslash\)n"}\textcolor{preprocessor}{)}\textcolor{preprocessor}{;}
+01422             \textcolor{preprocessor}{printf}\textcolor{preprocessor}{(}\textcolor{stringliteral}{"==> %s:%d '%s' is not true\(\backslash\)n"}\textcolor{preprocessor}{,} \textcolor{preprocessor}{\_\_FILE\_\_}\textcolor{preprocessor}{,} \textcolor{preprocessor}{\_\_LINE\_\_}\textcolor{preprocessor}{,} \textcolor{preprocessor}{#}\textcolor{preprocessor}{\_e}\textcolor{preprocessor}{)}\textcolor{preprocessor}{;}
+01423             \textcolor{preprocessor}{err}\textcolor{preprocessor}{++}\textcolor{preprocessor}{;}
+01424         \textcolor{preprocessor}{\}}
+01425     \textcolor{preprocessor}{\}} \textcolor{preprocessor}{while} \textcolor{preprocessor}{(}0\textcolor{preprocessor}{)}
+01426 
+01427 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{yell}\textcolor{preprocessor}{(}\textcolor{preprocessor}{str}\textcolor{preprocessor}{,} \textcolor{preprocessor}{...}\textcolor{preprocessor}{)} \textcolor{preprocessor}{printf}\textcolor{preprocessor}{(}\textcolor{stringliteral}{"ERROR! "} \textcolor{preprocessor}{str} \textcolor{stringliteral}{"\(\backslash\)n\(\backslash\)n"}\textcolor{preprocessor}{,} \textcolor{preprocessor}{\_\_VA\_ARGS\_\_}\textcolor{preprocessor}{)}
+01428 
+01429 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{OK} \textcolor{preprocessor}{printf}\textcolor{preprocessor}{(}\textcolor{stringliteral}{"\(\backslash\)tOK\(\backslash\)n"}\textcolor{preprocessor}{)}
+01430 
+01431 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{ERROR}
+01432     \textcolor{preprocessor}{do} \textcolor{preprocessor}{\{}
+01433         \textcolor{preprocessor}{printf}\textcolor{preprocessor}{(}\textcolor{stringliteral}{"\(\backslash\)tERROR!\(\backslash\)n"}\textcolor{preprocessor}{)}\textcolor{preprocessor}{;}
+01434         \textcolor{preprocessor}{err}\textcolor{preprocessor}{++}\textcolor{preprocessor}{;}
+01435     \textcolor{preprocessor}{\}} \textcolor{preprocessor}{while} \textcolor{preprocessor}{(}0\textcolor{preprocessor}{)}
+01436 
+01437 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{ERR}\textcolor{preprocessor}{(}\textcolor{preprocessor}{x}\textcolor{preprocessor}{,} \textcolor{preprocessor}{...}\textcolor{preprocessor}{)}
+01438     \textcolor{preprocessor}{do} \textcolor{preprocessor}{\{}
+01439         \textcolor{preprocessor}{printf}\textcolor{preprocessor}{(}\textcolor{stringliteral}{"%s:%s:%d:\(\backslash\)t"}\textcolor{preprocessor}{,} \textcolor{preprocessor}{\_\_FILE\_\_}\textcolor{preprocessor}{,} \textcolor{preprocessor}{\_\_FUNCTION\_\_}\textcolor{preprocessor}{,} \textcolor{preprocessor}{\_\_LINE\_\_}\textcolor{preprocessor}{)}\textcolor{preprocessor}{;}
+01440         \textcolor{preprocessor}{printf}\textcolor{preprocessor}{(}\textcolor{stringliteral}{"ERROR! "} \textcolor{preprocessor}{x} \textcolor{stringliteral}{"\(\backslash\)n"}\textcolor{preprocessor}{,} \textcolor{preprocessor}{\_\_VA\_ARGS\_\_}\textcolor{preprocessor}{)}\textcolor{preprocessor}{;}
+01441         \textcolor{preprocessor}{err}\textcolor{preprocessor}{++}\textcolor{preprocessor}{;}
+01442     \textcolor{preprocessor}{\}} \textcolor{preprocessor}{while} \textcolor{preprocessor}{(}0\textcolor{preprocessor}{)}
+01443 
+01444 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{TEST}\textcolor{preprocessor}{(}\textcolor{preprocessor}{name}\textcolor{preprocessor}{)} \textcolor{preprocessor}{printf}\textcolor{preprocessor}{(}\textcolor{stringliteral}{"test — %s\(\backslash\)n"}\textcolor{preprocessor}{,} \textcolor{preprocessor}{name}\textcolor{preprocessor}{)}\textcolor{preprocessor}{;}
+01445 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{TEST\_DESC}\textcolor{preprocessor}{(}\textcolor{preprocessor}{name}\textcolor{preprocessor}{,} \textcolor{preprocessor}{...}\textcolor{preprocessor}{)} \textcolor{preprocessor}{printf}\textcolor{preprocessor}{(}\textcolor{stringliteral}{"test — "} \textcolor{preprocessor}{name} \textcolor{stringliteral}{"\(\backslash\)n"}\textcolor{preprocessor}{,} \textcolor{preprocessor}{\_\_VA\_ARGS\_\_}\textcolor{preprocessor}{)}\textcolor{preprocessor}{;}
+01446 
+01447 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{QL\_TEST\_VERBOSE} 0
+01448 
+01449 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{UNUSED}\textcolor{preprocessor}{(}\textcolor{preprocessor}{x}\textcolor{preprocessor}{)} \textcolor{preprocessor}{(}\textcolor{preprocessor}{void}\textcolor{preprocessor}{)}\textcolor{preprocessor}{(}\textcolor{preprocessor}{x}\textcolor{preprocessor}{)}
+01450 \textcolor{keyword}{static} \textcolor{keywordtype}{void} ql\_info(quicklist *ql) \{
+01451 \textcolor{preprocessor}{#}\textcolor{preprocessor}{if} \textcolor{preprocessor}{QL\_TEST\_VERBOSE}
+01452     printf(\textcolor{stringliteral}{"Container length: %lu\(\backslash\)n"}, ql->len);
+01453     printf(\textcolor{stringliteral}{"Container size: %lu\(\backslash\)n"}, ql->count);
+01454     \textcolor{keywordflow}{if} (ql->head)
+01455         printf(\textcolor{stringliteral}{"\(\backslash\)t(zsize head: %d)\(\backslash\)n"}, ziplistLen(ql->head->zl));
+01456     \textcolor{keywordflow}{if} (ql->tail)
+01457         printf(\textcolor{stringliteral}{"\(\backslash\)t(zsize tail: %d)\(\backslash\)n"}, ziplistLen(ql->tail->zl));
+01458     printf(\textcolor{stringliteral}{"\(\backslash\)n"});
+01459 \textcolor{preprocessor}{#}\textcolor{preprocessor}{else}
+01460     UNUSED(ql);
+01461 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+01462 \}
+01463 
+01464 \textcolor{comment}{/* Return the UNIX time in microseconds */}
+01465 \textcolor{keyword}{static} \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} ustime(\textcolor{keywordtype}{void}) \{
+01466     \textcolor{keyword}{struct} timeval tv;
+01467     \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} ust;
+01468 
+01469     gettimeofday(&tv, NULL);
+01470     ust = ((\textcolor{keywordtype}{long} \textcolor{keywordtype}{long})tv.tv\_sec) * 1000000;
+01471     ust += tv.tv\_usec;
+01472     \textcolor{keywordflow}{return} ust;
+01473 \}
+01474 
+01475 \textcolor{comment}{/* Return the UNIX time in milliseconds */}
+01476 \textcolor{keyword}{static} \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} mstime(\textcolor{keywordtype}{void}) \{ \textcolor{keywordflow}{return} ustime() / 1000; \}
+01477 
+01478 \textcolor{comment}{/* Iterate over an entire quicklist.}
+01479 \textcolor{comment}{ * Print the list if 'print' == 1.}
+01480 \textcolor{comment}{ *}
+01481 \textcolor{comment}{ * Returns physical count of elements found by iterating over the list. */}
+01482 \textcolor{keyword}{static} \textcolor{keywordtype}{int} \_itrprintr(quicklist *ql, \textcolor{keywordtype}{int} print, \textcolor{keywordtype}{int} forward) \{
+01483     quicklistIter *iter =
+01484         quicklistGetIterator(ql, forward ? AL\_START\_HEAD : AL\_START\_TAIL);
+01485     quicklistEntry entry;
+01486     \textcolor{keywordtype}{int} i = 0;
+01487     \textcolor{keywordtype}{int} p = 0;
+01488     quicklistNode *prev = NULL;
+01489     \textcolor{keywordflow}{while} (quicklistNext(iter, &entry)) \{
+01490         \textcolor{keywordflow}{if} (entry.node != prev) \{
+01491             \textcolor{comment}{/* Count the number of list nodes too */}
+01492             p++;
+01493             prev = entry.node;
+01494         \}
+01495         \textcolor{keywordflow}{if} (print) \{
+01496             printf(\textcolor{stringliteral}{"[%3d (%2d)]: [%.*s] (%lld)\(\backslash\)n"}, i, p, entry.sz,
+01497                    (\textcolor{keywordtype}{char} *)entry.value, entry.longval);
+01498         \}
+01499         i++;
+01500     \}
+01501     quicklistReleaseIterator(iter);
+01502     \textcolor{keywordflow}{return} i;
+01503 \}
+01504 \textcolor{keyword}{static} \textcolor{keywordtype}{int} itrprintr(quicklist *ql, \textcolor{keywordtype}{int} print) \{
+01505     \textcolor{keywordflow}{return} \_itrprintr(ql, print, 1);
+01506 \}
+01507 
+01508 \textcolor{keyword}{static} \textcolor{keywordtype}{int} itrprintr\_rev(quicklist *ql, \textcolor{keywordtype}{int} print) \{
+01509     \textcolor{keywordflow}{return} \_itrprintr(ql, print, 0);
+01510 \}
+01511 
+01512 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{ql\_verify}\textcolor{preprocessor}{(}\textcolor{preprocessor}{a}\textcolor{preprocessor}{,} \textcolor{preprocessor}{b}\textcolor{preprocessor}{,} \textcolor{preprocessor}{c}\textcolor{preprocessor}{,} \textcolor{preprocessor}{d}\textcolor{preprocessor}{,} \textcolor{preprocessor}{e}\textcolor{preprocessor}{)}
+01513     \textcolor{preprocessor}{do} \textcolor{preprocessor}{\{}
+01514         \textcolor{preprocessor}{err} \textcolor{preprocessor}{+=} \textcolor{preprocessor}{\_ql\_verify}\textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{a}\textcolor{preprocessor}{)}\textcolor{preprocessor}{,} \textcolor{preprocessor}{(}\textcolor{preprocessor}{b}\textcolor{preprocessor}{)}\textcolor{preprocessor}{,} \textcolor{preprocessor}{(}\textcolor{preprocessor}{c}\textcolor{preprocessor}{)}\textcolor{preprocessor}{,} \textcolor{preprocessor}{(}\textcolor{preprocessor}{d}\textcolor{preprocessor}{)}\textcolor{preprocessor}{,} \textcolor{preprocessor}{(}\textcolor{preprocessor}{e}\textcolor{preprocessor}{)}\textcolor{preprocessor}{)}\textcolor{preprocessor}{;}
+01515     \textcolor{preprocessor}{\}} \textcolor{preprocessor}{while} \textcolor{preprocessor}{(}0\textcolor{preprocessor}{)}
+01516 
+01517 \textcolor{comment}{/* Verify list metadata matches physical list contents. */}
+01518 \textcolor{keyword}{static} \textcolor{keywordtype}{int} \_ql\_verify(quicklist *ql, uint32\_t len, uint32\_t count,
+01519                       uint32\_t head\_count, uint32\_t tail\_count) \{
+01520     \textcolor{keywordtype}{int} errors = 0;
+01521 
+01522     ql\_info(ql);
+01523     \textcolor{keywordflow}{if} (len != ql->len) \{
+01524         yell(\textcolor{stringliteral}{"quicklist length wrong: expected %d, got %u"}, len, ql->len);
+01525         errors++;
+01526     \}
+01527 
+01528     \textcolor{keywordflow}{if} (count != ql->count) \{
+01529         yell(\textcolor{stringliteral}{"quicklist count wrong: expected %d, got %lu"}, count, ql->count);
+01530         errors++;
+01531     \}
+01532 
+01533     \textcolor{keywordtype}{int} loopr = itrprintr(ql, 0);
+01534     \textcolor{keywordflow}{if} (loopr != (\textcolor{keywordtype}{int})ql->count) \{
+01535         yell(\textcolor{stringliteral}{"quicklist cached count not match actual count: expected %lu, got "}
+01536              \textcolor{stringliteral}{"%d"},
+01537              ql->count, loopr);
+01538         errors++;
+01539     \}
+01540 
+01541     \textcolor{keywordtype}{int} rloopr = itrprintr\_rev(ql, 0);
+01542     \textcolor{keywordflow}{if} (loopr != rloopr) \{
+01543         yell(\textcolor{stringliteral}{"quicklist has different forward count than reverse count!  "}
+01544              \textcolor{stringliteral}{"Forward count is %d, reverse count is %d."},
+01545              loopr, rloopr);
+01546         errors++;
+01547     \}
+01548 
+01549     \textcolor{keywordflow}{if} (ql->len == 0 && !errors) \{
+01550         OK;
+01551         \textcolor{keywordflow}{return} errors;
+01552     \}
+01553 
+01554     \textcolor{keywordflow}{if} (ql->head && head\_count != ql->head->count &&
+01555         head\_count != ziplistLen(ql->head->zl)) \{
+01556         yell(\textcolor{stringliteral}{"quicklist head count wrong: expected %d, "}
+01557              \textcolor{stringliteral}{"got cached %d vs. actual %d"},
+01558              head\_count, ql->head->count, ziplistLen(ql->head->zl));
+01559         errors++;
+01560     \}
+01561 
+01562     \textcolor{keywordflow}{if} (ql->tail && tail\_count != ql->tail->count &&
+01563         tail\_count != ziplistLen(ql->tail->zl)) \{
+01564         yell(\textcolor{stringliteral}{"quicklist tail count wrong: expected %d, "}
+01565              \textcolor{stringliteral}{"got cached %u vs. actual %d"},
+01566              tail\_count, ql->tail->count, ziplistLen(ql->tail->zl));
+01567         errors++;
+01568     \}
+01569 
+01570     \textcolor{keywordflow}{if} (quicklistAllowsCompression(ql)) \{
+01571         quicklistNode *node = ql->head;
+01572         \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{int} low\_raw = ql->compress;
+01573         \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{int} high\_raw = ql->len - ql->compress;
+01574 
+01575         \textcolor{keywordflow}{for} (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{int} at = 0; at < ql->len; at++, node = node->next) \{
+01576             \textcolor{keywordflow}{if} (node && (at < low\_raw || at >= high\_raw)) \{
+01577                 \textcolor{keywordflow}{if} (node->encoding != QUICKLIST\_NODE\_ENCODING\_RAW) \{
+01578                     yell(\textcolor{stringliteral}{"Incorrect compression: node %d is "}
+01579                          \textcolor{stringliteral}{"compressed at depth %d ((%u, %u); total "}
+01580                          \textcolor{stringliteral}{"nodes: %u; size: %u; recompress: %d)"},
+01581                          at, ql->compress, low\_raw, high\_raw, ql->len, node->sz,
+01582                          node->recompress);
+01583                     errors++;
+01584                 \}
+01585             \} \textcolor{keywordflow}{else} \{
+01586                 \textcolor{keywordflow}{if} (node->encoding != QUICKLIST\_NODE\_ENCODING\_LZF &&
+01587                     !node->attempted\_compress) \{
+01588                     yell(\textcolor{stringliteral}{"Incorrect non-compression: node %d is NOT "}
+01589                          \textcolor{stringliteral}{"compressed at depth %d ((%u, %u); total "}
+01590                          \textcolor{stringliteral}{"nodes: %u; size: %u; recompress: %d; attempted: %d)"},
+01591                          at, ql->compress, low\_raw, high\_raw, ql->len, node->sz,
+01592                          node->recompress, node->attempted\_compress);
+01593                     errors++;
+01594                 \}
+01595             \}
+01596         \}
+01597     \}
+01598 
+01599     \textcolor{keywordflow}{if} (!errors)
+01600         OK;
+01601     \textcolor{keywordflow}{return} errors;
+01602 \}
+01603 
+01604 \textcolor{comment}{/* Generate new string concatenating integer i against string 'prefix' */}
+01605 \textcolor{keyword}{static} \textcolor{keywordtype}{char} *genstr(\textcolor{keywordtype}{char} *prefix, \textcolor{keywordtype}{int} i) \{
+01606     \textcolor{keyword}{static} \textcolor{keywordtype}{char} result[64] = \{0\};
+01607     snprintf(result, \textcolor{keyword}{sizeof}(result), \textcolor{stringliteral}{"%s%d"}, prefix, i);
+01608     \textcolor{keywordflow}{return} result;
+01609 \}
+01610 
+01611 \textcolor{comment}{/* main test, but callable from other files */}
+01612 \textcolor{keywordtype}{int} quicklistTest(\textcolor{keywordtype}{int} argc, \textcolor{keywordtype}{char} *argv[]) \{
+01613     UNUSED(argc);
+01614     UNUSED(argv);
+01615 
+01616     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{int} err = 0;
+01617     \textcolor{keywordtype}{int} optimize\_start =
+01618         -(\textcolor{keywordtype}{int})(\textcolor{keyword}{sizeof}(optimization\_level) / \textcolor{keyword}{sizeof}(*optimization\_level));
+01619 
+01620     printf(\textcolor{stringliteral}{"Starting optimization offset at: %d\(\backslash\)n"}, optimize\_start);
+01621 
+01622     \textcolor{keywordtype}{int} options[] = \{0, 1, 2, 3, 4, 5, 6, 10\};
+01623     size\_t option\_count = \textcolor{keyword}{sizeof}(options) / \textcolor{keyword}{sizeof}(*options);
+01624     \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} runtime[option\_count];
+01625 
+01626     \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} \_i = 0; \_i < (\textcolor{keywordtype}{int})option\_count; \_i++) \{
+01627         printf(\textcolor{stringliteral}{"Testing Option %d\(\backslash\)n"}, options[\_i]);
+01628         \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} start = mstime();
+01629 
+01630         TEST(\textcolor{stringliteral}{"create list"}) \{
+01631             quicklist *ql = quicklistNew(-2, options[\_i]);
+01632             ql\_verify(ql, 0, 0, 0, 0);
+01633             quicklistRelease(ql);
+01634         \}
+01635 
+01636         TEST(\textcolor{stringliteral}{"add to tail of empty list"}) \{
+01637             quicklist *ql = quicklistNew(-2, options[\_i]);
+01638             quicklistPushTail(ql, \textcolor{stringliteral}{"hello"}, 6);
+01639             \textcolor{comment}{/* 1 for head and 1 for tail beacuse 1 node = head = tail */}
+01640             ql\_verify(ql, 1, 1, 1, 1);
+01641             quicklistRelease(ql);
+01642         \}
+01643 
+01644         TEST(\textcolor{stringliteral}{"add to head of empty list"}) \{
+01645             quicklist *ql = quicklistNew(-2, options[\_i]);
+01646             quicklistPushHead(ql, \textcolor{stringliteral}{"hello"}, 6);
+01647             \textcolor{comment}{/* 1 for head and 1 for tail beacuse 1 node = head = tail */}
+01648             ql\_verify(ql, 1, 1, 1, 1);
+01649             quicklistRelease(ql);
+01650         \}
+01651 
+01652         \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} f = optimize\_start; f < 32; f++) \{
+01653             TEST\_DESC(\textcolor{stringliteral}{"add to tail 5x at fill %d at compress %d"}, f,
+01654                       options[\_i]) \{
+01655                 quicklist *ql = quicklistNew(f, options[\_i]);
+01656                 \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} i = 0; i < 5; i++)
+01657                     quicklistPushTail(ql, genstr(\textcolor{stringliteral}{"hello"}, i), 32);
+01658                 \textcolor{keywordflow}{if} (ql->count != 5)
+01659                     ERROR;
+01660                 \textcolor{keywordflow}{if} (f == 32)
+01661                     ql\_verify(ql, 1, 5, 5, 5);
+01662                 quicklistRelease(ql);
+01663             \}
+01664         \}
+01665 
+01666         \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} f = optimize\_start; f < 32; f++) \{
+01667             TEST\_DESC(\textcolor{stringliteral}{"add to head 5x at fill %d at compress %d"}, f,
+01668                       options[\_i]) \{
+01669                 quicklist *ql = quicklistNew(f, options[\_i]);
+01670                 \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} i = 0; i < 5; i++)
+01671                     quicklistPushHead(ql, genstr(\textcolor{stringliteral}{"hello"}, i), 32);
+01672                 \textcolor{keywordflow}{if} (ql->count != 5)
+01673                     ERROR;
+01674                 \textcolor{keywordflow}{if} (f == 32)
+01675                     ql\_verify(ql, 1, 5, 5, 5);
+01676                 quicklistRelease(ql);
+01677             \}
+01678         \}
+01679 
+01680         \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} f = optimize\_start; f < 512; f++) \{
+01681             TEST\_DESC(\textcolor{stringliteral}{"add to tail 500x at fill %d at compress %d"}, f,
+01682                       options[\_i]) \{
+01683                 quicklist *ql = quicklistNew(f, options[\_i]);
+01684                 \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} i = 0; i < 500; i++)
+01685                     quicklistPushTail(ql, genstr(\textcolor{stringliteral}{"hello"}, i), 64);
+01686                 \textcolor{keywordflow}{if} (ql->count != 500)
+01687                     ERROR;
+01688                 \textcolor{keywordflow}{if} (f == 32)
+01689                     ql\_verify(ql, 16, 500, 32, 20);
+01690                 quicklistRelease(ql);
+01691             \}
+01692         \}
+01693 
+01694         \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} f = optimize\_start; f < 512; f++) \{
+01695             TEST\_DESC(\textcolor{stringliteral}{"add to head 500x at fill %d at compress %d"}, f,
+01696                       options[\_i]) \{
+01697                 quicklist *ql = quicklistNew(f, options[\_i]);
+01698                 \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} i = 0; i < 500; i++)
+01699                     quicklistPushHead(ql, genstr(\textcolor{stringliteral}{"hello"}, i), 32);
+01700                 \textcolor{keywordflow}{if} (ql->count != 500)
+01701                     ERROR;
+01702                 \textcolor{keywordflow}{if} (f == 32)
+01703                     ql\_verify(ql, 16, 500, 20, 32);
+01704                 quicklistRelease(ql);
+01705             \}
+01706         \}
+01707 
+01708         TEST(\textcolor{stringliteral}{"rotate empty"}) \{
+01709             quicklist *ql = quicklistNew(-2, options[\_i]);
+01710             quicklistRotate(ql);
+01711             ql\_verify(ql, 0, 0, 0, 0);
+01712             quicklistRelease(ql);
+01713         \}
+01714 
+01715         \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} f = optimize\_start; f < 32; f++) \{
+01716             TEST(\textcolor{stringliteral}{"rotate one val once"}) \{
+01717                 quicklist *ql = quicklistNew(f, options[\_i]);
+01718                 quicklistPushHead(ql, \textcolor{stringliteral}{"hello"}, 6);
+01719                 quicklistRotate(ql);
+01720                 \textcolor{comment}{/* Ignore compression verify because ziplist is}
+01721 \textcolor{comment}{                 * too small to compress. */}
+01722                 ql\_verify(ql, 1, 1, 1, 1);
+01723                 quicklistRelease(ql);
+01724             \}
+01725         \}
+01726 
+01727         \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} f = optimize\_start; f < 3; f++) \{
+01728             TEST\_DESC(\textcolor{stringliteral}{"rotate 500 val 5000 times at fill %d at compress %d"}, f,
+01729                       options[\_i]) \{
+01730                 quicklist *ql = quicklistNew(f, options[\_i]);
+01731                 quicklistPushHead(ql, \textcolor{stringliteral}{"900"}, 3);
+01732                 quicklistPushHead(ql, \textcolor{stringliteral}{"7000"}, 4);
+01733                 quicklistPushHead(ql, \textcolor{stringliteral}{"-1200"}, 5);
+01734                 quicklistPushHead(ql, \textcolor{stringliteral}{"42"}, 2);
+01735                 \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} i = 0; i < 500; i++)
+01736                     quicklistPushHead(ql, genstr(\textcolor{stringliteral}{"hello"}, i), 64);
+01737                 ql\_info(ql);
+01738                 \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} i = 0; i < 5000; i++) \{
+01739                     ql\_info(ql);
+01740                     quicklistRotate(ql);
+01741                 \}
+01742                 \textcolor{keywordflow}{if} (f == 1)
+01743                     ql\_verify(ql, 504, 504, 1, 1);
+01744                 \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (f == 2)
+01745                     ql\_verify(ql, 252, 504, 2, 2);
+01746                 \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (f == 32)
+01747                     ql\_verify(ql, 16, 504, 32, 24);
+01748                 quicklistRelease(ql);
+01749             \}
+01750         \}
+01751 
+01752         TEST(\textcolor{stringliteral}{"pop empty"}) \{
+01753             quicklist *ql = quicklistNew(-2, options[\_i]);
+01754             quicklistPop(ql, QUICKLIST\_HEAD, NULL, NULL, NULL);
+01755             ql\_verify(ql, 0, 0, 0, 0);
+01756             quicklistRelease(ql);
+01757         \}
+01758 
+01759         TEST(\textcolor{stringliteral}{"pop 1 string from 1"}) \{
+01760             quicklist *ql = quicklistNew(-2, options[\_i]);
+01761             \textcolor{keywordtype}{char} *populate = genstr(\textcolor{stringliteral}{"hello"}, 331);
+01762             quicklistPushHead(ql, populate, 32);
+01763             \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *data;
+01764             \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{int} sz;
+01765             \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} lv;
+01766             ql\_info(ql);
+01767             quicklistPop(ql, QUICKLIST\_HEAD, &data, &sz, &lv);
+01768             assert(data != NULL);
+01769             assert(sz == 32);
+01770             \textcolor{keywordflow}{if} (strcmp(populate, (\textcolor{keywordtype}{char} *)data))
+01771                 ERR(\textcolor{stringliteral}{"Pop'd value (%.*s) didn't equal original value (%s)"}, sz,
+01772                     data, populate);
+01773             zfree(data);
+01774             ql\_verify(ql, 0, 0, 0, 0);
+01775             quicklistRelease(ql);
+01776         \}
+01777 
+01778         TEST(\textcolor{stringliteral}{"pop head 1 number from 1"}) \{
+01779             quicklist *ql = quicklistNew(-2, options[\_i]);
+01780             quicklistPushHead(ql, \textcolor{stringliteral}{"55513"}, 5);
+01781             \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *data;
+01782             \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{int} sz;
+01783             \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} lv;
+01784             ql\_info(ql);
+01785             quicklistPop(ql, QUICKLIST\_HEAD, &data, &sz, &lv);
+01786             assert(data == NULL);
+01787             assert(lv == 55513);
+01788             ql\_verify(ql, 0, 0, 0, 0);
+01789             quicklistRelease(ql);
+01790         \}
+01791 
+01792         TEST(\textcolor{stringliteral}{"pop head 500 from 500"}) \{
+01793             quicklist *ql = quicklistNew(-2, options[\_i]);
+01794             \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} i = 0; i < 500; i++)
+01795                 quicklistPushHead(ql, genstr(\textcolor{stringliteral}{"hello"}, i), 32);
+01796             ql\_info(ql);
+01797             \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} i = 0; i < 500; i++) \{
+01798                 \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *data;
+01799                 \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{int} sz;
+01800                 \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} lv;
+01801                 \textcolor{keywordtype}{int} ret = quicklistPop(ql, QUICKLIST\_HEAD, &data, &sz, &lv);
+01802                 assert(ret == 1);
+01803                 assert(data != NULL);
+01804                 assert(sz == 32);
+01805                 \textcolor{keywordflow}{if} (strcmp(genstr(\textcolor{stringliteral}{"hello"}, 499 - i), (\textcolor{keywordtype}{char} *)data))
+01806                     ERR(\textcolor{stringliteral}{"Pop'd value (%.*s) didn't equal original value (%s)"},
+01807                         sz, data, genstr(\textcolor{stringliteral}{"hello"}, 499 - i));
+01808                 zfree(data);
+01809             \}
+01810             ql\_verify(ql, 0, 0, 0, 0);
+01811             quicklistRelease(ql);
+01812         \}
+01813 
+01814         TEST(\textcolor{stringliteral}{"pop head 5000 from 500"}) \{
+01815             quicklist *ql = quicklistNew(-2, options[\_i]);
+01816             \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} i = 0; i < 500; i++)
+01817                 quicklistPushHead(ql, genstr(\textcolor{stringliteral}{"hello"}, i), 32);
+01818             \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} i = 0; i < 5000; i++) \{
+01819                 \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *data;
+01820                 \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{int} sz;
+01821                 \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} lv;
+01822                 \textcolor{keywordtype}{int} ret = quicklistPop(ql, QUICKLIST\_HEAD, &data, &sz, &lv);
+01823                 \textcolor{keywordflow}{if} (i < 500) \{
+01824                     assert(ret == 1);
+01825                     assert(data != NULL);
+01826                     assert(sz == 32);
+01827                     \textcolor{keywordflow}{if} (strcmp(genstr(\textcolor{stringliteral}{"hello"}, 499 - i), (\textcolor{keywordtype}{char} *)data))
+01828                         ERR(\textcolor{stringliteral}{"Pop'd value (%.*s) didn't equal original value "}
+01829                             \textcolor{stringliteral}{"(%s)"},
+01830                             sz, data, genstr(\textcolor{stringliteral}{"hello"}, 499 - i));
+01831                     zfree(data);
+01832                 \} \textcolor{keywordflow}{else} \{
+01833                     assert(ret == 0);
+01834                 \}
+01835             \}
+01836             ql\_verify(ql, 0, 0, 0, 0);
+01837             quicklistRelease(ql);
+01838         \}
+01839 
+01840         TEST(\textcolor{stringliteral}{"iterate forward over 500 list"}) \{
+01841             quicklist *ql = quicklistNew(-2, options[\_i]);
+01842             quicklistSetFill(ql, 32);
+01843             \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} i = 0; i < 500; i++)
+01844                 quicklistPushHead(ql, genstr(\textcolor{stringliteral}{"hello"}, i), 32);
+01845             quicklistIter *iter = quicklistGetIterator(ql, AL\_START\_HEAD);
+01846             quicklistEntry entry;
+01847             \textcolor{keywordtype}{int} i = 499, count = 0;
+01848             \textcolor{keywordflow}{while} (quicklistNext(iter, &entry)) \{
+01849                 \textcolor{keywordtype}{char} *h = genstr(\textcolor{stringliteral}{"hello"}, i);
+01850                 \textcolor{keywordflow}{if} (strcmp((\textcolor{keywordtype}{char} *)entry.value, h))
+01851                     ERR(\textcolor{stringliteral}{"value [%s] didn't match [%s] at position %d"},
+01852                         entry.value, h, i);
+01853                 i--;
+01854                 count++;
+01855             \}
+01856             \textcolor{keywordflow}{if} (count != 500)
+01857                 ERR(\textcolor{stringliteral}{"Didn't iterate over exactly 500 elements (%d)"}, i);
+01858             ql\_verify(ql, 16, 500, 20, 32);
+01859             quicklistReleaseIterator(iter);
+01860             quicklistRelease(ql);
+01861         \}
+01862 
+01863         TEST(\textcolor{stringliteral}{"iterate reverse over 500 list"}) \{
+01864             quicklist *ql = quicklistNew(-2, options[\_i]);
+01865             quicklistSetFill(ql, 32);
+01866             \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} i = 0; i < 500; i++)
+01867                 quicklistPushHead(ql, genstr(\textcolor{stringliteral}{"hello"}, i), 32);
+01868             quicklistIter *iter = quicklistGetIterator(ql, AL\_START\_TAIL);
+01869             quicklistEntry entry;
+01870             \textcolor{keywordtype}{int} i = 0;
+01871             \textcolor{keywordflow}{while} (quicklistNext(iter, &entry)) \{
+01872                 \textcolor{keywordtype}{char} *h = genstr(\textcolor{stringliteral}{"hello"}, i);
+01873                 \textcolor{keywordflow}{if} (strcmp((\textcolor{keywordtype}{char} *)entry.value, h))
+01874                     ERR(\textcolor{stringliteral}{"value [%s] didn't match [%s] at position %d"},
+01875                         entry.value, h, i);
+01876                 i++;
+01877             \}
+01878             \textcolor{keywordflow}{if} (i != 500)
+01879                 ERR(\textcolor{stringliteral}{"Didn't iterate over exactly 500 elements (%d)"}, i);
+01880             ql\_verify(ql, 16, 500, 20, 32);
+01881             quicklistReleaseIterator(iter);
+01882             quicklistRelease(ql);
+01883         \}
+01884 
+01885         TEST(\textcolor{stringliteral}{"insert before with 0 elements"}) \{
+01886             quicklist *ql = quicklistNew(-2, options[\_i]);
+01887             quicklistEntry entry;
+01888             quicklistIndex(ql, 0, &entry);
+01889             quicklistInsertBefore(ql, &entry, \textcolor{stringliteral}{"abc"}, 4);
+01890             ql\_verify(ql, 1, 1, 1, 1);
+01891             quicklistRelease(ql);
+01892         \}
+01893 
+01894         TEST(\textcolor{stringliteral}{"insert after with 0 elements"}) \{
+01895             quicklist *ql = quicklistNew(-2, options[\_i]);
+01896             quicklistEntry entry;
+01897             quicklistIndex(ql, 0, &entry);
+01898             quicklistInsertAfter(ql, &entry, \textcolor{stringliteral}{"abc"}, 4);
+01899             ql\_verify(ql, 1, 1, 1, 1);
+01900             quicklistRelease(ql);
+01901         \}
+01902 
+01903         TEST(\textcolor{stringliteral}{"insert after 1 element"}) \{
+01904             quicklist *ql = quicklistNew(-2, options[\_i]);
+01905             quicklistPushHead(ql, \textcolor{stringliteral}{"hello"}, 6);
+01906             quicklistEntry entry;
+01907             quicklistIndex(ql, 0, &entry);
+01908             quicklistInsertAfter(ql, &entry, \textcolor{stringliteral}{"abc"}, 4);
+01909             ql\_verify(ql, 1, 2, 2, 2);
+01910             quicklistRelease(ql);
+01911         \}
+01912 
+01913         TEST(\textcolor{stringliteral}{"insert before 1 element"}) \{
+01914             quicklist *ql = quicklistNew(-2, options[\_i]);
+01915             quicklistPushHead(ql, \textcolor{stringliteral}{"hello"}, 6);
+01916             quicklistEntry entry;
+01917             quicklistIndex(ql, 0, &entry);
+01918             quicklistInsertAfter(ql, &entry, \textcolor{stringliteral}{"abc"}, 4);
+01919             ql\_verify(ql, 1, 2, 2, 2);
+01920             quicklistRelease(ql);
+01921         \}
+01922 
+01923         \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} f = optimize\_start; f < 12; f++) \{
+01924             TEST\_DESC(\textcolor{stringliteral}{"insert once in elements while iterating at fill %d at "}
+01925                       \textcolor{stringliteral}{"compress %d\(\backslash\)n"},
+01926                       f, options[\_i]) \{
+01927                 quicklist *ql = quicklistNew(f, options[\_i]);
+01928                 quicklistPushTail(ql, \textcolor{stringliteral}{"abc"}, 3);
+01929                 quicklistSetFill(ql, 1);
+01930                 quicklistPushTail(ql, \textcolor{stringliteral}{"def"}, 3); \textcolor{comment}{/* force to unique node */}
+01931                 quicklistSetFill(ql, f);
+01932                 quicklistPushTail(ql, \textcolor{stringliteral}{"bob"}, 3); \textcolor{comment}{/* force to reset for +3 */}
+01933                 quicklistPushTail(ql, \textcolor{stringliteral}{"foo"}, 3);
+01934                 quicklistPushTail(ql, \textcolor{stringliteral}{"zoo"}, 3);
+01935 
+01936                 itrprintr(ql, 0);
+01937                 \textcolor{comment}{/* insert "bar" before "bob" while iterating over list. */}
+01938                 quicklistIter *iter = quicklistGetIterator(ql, AL\_START\_HEAD);
+01939                 quicklistEntry entry;
+01940                 \textcolor{keywordflow}{while} (quicklistNext(iter, &entry)) \{
+01941                     \textcolor{keywordflow}{if} (!strncmp((\textcolor{keywordtype}{char} *)entry.value, \textcolor{stringliteral}{"bob"}, 3)) \{
+01942                         \textcolor{comment}{/* Insert as fill = 1 so it spills into new node. */}
+01943                         quicklistInsertBefore(ql, &entry, \textcolor{stringliteral}{"bar"}, 3);
+01944                         \textcolor{keywordflow}{break}; \textcolor{comment}{/* didn't we fix insert-while-iterating? */}
+01945                     \}
+01946                 \}
+01947                 itrprintr(ql, 0);
+01948 
+01949                 \textcolor{comment}{/* verify results */}
+01950                 quicklistIndex(ql, 0, &entry);
+01951                 \textcolor{keywordflow}{if} (strncmp((\textcolor{keywordtype}{char} *)entry.value, \textcolor{stringliteral}{"abc"}, 3))
+01952                     ERR(\textcolor{stringliteral}{"Value 0 didn't match, instead got: %.*s"}, entry.sz,
+01953                         entry.value);
+01954                 quicklistIndex(ql, 1, &entry);
+01955                 \textcolor{keywordflow}{if} (strncmp((\textcolor{keywordtype}{char} *)entry.value, \textcolor{stringliteral}{"def"}, 3))
+01956                     ERR(\textcolor{stringliteral}{"Value 1 didn't match, instead got: %.*s"}, entry.sz,
+01957                         entry.value);
+01958                 quicklistIndex(ql, 2, &entry);
+01959                 \textcolor{keywordflow}{if} (strncmp((\textcolor{keywordtype}{char} *)entry.value, \textcolor{stringliteral}{"bar"}, 3))
+01960                     ERR(\textcolor{stringliteral}{"Value 2 didn't match, instead got: %.*s"}, entry.sz,
+01961                         entry.value);
+01962                 quicklistIndex(ql, 3, &entry);
+01963                 \textcolor{keywordflow}{if} (strncmp((\textcolor{keywordtype}{char} *)entry.value, \textcolor{stringliteral}{"bob"}, 3))
+01964                     ERR(\textcolor{stringliteral}{"Value 3 didn't match, instead got: %.*s"}, entry.sz,
+01965                         entry.value);
+01966                 quicklistIndex(ql, 4, &entry);
+01967                 \textcolor{keywordflow}{if} (strncmp((\textcolor{keywordtype}{char} *)entry.value, \textcolor{stringliteral}{"foo"}, 3))
+01968                     ERR(\textcolor{stringliteral}{"Value 4 didn't match, instead got: %.*s"}, entry.sz,
+01969                         entry.value);
+01970                 quicklistIndex(ql, 5, &entry);
+01971                 \textcolor{keywordflow}{if} (strncmp((\textcolor{keywordtype}{char} *)entry.value, \textcolor{stringliteral}{"zoo"}, 3))
+01972                     ERR(\textcolor{stringliteral}{"Value 5 didn't match, instead got: %.*s"}, entry.sz,
+01973                         entry.value);
+01974                 quicklistReleaseIterator(iter);
+01975                 quicklistRelease(ql);
+01976             \}
+01977         \}
+01978 
+01979         \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} f = optimize\_start; f < 1024; f++) \{
+01980             TEST\_DESC(
+01981                 \textcolor{stringliteral}{"insert [before] 250 new in middle of 500 elements at fill"}
+01982                 \textcolor{stringliteral}{" %d at compress %d"},
+01983                 f, options[\_i]) \{
+01984                 quicklist *ql = quicklistNew(f, options[\_i]);
+01985                 \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} i = 0; i < 500; i++)
+01986                     quicklistPushTail(ql, genstr(\textcolor{stringliteral}{"hello"}, i), 32);
+01987                 \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} i = 0; i < 250; i++) \{
+01988                     quicklistEntry entry;
+01989                     quicklistIndex(ql, 250, &entry);
+01990                     quicklistInsertBefore(ql, &entry, genstr(\textcolor{stringliteral}{"abc"}, i), 32);
+01991                 \}
+01992                 \textcolor{keywordflow}{if} (f == 32)
+01993                     ql\_verify(ql, 25, 750, 32, 20);
+01994                 quicklistRelease(ql);
+01995             \}
+01996         \}
+01997 
+01998         \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} f = optimize\_start; f < 1024; f++) \{
+01999             TEST\_DESC(\textcolor{stringliteral}{"insert [after] 250 new in middle of 500 elements at "}
+02000                       \textcolor{stringliteral}{"fill %d at compress %d"},
+02001                       f, options[\_i]) \{
+02002                 quicklist *ql = quicklistNew(f, options[\_i]);
+02003                 \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} i = 0; i < 500; i++)
+02004                     quicklistPushHead(ql, genstr(\textcolor{stringliteral}{"hello"}, i), 32);
+02005                 \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} i = 0; i < 250; i++) \{
+02006                     quicklistEntry entry;
+02007                     quicklistIndex(ql, 250, &entry);
+02008                     quicklistInsertAfter(ql, &entry, genstr(\textcolor{stringliteral}{"abc"}, i), 32);
+02009                 \}
+02010 
+02011                 \textcolor{keywordflow}{if} (ql->count != 750)
+02012                     ERR(\textcolor{stringliteral}{"List size not 750, but rather %ld"}, ql->count);
+02013 
+02014                 \textcolor{keywordflow}{if} (f == 32)
+02015                     ql\_verify(ql, 26, 750, 20, 32);
+02016                 quicklistRelease(ql);
+02017             \}
+02018         \}
+02019 
+02020         TEST(\textcolor{stringliteral}{"duplicate empty list"}) \{
+02021             quicklist *ql = quicklistNew(-2, options[\_i]);
+02022             ql\_verify(ql, 0, 0, 0, 0);
+02023             quicklist *copy = quicklistDup(ql);
+02024             ql\_verify(copy, 0, 0, 0, 0);
+02025             quicklistRelease(ql);
+02026             quicklistRelease(copy);
+02027         \}
+02028 
+02029         TEST(\textcolor{stringliteral}{"duplicate list of 1 element"}) \{
+02030             quicklist *ql = quicklistNew(-2, options[\_i]);
+02031             quicklistPushHead(ql, genstr(\textcolor{stringliteral}{"hello"}, 3), 32);
+02032             ql\_verify(ql, 1, 1, 1, 1);
+02033             quicklist *copy = quicklistDup(ql);
+02034             ql\_verify(copy, 1, 1, 1, 1);
+02035             quicklistRelease(ql);
+02036             quicklistRelease(copy);
+02037         \}
+02038 
+02039         TEST(\textcolor{stringliteral}{"duplicate list of 500"}) \{
+02040             quicklist *ql = quicklistNew(-2, options[\_i]);
+02041             quicklistSetFill(ql, 32);
+02042             \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} i = 0; i < 500; i++)
+02043                 quicklistPushHead(ql, genstr(\textcolor{stringliteral}{"hello"}, i), 32);
+02044             ql\_verify(ql, 16, 500, 20, 32);
+02045 
+02046             quicklist *copy = quicklistDup(ql);
+02047             ql\_verify(copy, 16, 500, 20, 32);
+02048             quicklistRelease(ql);
+02049             quicklistRelease(copy);
+02050         \}
+02051 
+02052         \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} f = optimize\_start; f < 512; f++) \{
+02053             TEST\_DESC(\textcolor{stringliteral}{"index 1,200 from 500 list at fill %d at compress %d"}, f,
+02054                       options[\_i]) \{
+02055                 quicklist *ql = quicklistNew(f, options[\_i]);
+02056                 \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} i = 0; i < 500; i++)
+02057                     quicklistPushTail(ql, genstr(\textcolor{stringliteral}{"hello"}, i + 1), 32);
+02058                 quicklistEntry entry;
+02059                 quicklistIndex(ql, 1, &entry);
+02060                 \textcolor{keywordflow}{if} (!strcmp((\textcolor{keywordtype}{char} *)entry.value, \textcolor{stringliteral}{"hello2"}))
+02061                     OK;
+02062                 \textcolor{keywordflow}{else}
+02063                     ERR(\textcolor{stringliteral}{"Value: %s"}, entry.value);
+02064                 quicklistIndex(ql, 200, &entry);
+02065                 \textcolor{keywordflow}{if} (!strcmp((\textcolor{keywordtype}{char} *)entry.value, \textcolor{stringliteral}{"hello201"}))
+02066                     OK;
+02067                 \textcolor{keywordflow}{else}
+02068                     ERR(\textcolor{stringliteral}{"Value: %s"}, entry.value);
+02069                 quicklistRelease(ql);
+02070             \}
+02071 
+02072             TEST\_DESC(\textcolor{stringliteral}{"index -1,-2 from 500 list at fill %d at compress %d"}, f,
+02073                       options[\_i]) \{
+02074                 quicklist *ql = quicklistNew(f, options[\_i]);
+02075                 \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} i = 0; i < 500; i++)
+02076                     quicklistPushTail(ql, genstr(\textcolor{stringliteral}{"hello"}, i + 1), 32);
+02077                 quicklistEntry entry;
+02078                 quicklistIndex(ql, -1, &entry);
+02079                 \textcolor{keywordflow}{if} (!strcmp((\textcolor{keywordtype}{char} *)entry.value, \textcolor{stringliteral}{"hello500"}))
+02080                     OK;
+02081                 \textcolor{keywordflow}{else}
+02082                     ERR(\textcolor{stringliteral}{"Value: %s"}, entry.value);
+02083                 quicklistIndex(ql, -2, &entry);
+02084                 \textcolor{keywordflow}{if} (!strcmp((\textcolor{keywordtype}{char} *)entry.value, \textcolor{stringliteral}{"hello499"}))
+02085                     OK;
+02086                 \textcolor{keywordflow}{else}
+02087                     ERR(\textcolor{stringliteral}{"Value: %s"}, entry.value);
+02088                 quicklistRelease(ql);
+02089             \}
+02090 
+02091             TEST\_DESC(\textcolor{stringliteral}{"index -100 from 500 list at fill %d at compress %d"}, f,
+02092                       options[\_i]) \{
+02093                 quicklist *ql = quicklistNew(f, options[\_i]);
+02094                 \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} i = 0; i < 500; i++)
+02095                     quicklistPushTail(ql, genstr(\textcolor{stringliteral}{"hello"}, i + 1), 32);
+02096                 quicklistEntry entry;
+02097                 quicklistIndex(ql, -100, &entry);
+02098                 \textcolor{keywordflow}{if} (!strcmp((\textcolor{keywordtype}{char} *)entry.value, \textcolor{stringliteral}{"hello401"}))
+02099                     OK;
+02100                 \textcolor{keywordflow}{else}
+02101                     ERR(\textcolor{stringliteral}{"Value: %s"}, entry.value);
+02102                 quicklistRelease(ql);
+02103             \}
+02104 
+02105             TEST\_DESC(\textcolor{stringliteral}{"index too big +1 from 50 list at fill %d at compress %d"},
+02106                       f, options[\_i]) \{
+02107                 quicklist *ql = quicklistNew(f, options[\_i]);
+02108                 \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} i = 0; i < 50; i++)
+02109                     quicklistPushTail(ql, genstr(\textcolor{stringliteral}{"hello"}, i + 1), 32);
+02110                 quicklistEntry entry;
+02111                 \textcolor{keywordflow}{if} (quicklistIndex(ql, 50, &entry))
+02112                     ERR(\textcolor{stringliteral}{"Index found at 50 with 50 list: %.*s"}, entry.sz,
+02113                         entry.value);
+02114                 \textcolor{keywordflow}{else}
+02115                     OK;
+02116                 quicklistRelease(ql);
+02117             \}
+02118         \}
+02119 
+02120         TEST(\textcolor{stringliteral}{"delete range empty list"}) \{
+02121             quicklist *ql = quicklistNew(-2, options[\_i]);
+02122             quicklistDelRange(ql, 5, 20);
+02123             ql\_verify(ql, 0, 0, 0, 0);
+02124             quicklistRelease(ql);
+02125         \}
+02126 
+02127         TEST(\textcolor{stringliteral}{"delete range of entire node in list of one node"}) \{
+02128             quicklist *ql = quicklistNew(-2, options[\_i]);
+02129             \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} i = 0; i < 32; i++)
+02130                 quicklistPushHead(ql, genstr(\textcolor{stringliteral}{"hello"}, i), 32);
+02131             ql\_verify(ql, 1, 32, 32, 32);
+02132             quicklistDelRange(ql, 0, 32);
+02133             ql\_verify(ql, 0, 0, 0, 0);
+02134             quicklistRelease(ql);
+02135         \}
+02136 
+02137         TEST(\textcolor{stringliteral}{"delete range of entire node with overflow counts"}) \{
+02138             quicklist *ql = quicklistNew(-2, options[\_i]);
+02139             \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} i = 0; i < 32; i++)
+02140                 quicklistPushHead(ql, genstr(\textcolor{stringliteral}{"hello"}, i), 32);
+02141             ql\_verify(ql, 1, 32, 32, 32);
+02142             quicklistDelRange(ql, 0, 128);
+02143             ql\_verify(ql, 0, 0, 0, 0);
+02144             quicklistRelease(ql);
+02145         \}
+02146 
+02147         TEST(\textcolor{stringliteral}{"delete middle 100 of 500 list"}) \{
+02148             quicklist *ql = quicklistNew(-2, options[\_i]);
+02149             quicklistSetFill(ql, 32);
+02150             \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} i = 0; i < 500; i++)
+02151                 quicklistPushTail(ql, genstr(\textcolor{stringliteral}{"hello"}, i + 1), 32);
+02152             ql\_verify(ql, 16, 500, 32, 20);
+02153             quicklistDelRange(ql, 200, 100);
+02154             ql\_verify(ql, 14, 400, 32, 20);
+02155             quicklistRelease(ql);
+02156         \}
+02157 
+02158         TEST(\textcolor{stringliteral}{"delete negative 1 from 500 list"}) \{
+02159             quicklist *ql = quicklistNew(-2, options[\_i]);
+02160             quicklistSetFill(ql, 32);
+02161             \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} i = 0; i < 500; i++)
+02162                 quicklistPushTail(ql, genstr(\textcolor{stringliteral}{"hello"}, i + 1), 32);
+02163             ql\_verify(ql, 16, 500, 32, 20);
+02164             quicklistDelRange(ql, -1, 1);
+02165             ql\_verify(ql, 16, 499, 32, 19);
+02166             quicklistRelease(ql);
+02167         \}
+02168 
+02169         TEST(\textcolor{stringliteral}{"delete negative 1 from 500 list with overflow counts"}) \{
+02170             quicklist *ql = quicklistNew(-2, options[\_i]);
+02171             quicklistSetFill(ql, 32);
+02172             \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} i = 0; i < 500; i++)
+02173                 quicklistPushTail(ql, genstr(\textcolor{stringliteral}{"hello"}, i + 1), 32);
+02174             ql\_verify(ql, 16, 500, 32, 20);
+02175             quicklistDelRange(ql, -1, 128);
+02176             ql\_verify(ql, 16, 499, 32, 19);
+02177             quicklistRelease(ql);
+02178         \}
+02179 
+02180         TEST(\textcolor{stringliteral}{"delete negative 100 from 500 list"}) \{
+02181             quicklist *ql = quicklistNew(-2, options[\_i]);
+02182             quicklistSetFill(ql, 32);
+02183             \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} i = 0; i < 500; i++)
+02184                 quicklistPushTail(ql, genstr(\textcolor{stringliteral}{"hello"}, i + 1), 32);
+02185             quicklistDelRange(ql, -100, 100);
+02186             ql\_verify(ql, 13, 400, 32, 16);
+02187             quicklistRelease(ql);
+02188         \}
+02189 
+02190         TEST(\textcolor{stringliteral}{"delete -10 count 5 from 50 list"}) \{
+02191             quicklist *ql = quicklistNew(-2, options[\_i]);
+02192             quicklistSetFill(ql, 32);
+02193             \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} i = 0; i < 50; i++)
+02194                 quicklistPushTail(ql, genstr(\textcolor{stringliteral}{"hello"}, i + 1), 32);
+02195             ql\_verify(ql, 2, 50, 32, 18);
+02196             quicklistDelRange(ql, -10, 5);
+02197             ql\_verify(ql, 2, 45, 32, 13);
+02198             quicklistRelease(ql);
+02199         \}
+02200 
+02201         TEST(\textcolor{stringliteral}{"numbers only list read"}) \{
+02202             quicklist *ql = quicklistNew(-2, options[\_i]);
+02203             quicklistPushTail(ql, \textcolor{stringliteral}{"1111"}, 4);
+02204             quicklistPushTail(ql, \textcolor{stringliteral}{"2222"}, 4);
+02205             quicklistPushTail(ql, \textcolor{stringliteral}{"3333"}, 4);
+02206             quicklistPushTail(ql, \textcolor{stringliteral}{"4444"}, 4);
+02207             ql\_verify(ql, 1, 4, 4, 4);
+02208             quicklistEntry entry;
+02209             quicklistIndex(ql, 0, &entry);
+02210             \textcolor{keywordflow}{if} (entry.longval != 1111)
+02211                 ERR(\textcolor{stringliteral}{"Not 1111, %lld"}, entry.longval);
+02212             quicklistIndex(ql, 1, &entry);
+02213             \textcolor{keywordflow}{if} (entry.longval != 2222)
+02214                 ERR(\textcolor{stringliteral}{"Not 2222, %lld"}, entry.longval);
+02215             quicklistIndex(ql, 2, &entry);
+02216             \textcolor{keywordflow}{if} (entry.longval != 3333)
+02217                 ERR(\textcolor{stringliteral}{"Not 3333, %lld"}, entry.longval);
+02218             quicklistIndex(ql, 3, &entry);
+02219             \textcolor{keywordflow}{if} (entry.longval != 4444)
+02220                 ERR(\textcolor{stringliteral}{"Not 4444, %lld"}, entry.longval);
+02221             \textcolor{keywordflow}{if} (quicklistIndex(ql, 4, &entry))
+02222                 ERR(\textcolor{stringliteral}{"Index past elements: %lld"}, entry.longval);
+02223             quicklistIndex(ql, -1, &entry);
+02224             \textcolor{keywordflow}{if} (entry.longval != 4444)
+02225                 ERR(\textcolor{stringliteral}{"Not 4444 (reverse), %lld"}, entry.longval);
+02226             quicklistIndex(ql, -2, &entry);
+02227             \textcolor{keywordflow}{if} (entry.longval != 3333)
+02228                 ERR(\textcolor{stringliteral}{"Not 3333 (reverse), %lld"}, entry.longval);
+02229             quicklistIndex(ql, -3, &entry);
+02230             \textcolor{keywordflow}{if} (entry.longval != 2222)
+02231                 ERR(\textcolor{stringliteral}{"Not 2222 (reverse), %lld"}, entry.longval);
+02232             quicklistIndex(ql, -4, &entry);
+02233             \textcolor{keywordflow}{if} (entry.longval != 1111)
+02234                 ERR(\textcolor{stringliteral}{"Not 1111 (reverse), %lld"}, entry.longval);
+02235             \textcolor{keywordflow}{if} (quicklistIndex(ql, -5, &entry))
+02236                 ERR(\textcolor{stringliteral}{"Index past elements (reverse), %lld"}, entry.longval);
+02237             quicklistRelease(ql);
+02238         \}
+02239 
+02240         TEST(\textcolor{stringliteral}{"numbers larger list read"}) \{
+02241             quicklist *ql = quicklistNew(-2, options[\_i]);
+02242             quicklistSetFill(ql, 32);
+02243             \textcolor{keywordtype}{char} num[32];
+02244             \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} nums[5000];
+02245             \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} i = 0; i < 5000; i++) \{
+02246                 nums[i] = -5157318210846258176 + i;
+02247                 \textcolor{keywordtype}{int} sz = ll2string(num, \textcolor{keyword}{sizeof}(num), nums[i]);
+02248                 quicklistPushTail(ql, num, sz);
+02249             \}
+02250             quicklistPushTail(ql, \textcolor{stringliteral}{"xxxxxxxxxxxxxxxxxxxx"}, 20);
+02251             quicklistEntry entry;
+02252             \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} i = 0; i < 5000; i++) \{
+02253                 quicklistIndex(ql, i, &entry);
+02254                 \textcolor{keywordflow}{if} (entry.longval != nums[i])
+02255                     ERR(\textcolor{stringliteral}{"[%d] Not longval %lld but rather %lld"}, i, nums[i],
+02256                         entry.longval);
+02257                 entry.longval = 0xdeadbeef;
+02258             \}
+02259             quicklistIndex(ql, 5000, &entry);
+02260             \textcolor{keywordflow}{if} (strncmp((\textcolor{keywordtype}{char} *)entry.value, \textcolor{stringliteral}{"xxxxxxxxxxxxxxxxxxxx"}, 20))
+02261                 ERR(\textcolor{stringliteral}{"String val not match: %s"}, entry.value);
+02262             ql\_verify(ql, 157, 5001, 32, 9);
+02263             quicklistRelease(ql);
+02264         \}
+02265 
+02266         TEST(\textcolor{stringliteral}{"numbers larger list read B"}) \{
+02267             quicklist *ql = quicklistNew(-2, options[\_i]);
+02268             quicklistPushTail(ql, \textcolor{stringliteral}{"99"}, 2);
+02269             quicklistPushTail(ql, \textcolor{stringliteral}{"98"}, 2);
+02270             quicklistPushTail(ql, \textcolor{stringliteral}{"xxxxxxxxxxxxxxxxxxxx"}, 20);
+02271             quicklistPushTail(ql, \textcolor{stringliteral}{"96"}, 2);
+02272             quicklistPushTail(ql, \textcolor{stringliteral}{"95"}, 2);
+02273             quicklistReplaceAtIndex(ql, 1, \textcolor{stringliteral}{"foo"}, 3);
+02274             quicklistReplaceAtIndex(ql, -1, \textcolor{stringliteral}{"bar"}, 3);
+02275             quicklistRelease(ql);
+02276             OK;
+02277         \}
+02278 
+02279         \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} f = optimize\_start; f < 16; f++) \{
+02280             TEST\_DESC(\textcolor{stringliteral}{"lrem test at fill %d at compress %d"}, f, options[\_i]) \{
+02281                 quicklist *ql = quicklistNew(f, options[\_i]);
+02282                 \textcolor{keywordtype}{char} *words[] = \{\textcolor{stringliteral}{"abc"}, \textcolor{stringliteral}{"foo"}, \textcolor{stringliteral}{"bar"},  \textcolor{stringliteral}{"foobar"}, \textcolor{stringliteral}{"foobared"},
+02283                                  \textcolor{stringliteral}{"zap"}, \textcolor{stringliteral}{"bar"}, \textcolor{stringliteral}{"test"}, \textcolor{stringliteral}{"foo"}\};
+02284                 \textcolor{keywordtype}{char} *result[] = \{\textcolor{stringliteral}{"abc"}, \textcolor{stringliteral}{"foo"},  \textcolor{stringliteral}{"foobar"}, \textcolor{stringliteral}{"foobared"},
+02285                                   \textcolor{stringliteral}{"zap"}, \textcolor{stringliteral}{"test"}, \textcolor{stringliteral}{"foo"}\};
+02286                 \textcolor{keywordtype}{char} *resultB[] = \{\textcolor{stringliteral}{"abc"},      \textcolor{stringliteral}{"foo"}, \textcolor{stringliteral}{"foobar"},
+02287                                    \textcolor{stringliteral}{"foobared"}, \textcolor{stringliteral}{"zap"}, \textcolor{stringliteral}{"test"}\};
+02288                 \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} i = 0; i < 9; i++)
+02289                     quicklistPushTail(ql, words[i], strlen(words[i]));
+02290 
+02291                 \textcolor{comment}{/* lrem 0 bar */}
+02292                 quicklistIter *iter = quicklistGetIterator(ql, AL\_START\_HEAD);
+02293                 quicklistEntry entry;
+02294                 \textcolor{keywordtype}{int} i = 0;
+02295                 \textcolor{keywordflow}{while} (quicklistNext(iter, &entry)) \{
+02296                     \textcolor{keywordflow}{if} (quicklistCompare(entry.zi, (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *)\textcolor{stringliteral}{"bar"}, 3)) \{
+02297                         quicklistDelEntry(iter, &entry);
+02298                     \}
+02299                     i++;
+02300                 \}
+02301                 quicklistReleaseIterator(iter);
+02302 
+02303                 \textcolor{comment}{/* check result of lrem 0 bar */}
+02304                 iter = quicklistGetIterator(ql, AL\_START\_HEAD);
+02305                 i = 0;
+02306                 \textcolor{keywordtype}{int} ok = 1;
+02307                 \textcolor{keywordflow}{while} (quicklistNext(iter, &entry)) \{
+02308                     \textcolor{comment}{/* Result must be: abc, foo, foobar, foobared, zap, test,}
+02309 \textcolor{comment}{                     * foo */}
+02310                     \textcolor{keywordflow}{if} (strncmp((\textcolor{keywordtype}{char} *)entry.value, result[i], entry.sz)) \{
+02311                         ERR(\textcolor{stringliteral}{"No match at position %d, got %.*s instead of %s"},
+02312                             i, entry.sz, entry.value, result[i]);
+02313                         ok = 0;
+02314                     \}
+02315                     i++;
+02316                 \}
+02317                 quicklistReleaseIterator(iter);
+02318 
+02319                 quicklistPushTail(ql, \textcolor{stringliteral}{"foo"}, 3);
+02320 
+02321                 \textcolor{comment}{/* lrem -2 foo */}
+02322                 iter = quicklistGetIterator(ql, AL\_START\_TAIL);
+02323                 i = 0;
+02324                 \textcolor{keywordtype}{int} del = 2;
+02325                 \textcolor{keywordflow}{while} (quicklistNext(iter, &entry)) \{
+02326                     \textcolor{keywordflow}{if} (quicklistCompare(entry.zi, (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *)\textcolor{stringliteral}{"foo"}, 3)) \{
+02327                         quicklistDelEntry(iter, &entry);
+02328                         del--;
+02329                     \}
+02330                     \textcolor{keywordflow}{if} (!del)
+02331                         \textcolor{keywordflow}{break};
+02332                     i++;
+02333                 \}
+02334                 quicklistReleaseIterator(iter);
+02335 
+02336                 \textcolor{comment}{/* check result of lrem -2 foo */}
+02337                 \textcolor{comment}{/* (we're ignoring the '2' part and still deleting all foo}
+02338 \textcolor{comment}{                 * because}
+02339 \textcolor{comment}{                 * we only have two foo) */}
+02340                 iter = quicklistGetIterator(ql, AL\_START\_TAIL);
+02341                 i = 0;
+02342                 size\_t resB = \textcolor{keyword}{sizeof}(resultB) / \textcolor{keyword}{sizeof}(*resultB);
+02343                 \textcolor{keywordflow}{while} (quicklistNext(iter, &entry)) \{
+02344                     \textcolor{comment}{/* Result must be: abc, foo, foobar, foobared, zap, test,}
+02345 \textcolor{comment}{                     * foo */}
+02346                     \textcolor{keywordflow}{if} (strncmp((\textcolor{keywordtype}{char} *)entry.value, resultB[resB - 1 - i],
+02347                                 entry.sz)) \{
+02348                         ERR(\textcolor{stringliteral}{"No match at position %d, got %.*s instead of %s"},
+02349                             i, entry.sz, entry.value, resultB[resB - 1 - i]);
+02350                         ok = 0;
+02351                     \}
+02352                     i++;
+02353                 \}
+02354 
+02355                 quicklistReleaseIterator(iter);
+02356                 \textcolor{comment}{/* final result of all tests */}
+02357                 \textcolor{keywordflow}{if} (ok)
+02358                     OK;
+02359                 quicklistRelease(ql);
+02360             \}
+02361         \}
+02362 
+02363         \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} f = optimize\_start; f < 16; f++) \{
+02364             TEST\_DESC(\textcolor{stringliteral}{"iterate reverse + delete at fill %d at compress %d"}, f,
+02365                       options[\_i]) \{
+02366                 quicklist *ql = quicklistNew(f, options[\_i]);
+02367                 quicklistPushTail(ql, \textcolor{stringliteral}{"abc"}, 3);
+02368                 quicklistPushTail(ql, \textcolor{stringliteral}{"def"}, 3);
+02369                 quicklistPushTail(ql, \textcolor{stringliteral}{"hij"}, 3);
+02370                 quicklistPushTail(ql, \textcolor{stringliteral}{"jkl"}, 3);
+02371                 quicklistPushTail(ql, \textcolor{stringliteral}{"oop"}, 3);
+02372 
+02373                 quicklistEntry entry;
+02374                 quicklistIter *iter = quicklistGetIterator(ql, AL\_START\_TAIL);
+02375                 \textcolor{keywordtype}{int} i = 0;
+02376                 \textcolor{keywordflow}{while} (quicklistNext(iter, &entry)) \{
+02377                     \textcolor{keywordflow}{if} (quicklistCompare(entry.zi, (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *)\textcolor{stringliteral}{"hij"}, 3)) \{
+02378                         quicklistDelEntry(iter, &entry);
+02379                     \}
+02380                     i++;
+02381                 \}
+02382                 quicklistReleaseIterator(iter);
+02383 
+02384                 \textcolor{keywordflow}{if} (i != 5)
+02385                     ERR(\textcolor{stringliteral}{"Didn't iterate 5 times, iterated %d times."}, i);
+02386 
+02387                 \textcolor{comment}{/* Check results after deletion of "hij" */}
+02388                 iter = quicklistGetIterator(ql, AL\_START\_HEAD);
+02389                 i = 0;
+02390                 \textcolor{keywordtype}{char} *vals[] = \{\textcolor{stringliteral}{"abc"}, \textcolor{stringliteral}{"def"}, \textcolor{stringliteral}{"jkl"}, \textcolor{stringliteral}{"oop"}\};
+02391                 \textcolor{keywordflow}{while} (quicklistNext(iter, &entry)) \{
+02392                     \textcolor{keywordflow}{if} (!quicklistCompare(entry.zi, (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *)vals[i],
+02393                                           3)) \{
+02394                         ERR(\textcolor{stringliteral}{"Value at %d didn't match %s\(\backslash\)n"}, i, vals[i]);
+02395                     \}
+02396                     i++;
+02397                 \}
+02398                 quicklistReleaseIterator(iter);
+02399                 quicklistRelease(ql);
+02400             \}
+02401         \}
+02402 
+02403         \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} f = optimize\_start; f < 800; f++) \{
+02404             TEST\_DESC(\textcolor{stringliteral}{"iterator at index test at fill %d at compress %d"}, f,
+02405                       options[\_i]) \{
+02406                 quicklist *ql = quicklistNew(f, options[\_i]);
+02407                 \textcolor{keywordtype}{char} num[32];
+02408                 \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} nums[5000];
+02409                 \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} i = 0; i < 760; i++) \{
+02410                     nums[i] = -5157318210846258176 + i;
+02411                     \textcolor{keywordtype}{int} sz = ll2string(num, \textcolor{keyword}{sizeof}(num), nums[i]);
+02412                     quicklistPushTail(ql, num, sz);
+02413                 \}
+02414 
+02415                 quicklistEntry entry;
+02416                 quicklistIter *iter =
+02417                     quicklistGetIteratorAtIdx(ql, AL\_START\_HEAD, 437);
+02418                 \textcolor{keywordtype}{int} i = 437;
+02419                 \textcolor{keywordflow}{while} (quicklistNext(iter, &entry)) \{
+02420                     \textcolor{keywordflow}{if} (entry.longval != nums[i])
+02421                         ERR(\textcolor{stringliteral}{"Expected %lld, but got %lld"}, entry.longval,
+02422                             nums[i]);
+02423                     i++;
+02424                 \}
+02425                 quicklistReleaseIterator(iter);
+02426                 quicklistRelease(ql);
+02427             \}
+02428         \}
+02429 
+02430         \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} f = optimize\_start; f < 40; f++) \{
+02431             TEST\_DESC(\textcolor{stringliteral}{"ltrim test A at fill %d at compress %d"}, f,
+02432                       options[\_i]) \{
+02433                 quicklist *ql = quicklistNew(f, options[\_i]);
+02434                 \textcolor{keywordtype}{char} num[32];
+02435                 \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} nums[5000];
+02436                 \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} i = 0; i < 32; i++) \{
+02437                     nums[i] = -5157318210846258176 + i;
+02438                     \textcolor{keywordtype}{int} sz = ll2string(num, \textcolor{keyword}{sizeof}(num), nums[i]);
+02439                     quicklistPushTail(ql, num, sz);
+02440                 \}
+02441                 \textcolor{keywordflow}{if} (f == 32)
+02442                     ql\_verify(ql, 1, 32, 32, 32);
+02443                 \textcolor{comment}{/* ltrim 25 53 (keep [25,32] inclusive = 7 remaining) */}
+02444                 quicklistDelRange(ql, 0, 25);
+02445                 quicklistDelRange(ql, 0, 0);
+02446                 quicklistEntry entry;
+02447                 \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} i = 0; i < 7; i++) \{
+02448                     quicklistIndex(ql, i, &entry);
+02449                     \textcolor{keywordflow}{if} (entry.longval != nums[25 + i])
+02450                         ERR(\textcolor{stringliteral}{"Deleted invalid range!  Expected %lld but got "}
+02451                             \textcolor{stringliteral}{"%lld"},
+02452                             entry.longval, nums[25 + i]);
+02453                 \}
+02454                 \textcolor{keywordflow}{if} (f == 32)
+02455                     ql\_verify(ql, 1, 7, 7, 7);
+02456                 quicklistRelease(ql);
+02457             \}
+02458         \}
+02459 
+02460         \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} f = optimize\_start; f < 40; f++) \{
+02461             TEST\_DESC(\textcolor{stringliteral}{"ltrim test B at fill %d at compress %d"}, f,
+02462                       options[\_i]) \{
+02463                 \textcolor{comment}{/* Force-disable compression because our 33 sequential}
+02464 \textcolor{comment}{                 * integers don't compress and the check always fails. */}
+02465                 quicklist *ql = quicklistNew(f, QUICKLIST\_NOCOMPRESS);
+02466                 \textcolor{keywordtype}{char} num[32];
+02467                 \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} nums[5000];
+02468                 \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} i = 0; i < 33; i++) \{
+02469                     nums[i] = i;
+02470                     \textcolor{keywordtype}{int} sz = ll2string(num, \textcolor{keyword}{sizeof}(num), nums[i]);
+02471                     quicklistPushTail(ql, num, sz);
+02472                 \}
+02473                 \textcolor{keywordflow}{if} (f == 32)
+02474                     ql\_verify(ql, 2, 33, 32, 1);
+02475                 \textcolor{comment}{/* ltrim 5 16 (keep [5,16] inclusive = 12 remaining) */}
+02476                 quicklistDelRange(ql, 0, 5);
+02477                 quicklistDelRange(ql, -16, 16);
+02478                 \textcolor{keywordflow}{if} (f == 32)
+02479                     ql\_verify(ql, 1, 12, 12, 12);
+02480                 quicklistEntry entry;
+02481                 quicklistIndex(ql, 0, &entry);
+02482                 \textcolor{keywordflow}{if} (entry.longval != 5)
+02483                     ERR(\textcolor{stringliteral}{"A: longval not 5, but %lld"}, entry.longval);
+02484                 \textcolor{keywordflow}{else}
+02485                     OK;
+02486                 quicklistIndex(ql, -1, &entry);
+02487                 \textcolor{keywordflow}{if} (entry.longval != 16)
+02488                     ERR(\textcolor{stringliteral}{"B! got instead: %lld"}, entry.longval);
+02489                 \textcolor{keywordflow}{else}
+02490                     OK;
+02491                 quicklistPushTail(ql, \textcolor{stringliteral}{"bobobob"}, 7);
+02492                 quicklistIndex(ql, -1, &entry);
+02493                 \textcolor{keywordflow}{if} (strncmp((\textcolor{keywordtype}{char} *)entry.value, \textcolor{stringliteral}{"bobobob"}, 7))
+02494                     ERR(\textcolor{stringliteral}{"Tail doesn't match bobobob, it's %.*s instead"},
+02495                         entry.sz, entry.value);
+02496                 \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} i = 0; i < 12; i++) \{
+02497                     quicklistIndex(ql, i, &entry);
+02498                     \textcolor{keywordflow}{if} (entry.longval != nums[5 + i])
+02499                         ERR(\textcolor{stringliteral}{"Deleted invalid range!  Expected %lld but got "}
+02500                             \textcolor{stringliteral}{"%lld"},
+02501                             entry.longval, nums[5 + i]);
+02502                 \}
+02503                 quicklistRelease(ql);
+02504             \}
+02505         \}
+02506 
+02507         \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} f = optimize\_start; f < 40; f++) \{
+02508             TEST\_DESC(\textcolor{stringliteral}{"ltrim test C at fill %d at compress %d"}, f,
+02509                       options[\_i]) \{
+02510                 quicklist *ql = quicklistNew(f, options[\_i]);
+02511                 \textcolor{keywordtype}{char} num[32];
+02512                 \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} nums[5000];
+02513                 \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} i = 0; i < 33; i++) \{
+02514                     nums[i] = -5157318210846258176 + i;
+02515                     \textcolor{keywordtype}{int} sz = ll2string(num, \textcolor{keyword}{sizeof}(num), nums[i]);
+02516                     quicklistPushTail(ql, num, sz);
+02517                 \}
+02518                 \textcolor{keywordflow}{if} (f == 32)
+02519                     ql\_verify(ql, 2, 33, 32, 1);
+02520                 \textcolor{comment}{/* ltrim 3 3 (keep [3,3] inclusive = 1 remaining) */}
+02521                 quicklistDelRange(ql, 0, 3);
+02522                 quicklistDelRange(ql, -29,
+02523                                   4000); \textcolor{comment}{/* make sure not loop forever */}
+02524                 \textcolor{keywordflow}{if} (f == 32)
+02525                     ql\_verify(ql, 1, 1, 1, 1);
+02526                 quicklistEntry entry;
+02527                 quicklistIndex(ql, 0, &entry);
+02528                 \textcolor{keywordflow}{if} (entry.longval != -5157318210846258173)
+02529                     ERROR;
+02530                 \textcolor{keywordflow}{else}
+02531                     OK;
+02532                 quicklistRelease(ql);
+02533             \}
+02534         \}
+02535 
+02536         \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} f = optimize\_start; f < 40; f++) \{
+02537             TEST\_DESC(\textcolor{stringliteral}{"ltrim test D at fill %d at compress %d"}, f,
+02538                       options[\_i]) \{
+02539                 quicklist *ql = quicklistNew(f, options[\_i]);
+02540                 \textcolor{keywordtype}{char} num[32];
+02541                 \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} nums[5000];
+02542                 \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} i = 0; i < 33; i++) \{
+02543                     nums[i] = -5157318210846258176 + i;
+02544                     \textcolor{keywordtype}{int} sz = ll2string(num, \textcolor{keyword}{sizeof}(num), nums[i]);
+02545                     quicklistPushTail(ql, num, sz);
+02546                 \}
+02547                 \textcolor{keywordflow}{if} (f == 32)
+02548                     ql\_verify(ql, 2, 33, 32, 1);
+02549                 quicklistDelRange(ql, -12, 3);
+02550                 \textcolor{keywordflow}{if} (ql->count != 30)
+02551                     ERR(\textcolor{stringliteral}{"Didn't delete exactly three elements!  Count is: %lu"},
+02552                         ql->count);
+02553                 quicklistRelease(ql);
+02554             \}
+02555         \}
+02556 
+02557         \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} f = optimize\_start; f < 72; f++) \{
+02558             TEST\_DESC(\textcolor{stringliteral}{"create quicklist from ziplist at fill %d at compress %d"},
+02559                       f, options[\_i]) \{
+02560                 \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *zl = ziplistNew();
+02561                 \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} nums[64];
+02562                 \textcolor{keywordtype}{char} num[64];
+02563                 \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} i = 0; i < 33; i++) \{
+02564                     nums[i] = -5157318210846258176 + i;
+02565                     \textcolor{keywordtype}{int} sz = ll2string(num, \textcolor{keyword}{sizeof}(num), nums[i]);
+02566                     zl =
+02567                         ziplistPush(zl, (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *)num, sz, ZIPLIST\_TAIL);
+02568                 \}
+02569                 \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} i = 0; i < 33; i++) \{
+02570                     zl = ziplistPush(zl, (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *)genstr(\textcolor{stringliteral}{"hello"}, i),
+02571                                      32, ZIPLIST\_TAIL);
+02572                 \}
+02573                 quicklist *ql = quicklistCreateFromZiplist(f, options[\_i], zl);
+02574                 \textcolor{keywordflow}{if} (f == 1)
+02575                     ql\_verify(ql, 66, 66, 1, 1);
+02576                 \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (f == 32)
+02577                     ql\_verify(ql, 3, 66, 32, 2);
+02578                 \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (f == 66)
+02579                     ql\_verify(ql, 1, 66, 66, 66);
+02580                 quicklistRelease(ql);
+02581             \}
+02582         \}
+02583 
+02584         \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} stop = mstime();
+02585         runtime[\_i] = stop - start;
+02586     \}
+02587 
+02588     \textcolor{comment}{/* Run a longer test of compression depth outside of primary test loop. */}
+02589     \textcolor{keywordtype}{int} list\_sizes[] = \{250, 251, 500, 999, 1000\};
+02590     \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} start = mstime();
+02591     \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} list = 0; list < (\textcolor{keywordtype}{int})(\textcolor{keyword}{sizeof}(list\_sizes) / \textcolor{keyword}{sizeof}(*list\_sizes));
+02592          list++) \{
+02593         \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} f = optimize\_start; f < 128; f++) \{
+02594             \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} depth = 1; depth < 40; depth++) \{
+02595                 \textcolor{comment}{/* skip over many redundant test cases */}
+02596                 TEST\_DESC(\textcolor{stringliteral}{"verify specific compression of interior nodes with "}
+02597                           \textcolor{stringliteral}{"%d list "}
+02598                           \textcolor{stringliteral}{"at fill %d at compress %d"},
+02599                           list\_sizes[list], f, depth) \{
+02600                     quicklist *ql = quicklistNew(f, depth);
+02601                     \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} i = 0; i < list\_sizes[list]; i++) \{
+02602                         quicklistPushTail(ql, genstr(\textcolor{stringliteral}{"hello TAIL"}, i + 1), 64);
+02603                         quicklistPushHead(ql, genstr(\textcolor{stringliteral}{"hello HEAD"}, i + 1), 64);
+02604                     \}
+02605 
+02606                     quicklistNode *node = ql->head;
+02607                     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{int} low\_raw = ql->compress;
+02608                     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{int} high\_raw = ql->len - ql->compress;
+02609 
+02610                     \textcolor{keywordflow}{for} (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{int} at = 0; at < ql->len;
+02611                          at++, node = node->next) \{
+02612                         \textcolor{keywordflow}{if} (at < low\_raw || at >= high\_raw) \{
+02613                             \textcolor{keywordflow}{if} (node->encoding != QUICKLIST\_NODE\_ENCODING\_RAW) \{
+02614                                 ERR(\textcolor{stringliteral}{"Incorrect compression: node %d is "}
+02615                                     \textcolor{stringliteral}{"compressed at depth %d ((%u, %u); total "}
+02616                                     \textcolor{stringliteral}{"nodes: %u; size: %u)"},
+02617                                     at, depth, low\_raw, high\_raw, ql->len,
+02618                                     node->sz);
+02619                             \}
+02620                         \} \textcolor{keywordflow}{else} \{
+02621                             \textcolor{keywordflow}{if} (node->encoding != QUICKLIST\_NODE\_ENCODING\_LZF) \{
+02622                                 ERR(\textcolor{stringliteral}{"Incorrect non-compression: node %d is NOT "}
+02623                                     \textcolor{stringliteral}{"compressed at depth %d ((%u, %u); total "}
+02624                                     \textcolor{stringliteral}{"nodes: %u; size: %u; attempted: %d)"},
+02625                                     at, depth, low\_raw, high\_raw, ql->len,
+02626                                     node->sz, node->attempted\_compress);
+02627                             \}
+02628                         \}
+02629                     \}
+02630                     quicklistRelease(ql);
+02631                 \}
+02632             \}
+02633         \}
+02634     \}
+02635     \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} stop = mstime();
+02636 
+02637     printf(\textcolor{stringliteral}{"\(\backslash\)n"});
+02638     \textcolor{keywordflow}{for} (size\_t i = 0; i < option\_count; i++)
+02639         printf(\textcolor{stringliteral}{"Test Loop %02d: %0.2f seconds.\(\backslash\)n"}, options[i],
+02640                (\textcolor{keywordtype}{float})runtime[i] / 1000);
+02641     printf(\textcolor{stringliteral}{"Compressions: %0.2f seconds.\(\backslash\)n"}, (\textcolor{keywordtype}{float})(stop - start) / 1000);
+02642     printf(\textcolor{stringliteral}{"\(\backslash\)n"});
+02643 
+02644     \textcolor{keywordflow}{if} (!err)
+02645         printf(\textcolor{stringliteral}{"ALL TESTS PASSED!\(\backslash\)n"});
+02646     \textcolor{keywordflow}{else}
+02647         ERR(\textcolor{stringliteral}{"Sorry, not all tests passed!  In fact, %d tests failed."}, err);
+02648 
+02649     \textcolor{keywordflow}{return} err;
+02650 \}
+02651 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+\end{DoxyCode}

@@ -1,0 +1,571 @@
+\hypertarget{evict_8c_source}{}\section{evict.\+c}
+\label{evict_8c_source}\index{src/evict.\+c@{src/evict.\+c}}
+
+\begin{DoxyCode}
+00001 \textcolor{comment}{/* Maxmemory directive handling (LRU eviction and other policies).}
+00002 \textcolor{comment}{ *}
+00003 \textcolor{comment}{ * ----------------------------------------------------------------------------}
+00004 \textcolor{comment}{ *}
+00005 \textcolor{comment}{ * Copyright (c) 2009-2016, Salvatore Sanfilippo <antirez at gmail dot com>}
+00006 \textcolor{comment}{ * All rights reserved.}
+00007 \textcolor{comment}{ *}
+00008 \textcolor{comment}{ * Redistribution and use in source and binary forms, with or without}
+00009 \textcolor{comment}{ * modification, are permitted provided that the following conditions are met:}
+00010 \textcolor{comment}{ *}
+00011 \textcolor{comment}{ *   * Redistributions of source code must retain the above copyright notice,}
+00012 \textcolor{comment}{ *     this list of conditions and the following disclaimer.}
+00013 \textcolor{comment}{ *   * Redistributions in binary form must reproduce the above copyright}
+00014 \textcolor{comment}{ *     notice, this list of conditions and the following disclaimer in the}
+00015 \textcolor{comment}{ *     documentation and/or other materials provided with the distribution.}
+00016 \textcolor{comment}{ *   * Neither the name of Redis nor the names of its contributors may be used}
+00017 \textcolor{comment}{ *     to endorse or promote products derived from this software without}
+00018 \textcolor{comment}{ *     specific prior written permission.}
+00019 \textcolor{comment}{ *}
+00020 \textcolor{comment}{ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"}
+00021 \textcolor{comment}{ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE}
+00022 \textcolor{comment}{ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE}
+00023 \textcolor{comment}{ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE}
+00024 \textcolor{comment}{ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR}
+00025 \textcolor{comment}{ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF}
+00026 \textcolor{comment}{ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS}
+00027 \textcolor{comment}{ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN}
+00028 \textcolor{comment}{ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)}
+00029 \textcolor{comment}{ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE}
+00030 \textcolor{comment}{ * POSSIBILITY OF SUCH DAMAGE.}
+00031 \textcolor{comment}{ */}
+00032 
+00033 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \hyperlink{server_8h}{"server.h"}
+00034 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \hyperlink{bio_8h}{"bio.h"}
+00035 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \hyperlink{atomicvar_8h}{"atomicvar.h"}
+00036 
+00037 \textcolor{comment}{/* ----------------------------------------------------------------------------}
+00038 \textcolor{comment}{ * Data structures}
+00039 \textcolor{comment}{ * --------------------------------------------------------------------------*/}
+00040 
+00041 \textcolor{comment}{/* To improve the quality of the LRU approximation we take a set of keys}
+00042 \textcolor{comment}{ * that are good candidate for eviction across freeMemoryIfNeeded() calls.}
+00043 \textcolor{comment}{ *}
+00044 \textcolor{comment}{ * Entries inside the eviciton pool are taken ordered by idle time, putting}
+00045 \textcolor{comment}{ * greater idle times to the right (ascending order).}
+00046 \textcolor{comment}{ *}
+00047 \textcolor{comment}{ * When an LFU policy is used instead, a reverse frequency indication is used}
+00048 \textcolor{comment}{ * instead of the idle time, so that we still evict by larger value (larger}
+00049 \textcolor{comment}{ * inverse frequency means to evict keys with the least frequent accesses).}
+00050 \textcolor{comment}{ *}
+00051 \textcolor{comment}{ * Empty entries have the key pointer set to NULL. */}
+00052 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{EVPOOL\_SIZE} 16
+00053 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{EVPOOL\_CACHED\_SDS\_SIZE} 255
+\Hypertarget{evict_8c_source_l00054}\hyperlink{structevictionPoolEntry}{00054} \textcolor{keyword}{struct} \hyperlink{structevictionPoolEntry}{evictionPoolEntry} \{
+00055     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} idle;    \textcolor{comment}{/* Object idle time (inverse frequency for LFU) */}
+00056     sds key;                    \textcolor{comment}{/* Key name. */}
+00057     sds cached;                 \textcolor{comment}{/* Cached SDS object for key name. */}
+00058     \textcolor{keywordtype}{int} dbid;                   \textcolor{comment}{/* Key DB number. */}
+00059 \};
+00060 
+00061 \textcolor{keyword}{static} \textcolor{keyword}{struct} \hyperlink{structevictionPoolEntry}{evictionPoolEntry} *EvictionPoolLRU;
+00062 
+00063 \textcolor{comment}{/* ----------------------------------------------------------------------------}
+00064 \textcolor{comment}{ * Implementation of eviction, aging and LRU}
+00065 \textcolor{comment}{ * --------------------------------------------------------------------------*/}
+00066 
+00067 \textcolor{comment}{/* Return the LRU clock, based on the clock resolution. This is a time}
+00068 \textcolor{comment}{ * in a reduced-bits format that can be used to set and check the}
+00069 \textcolor{comment}{ * object->lru field of redisObject structures. */}
+00070 \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{int} getLRUClock(\textcolor{keywordtype}{void}) \{
+00071     \textcolor{keywordflow}{return} (mstime()/\hyperlink{server_8h_ace9135e475fa92a1d52f0c5782687efe}{LRU\_CLOCK\_RESOLUTION}) & 
+      \hyperlink{server_8h_a39e838b26cf6677ae57950f45a45f1b2}{LRU\_CLOCK\_MAX};
+00072 \}
+00073 
+00074 \textcolor{comment}{/* This function is used to obtain the current LRU clock.}
+00075 \textcolor{comment}{ * If the current resolution is lower than the frequency we refresh the}
+00076 \textcolor{comment}{ * LRU clock (as it should be in production servers) we return the}
+00077 \textcolor{comment}{ * precomputed value, otherwise we need to resort to a system call. */}
+00078 \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{int} LRU\_CLOCK(\textcolor{keywordtype}{void}) \{
+00079     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{int} lruclock;
+00080     \textcolor{keywordflow}{if} (1000/server.hz <= \hyperlink{server_8h_ace9135e475fa92a1d52f0c5782687efe}{LRU\_CLOCK\_RESOLUTION}) \{
+00081         \hyperlink{atomicvar_8h_a57b17e058ecff6871debb3d1d4f3031a}{atomicGet}(server.lruclock,lruclock);
+00082     \} \textcolor{keywordflow}{else} \{
+00083         lruclock = getLRUClock();
+00084     \}
+00085     \textcolor{keywordflow}{return} lruclock;
+00086 \}
+00087 
+00088 \textcolor{comment}{/* Given an object returns the min number of milliseconds the object was never}
+00089 \textcolor{comment}{ * requested, using an approximated LRU algorithm. */}
+00090 \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} estimateObjectIdleTime(robj *o) \{
+00091     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} lruclock = LRU\_CLOCK();
+00092     \textcolor{keywordflow}{if} (lruclock >= o->lru) \{
+00093         \textcolor{keywordflow}{return} (lruclock - o->lru) * \hyperlink{server_8h_ace9135e475fa92a1d52f0c5782687efe}{LRU\_CLOCK\_RESOLUTION};
+00094     \} \textcolor{keywordflow}{else} \{
+00095         \textcolor{keywordflow}{return} (lruclock + (\hyperlink{server_8h_a39e838b26cf6677ae57950f45a45f1b2}{LRU\_CLOCK\_MAX} - o->lru)) *
+00096                     \hyperlink{server_8h_ace9135e475fa92a1d52f0c5782687efe}{LRU\_CLOCK\_RESOLUTION};
+00097     \}
+00098 \}
+00099 
+00100 \textcolor{comment}{/* freeMemoryIfNeeded() gets called when 'maxmemory' is set on the config}
+00101 \textcolor{comment}{ * file to limit the max memory used by the server, before processing a}
+00102 \textcolor{comment}{ * command.}
+00103 \textcolor{comment}{ *}
+00104 \textcolor{comment}{ * The goal of the function is to free enough memory to keep Redis under the}
+00105 \textcolor{comment}{ * configured memory limit.}
+00106 \textcolor{comment}{ *}
+00107 \textcolor{comment}{ * The function starts calculating how many bytes should be freed to keep}
+00108 \textcolor{comment}{ * Redis under the limit, and enters a loop selecting the best keys to}
+00109 \textcolor{comment}{ * evict accordingly to the configured policy.}
+00110 \textcolor{comment}{ *}
+00111 \textcolor{comment}{ * If all the bytes needed to return back under the limit were freed the}
+00112 \textcolor{comment}{ * function returns C\_OK, otherwise C\_ERR is returned, and the caller}
+00113 \textcolor{comment}{ * should block the execution of commands that will result in more memory}
+00114 \textcolor{comment}{ * used by the server.}
+00115 \textcolor{comment}{ *}
+00116 \textcolor{comment}{ * ------------------------------------------------------------------------}
+00117 \textcolor{comment}{ *}
+00118 \textcolor{comment}{ * LRU approximation algorithm}
+00119 \textcolor{comment}{ *}
+00120 \textcolor{comment}{ * Redis uses an approximation of the LRU algorithm that runs in constant}
+00121 \textcolor{comment}{ * memory. Every time there is a key to expire, we sample N keys (with}
+00122 \textcolor{comment}{ * N very small, usually in around 5) to populate a pool of best keys to}
+00123 \textcolor{comment}{ * evict of M keys (the pool size is defined by EVPOOL\_SIZE).}
+00124 \textcolor{comment}{ *}
+00125 \textcolor{comment}{ * The N keys sampled are added in the pool of good keys to expire (the one}
+00126 \textcolor{comment}{ * with an old access time) if they are better than one of the current keys}
+00127 \textcolor{comment}{ * in the pool.}
+00128 \textcolor{comment}{ *}
+00129 \textcolor{comment}{ * After the pool is populated, the best key we have in the pool is expired.}
+00130 \textcolor{comment}{ * However note that we don't remove keys from the pool when they are deleted}
+00131 \textcolor{comment}{ * so the pool may contain keys that no longer exist.}
+00132 \textcolor{comment}{ *}
+00133 \textcolor{comment}{ * When we try to evict a key, and all the entries in the pool don't exist}
+00134 \textcolor{comment}{ * we populate it again. This time we'll be sure that the pool has at least}
+00135 \textcolor{comment}{ * one key that can be evicted, if there is at least one key that can be}
+00136 \textcolor{comment}{ * evicted in the whole database. */}
+00137 
+00138 \textcolor{comment}{/* Create a new eviction pool. */}
+00139 \textcolor{keywordtype}{void} evictionPoolAlloc(\textcolor{keywordtype}{void}) \{
+00140     \textcolor{keyword}{struct} \hyperlink{structevictionPoolEntry}{evictionPoolEntry} *ep;
+00141     \textcolor{keywordtype}{int} j;
+00142 
+00143     ep = zmalloc(\textcolor{keyword}{sizeof}(*ep)*\hyperlink{evict_8c_a459751f47982906b9beb736ea3519e97}{EVPOOL\_SIZE});
+00144     \textcolor{keywordflow}{for} (j = 0; j < \hyperlink{evict_8c_a459751f47982906b9beb736ea3519e97}{EVPOOL\_SIZE}; j++) \{
+00145         ep[j].idle = 0;
+00146         ep[j].key = NULL;
+00147         ep[j].cached = sdsnewlen(NULL,\hyperlink{evict_8c_acfb2106a0b0fb572e25c170d78ab1729}{EVPOOL\_CACHED\_SDS\_SIZE});
+00148         ep[j].dbid = 0;
+00149     \}
+00150     EvictionPoolLRU = ep;
+00151 \}
+00152 
+00153 \textcolor{comment}{/* This is an helper function for freeMemoryIfNeeded(), it is used in order}
+00154 \textcolor{comment}{ * to populate the evictionPool with a few entries every time we want to}
+00155 \textcolor{comment}{ * expire a key. Keys with idle time smaller than one of the current}
+00156 \textcolor{comment}{ * keys are added. Keys are always added if there are free entries.}
+00157 \textcolor{comment}{ *}
+00158 \textcolor{comment}{ * We insert keys on place in ascending order, so keys with the smaller}
+00159 \textcolor{comment}{ * idle time are on the left, and keys with the higher idle time on the}
+00160 \textcolor{comment}{ * right. */}
+00161 
+00162 \textcolor{keywordtype}{void} evictionPoolPopulate(\textcolor{keywordtype}{int} dbid, dict *sampledict, dict *keydict, \textcolor{keyword}{struct} 
+      \hyperlink{structevictionPoolEntry}{evictionPoolEntry} *pool) \{
+00163     \textcolor{keywordtype}{int} j, k, count;
+00164     dictEntry *samples[server.maxmemory\_samples];
+00165 
+00166     count = dictGetSomeKeys(sampledict,samples,server.maxmemory\_samples);
+00167     \textcolor{keywordflow}{for} (j = 0; j < count; j++) \{
+00168         \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} idle;
+00169         sds key;
+00170         robj *o;
+00171         dictEntry *de;
+00172 
+00173         de = samples[j];
+00174         key = \hyperlink{dict_8h_a3271c334309904a3086deca94f96e46e}{dictGetKey}(de);
+00175 
+00176         \textcolor{comment}{/* If the dictionary we are sampling from is not the main}
+00177 \textcolor{comment}{         * dictionary (but the expires one) we need to lookup the key}
+00178 \textcolor{comment}{         * again in the key dictionary to obtain the value object. */}
+00179         \textcolor{keywordflow}{if} (server.maxmemory\_policy != \hyperlink{server_8h_a463db85c87bf7ecf91e3f9d182397969}{MAXMEMORY\_VOLATILE\_TTL}) \{
+00180             \textcolor{keywordflow}{if} (sampledict != keydict) de = dictFind(keydict, key);
+00181             o = \hyperlink{dict_8h_ae8d2cc391873b2bea2b87c4f80f43120}{dictGetVal}(de);
+00182         \}
+00183 
+00184         \textcolor{comment}{/* Calculate the idle time according to the policy. This is called}
+00185 \textcolor{comment}{         * idle just because the code initially handled LRU, but is in fact}
+00186 \textcolor{comment}{         * just a score where an higher score means better candidate. */}
+00187         \textcolor{keywordflow}{if} (server.maxmemory\_policy & \hyperlink{server_8h_a9f9503e7c7ba52df66b097c2b0b4c6d0}{MAXMEMORY\_FLAG\_LRU}) \{
+00188             idle = estimateObjectIdleTime(o);
+00189         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (server.maxmemory\_policy & \hyperlink{server_8h_aac2d3ad7a604f87e06e25233dbd01c9b}{MAXMEMORY\_FLAG\_LFU}) \{
+00190             \textcolor{comment}{/* When we use an LRU policy, we sort the keys by idle time}
+00191 \textcolor{comment}{             * so that we expire keys starting from greater idle time.}
+00192 \textcolor{comment}{             * However when the policy is an LFU one, we have a frequency}
+00193 \textcolor{comment}{             * estimation, and we want to evict keys with lower frequency}
+00194 \textcolor{comment}{             * first. So inside the pool we put objects using the inverted}
+00195 \textcolor{comment}{             * frequency subtracting the actual frequency to the maximum}
+00196 \textcolor{comment}{             * frequency of 255. */}
+00197             idle = 255-LFUDecrAndReturn(o);
+00198         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (server.maxmemory\_policy == \hyperlink{server_8h_a463db85c87bf7ecf91e3f9d182397969}{MAXMEMORY\_VOLATILE\_TTL}) \{
+00199             \textcolor{comment}{/* In this case the sooner the expire the better. */}
+00200             idle = ULLONG\_MAX - (\textcolor{keywordtype}{long})\hyperlink{dict_8h_ae8d2cc391873b2bea2b87c4f80f43120}{dictGetVal}(de);
+00201         \} \textcolor{keywordflow}{else} \{
+00202             \hyperlink{server_8h_a11cc378e7778a830b41240578de3b204}{serverPanic}(\textcolor{stringliteral}{"Unknown eviction policy in evictionPoolPopulate()"});
+00203         \}
+00204 
+00205         \textcolor{comment}{/* Insert the element inside the pool.}
+00206 \textcolor{comment}{         * First, find the first empty bucket or the first populated}
+00207 \textcolor{comment}{         * bucket that has an idle time smaller than our idle time. */}
+00208         k = 0;
+00209         \textcolor{keywordflow}{while} (k < \hyperlink{evict_8c_a459751f47982906b9beb736ea3519e97}{EVPOOL\_SIZE} &&
+00210                pool[k].key &&
+00211                pool[k].idle < idle) k++;
+00212         \textcolor{keywordflow}{if} (k == 0 && pool[\hyperlink{evict_8c_a459751f47982906b9beb736ea3519e97}{EVPOOL\_SIZE}-1].key != NULL) \{
+00213             \textcolor{comment}{/* Can't insert if the element is < the worst element we have}
+00214 \textcolor{comment}{             * and there are no empty buckets. */}
+00215             \textcolor{keywordflow}{continue};
+00216         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (k < \hyperlink{evict_8c_a459751f47982906b9beb736ea3519e97}{EVPOOL\_SIZE} && pool[k].key == NULL) \{
+00217             \textcolor{comment}{/* Inserting into empty position. No setup needed before insert. */}
+00218         \} \textcolor{keywordflow}{else} \{
+00219             \textcolor{comment}{/* Inserting in the middle. Now k points to the first element}
+00220 \textcolor{comment}{             * greater than the element to insert.  */}
+00221             \textcolor{keywordflow}{if} (pool[\hyperlink{evict_8c_a459751f47982906b9beb736ea3519e97}{EVPOOL\_SIZE}-1].key == NULL) \{
+00222                 \textcolor{comment}{/* Free space on the right? Insert at k shifting}
+00223 \textcolor{comment}{                 * all the elements from k to end to the right. */}
+00224 
+00225                 \textcolor{comment}{/* Save SDS before overwriting. */}
+00226                 sds cached = pool[\hyperlink{evict_8c_a459751f47982906b9beb736ea3519e97}{EVPOOL\_SIZE}-1].cached;
+00227                 memmove(pool+k+1,pool+k,
+00228                     \textcolor{keyword}{sizeof}(pool[0])*(\hyperlink{evict_8c_a459751f47982906b9beb736ea3519e97}{EVPOOL\_SIZE}-k-1));
+00229                 pool[k].cached = cached;
+00230             \} \textcolor{keywordflow}{else} \{
+00231                 \textcolor{comment}{/* No free space on right? Insert at k-1 */}
+00232                 k--;
+00233                 \textcolor{comment}{/* Shift all elements on the left of k (included) to the}
+00234 \textcolor{comment}{                 * left, so we discard the element with smaller idle time. */}
+00235                 sds cached = pool[0].cached; \textcolor{comment}{/* Save SDS before overwriting. */}
+00236                 \textcolor{keywordflow}{if} (pool[0].key != pool[0].cached) sdsfree(pool[0].key);
+00237                 memmove(pool,pool+1,\textcolor{keyword}{sizeof}(pool[0])*k);
+00238                 pool[k].cached = cached;
+00239             \}
+00240         \}
+00241 
+00242         \textcolor{comment}{/* Try to reuse the cached SDS string allocated in the pool entry,}
+00243 \textcolor{comment}{         * because allocating and deallocating this object is costly}
+00244 \textcolor{comment}{         * (according to the profiler, not my fantasy. Remember:}
+00245 \textcolor{comment}{         * premature optimizbla bla bla bla. */}
+00246         \textcolor{keywordtype}{int} klen = sdslen(key);
+00247         \textcolor{keywordflow}{if} (klen > \hyperlink{evict_8c_acfb2106a0b0fb572e25c170d78ab1729}{EVPOOL\_CACHED\_SDS\_SIZE}) \{
+00248             pool[k].key = sdsdup(key);
+00249         \} \textcolor{keywordflow}{else} \{
+00250             memcpy(pool[k].cached,key,klen+1);
+00251             sdssetlen(pool[k].cached,klen);
+00252             pool[k].key = pool[k].cached;
+00253         \}
+00254         pool[k].idle = idle;
+00255         pool[k].dbid = dbid;
+00256     \}
+00257 \}
+00258 
+00259 \textcolor{comment}{/* ----------------------------------------------------------------------------}
+00260 \textcolor{comment}{ * LFU (Least Frequently Used) implementation.}
+00261 \textcolor{comment}{}
+00262 \textcolor{comment}{ * We have 24 total bits of space in each object in order to implement}
+00263 \textcolor{comment}{ * an LFU (Least Frequently Used) eviction policy, since we re-use the}
+00264 \textcolor{comment}{ * LRU field for this purpose.}
+00265 \textcolor{comment}{ *}
+00266 \textcolor{comment}{ * We split the 24 bits into two fields:}
+00267 \textcolor{comment}{ *}
+00268 \textcolor{comment}{ *          16 bits      8 bits}
+00269 \textcolor{comment}{ *     +----------------+--------+}
+00270 \textcolor{comment}{ *     + Last decr time | LOG\_C  |}
+00271 \textcolor{comment}{ *     +----------------+--------+}
+00272 \textcolor{comment}{ *}
+00273 \textcolor{comment}{ * LOG\_C is a logarithmic counter that provides an indication of the access}
+00274 \textcolor{comment}{ * frequency. However this field must also be decremented otherwise what used}
+00275 \textcolor{comment}{ * to be a frequently accessed key in the past, will remain ranked like that}
+00276 \textcolor{comment}{ * forever, while we want the algorithm to adapt to access pattern changes.}
+00277 \textcolor{comment}{ *}
+00278 \textcolor{comment}{ * So the remaining 16 bits are used in order to store the "decrement time",}
+00279 \textcolor{comment}{ * a reduced-precision Unix time (we take 16 bits of the time converted}
+00280 \textcolor{comment}{ * in minutes since we don't care about wrapping around) where the LOG\_C}
+00281 \textcolor{comment}{ * counter is halved if it has an high value, or just decremented if it}
+00282 \textcolor{comment}{ * has a low value.}
+00283 \textcolor{comment}{ *}
+00284 \textcolor{comment}{ * New keys don't start at zero, in order to have the ability to collect}
+00285 \textcolor{comment}{ * some accesses before being trashed away, so they start at COUNTER\_INIT\_VAL.}
+00286 \textcolor{comment}{ * The logarithmic increment performed on LOG\_C takes care of COUNTER\_INIT\_VAL}
+00287 \textcolor{comment}{ * when incrementing the key, so that keys starting at COUNTER\_INIT\_VAL}
+00288 \textcolor{comment}{ * (or having a smaller value) have a very high chance of being incremented}
+00289 \textcolor{comment}{ * on access.}
+00290 \textcolor{comment}{ *}
+00291 \textcolor{comment}{ * During decrement, the value of the logarithmic counter is halved if}
+00292 \textcolor{comment}{ * its current value is greater than two times the COUNTER\_INIT\_VAL, otherwise}
+00293 \textcolor{comment}{ * it is just decremented by one.}
+00294 \textcolor{comment}{ * --------------------------------------------------------------------------*/}
+00295 
+00296 \textcolor{comment}{/* Return the current time in minutes, just taking the least significant}
+00297 \textcolor{comment}{ * 16 bits. The returned time is suitable to be stored as LDT (last decrement}
+00298 \textcolor{comment}{ * time) for the LFU implementation. */}
+00299 \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} LFUGetTimeInMinutes(\textcolor{keywordtype}{void}) \{
+00300     \textcolor{keywordflow}{return} (server.unixtime/60) & 65535;
+00301 \}
+00302 
+00303 \textcolor{comment}{/* Given an object last access time, compute the minimum number of minutes}
+00304 \textcolor{comment}{ * that elapsed since the last access. Handle overflow (ldt greater than}
+00305 \textcolor{comment}{ * the current 16 bits minutes time) considering the time as wrapping}
+00306 \textcolor{comment}{ * exactly once. */}
+00307 \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} LFUTimeElapsed(\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} ldt) \{
+00308     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} now = LFUGetTimeInMinutes();
+00309     \textcolor{keywordflow}{if} (now >= ldt) \textcolor{keywordflow}{return} now-ldt;
+00310     \textcolor{keywordflow}{return} 65535-ldt+now;
+00311 \}
+00312 
+00313 \textcolor{comment}{/* Logarithmically increment a counter. The greater is the current counter value}
+00314 \textcolor{comment}{ * the less likely is that it gets really implemented. Saturate it at 255. */}
+00315 uint8\_t LFULogIncr(uint8\_t counter) \{
+00316     \textcolor{keywordflow}{if} (counter == 255) \textcolor{keywordflow}{return} 255;
+00317     \textcolor{keywordtype}{double} r = (\textcolor{keywordtype}{double})rand()/RAND\_MAX;
+00318     \textcolor{keywordtype}{double} baseval = counter - \hyperlink{server_8h_a8cec44bf7da67aac58839ab5033bdc0a}{LFU\_INIT\_VAL};
+00319     \textcolor{keywordflow}{if} (baseval < 0) baseval = 0;
+00320     \textcolor{keywordtype}{double} p = 1.0/(baseval*server.lfu\_log\_factor+1);
+00321     \textcolor{keywordflow}{if} (r < p) counter++;
+00322     \textcolor{keywordflow}{return} counter;
+00323 \}
+00324 
+00325 \textcolor{comment}{/* If the object decrement time is reached decrement the LFU counter but}
+00326 \textcolor{comment}{ * do not update LFU fields of the object, we update the access time}
+00327 \textcolor{comment}{ * and counter in an explicit way when the object is really accessed.}
+00328 \textcolor{comment}{ * And we will times halve the counter according to the times of}
+00329 \textcolor{comment}{ * elapsed time than server.lfu\_decay\_time.}
+00330 \textcolor{comment}{ * Return the object frequency counter.}
+00331 \textcolor{comment}{ *}
+00332 \textcolor{comment}{ * This function is used in order to scan the dataset for the best object}
+00333 \textcolor{comment}{ * to fit: as we check for the candidate, we incrementally decrement the}
+00334 \textcolor{comment}{ * counter of the scanned objects if needed. */}
+00335 \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} LFUDecrAndReturn(robj *o) \{
+00336     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} ldt = o->lru >> 8;
+00337     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} counter = o->lru & 255;
+00338     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} num\_periods = server.lfu\_decay\_time ? LFUTimeElapsed(ldt) / server.lfu\_decay\_time : 
+      0;
+00339     \textcolor{keywordflow}{if} (num\_periods)
+00340         counter = (num\_periods > counter) ? 0 : counter - num\_periods;
+00341     \textcolor{keywordflow}{return} counter;
+00342 \}
+00343 
+00344 \textcolor{comment}{/* ----------------------------------------------------------------------------}
+00345 \textcolor{comment}{ * The external API for eviction: freeMemroyIfNeeded() is called by the}
+00346 \textcolor{comment}{ * server when there is data to add in order to make space if needed.}
+00347 \textcolor{comment}{ * --------------------------------------------------------------------------*/}
+00348 
+00349 \textcolor{comment}{/* We don't want to count AOF buffers and slaves output buffers as}
+00350 \textcolor{comment}{ * used memory: the eviction should use mostly data size. This function}
+00351 \textcolor{comment}{ * returns the sum of AOF and slaves buffer. */}
+00352 size\_t freeMemoryGetNotCountedMemory(\textcolor{keywordtype}{void}) \{
+00353     size\_t overhead = 0;
+00354     \textcolor{keywordtype}{int} slaves = \hyperlink{adlist_8h_afde0ab079f934670e82119b43120e94b}{listLength}(server.slaves);
+00355 
+00356     \textcolor{keywordflow}{if} (slaves) \{
+00357         listIter li;
+00358         listNode *ln;
+00359 
+00360         listRewind(server.slaves,&li);
+00361         \textcolor{keywordflow}{while}((ln = listNext(&li))) \{
+00362             \hyperlink{structclient}{client} *slave = \hyperlink{adlist_8h_af84cae230e7180ebcda1e2736fce9f65}{listNodeValue}(ln);
+00363             overhead += getClientOutputBufferMemoryUsage(slave);
+00364         \}
+00365     \}
+00366     \textcolor{keywordflow}{if} (server.aof\_state != \hyperlink{server_8h_a5226306fbcebcb6d5d02e0fef3c213c2}{AOF\_OFF}) \{
+00367         overhead += sdslen(server.aof\_buf)+aofRewriteBufferSize();
+00368     \}
+00369     \textcolor{keywordflow}{return} overhead;
+00370 \}
+00371 
+00372 \textcolor{keywordtype}{int} freeMemoryIfNeeded(\textcolor{keywordtype}{void}) \{
+00373     size\_t mem\_reported, mem\_used, mem\_tofree, mem\_freed;
+00374     mstime\_t latency, eviction\_latency;
+00375     \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} delta;
+00376     \textcolor{keywordtype}{int} slaves = \hyperlink{adlist_8h_afde0ab079f934670e82119b43120e94b}{listLength}(server.slaves);
+00377 
+00378     \textcolor{comment}{/* When clients are paused the dataset should be static not just from the}
+00379 \textcolor{comment}{     * POV of clients not being able to write, but also from the POV of}
+00380 \textcolor{comment}{     * expires and evictions of keys not being performed. */}
+00381     \textcolor{keywordflow}{if} (clientsArePaused()) \textcolor{keywordflow}{return} \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK};
+00382 
+00383     \textcolor{comment}{/* Check if we are over the memory usage limit. If we are not, no need}
+00384 \textcolor{comment}{     * to subtract the slaves output buffers. We can just return ASAP. */}
+00385     mem\_reported = zmalloc\_used\_memory();
+00386     \textcolor{keywordflow}{if} (mem\_reported <= server.maxmemory) \textcolor{keywordflow}{return} \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK};
+00387 
+00388     \textcolor{comment}{/* Remove the size of slaves output buffers and AOF buffer from the}
+00389 \textcolor{comment}{     * count of used memory. */}
+00390     mem\_used = mem\_reported;
+00391     size\_t overhead = freeMemoryGetNotCountedMemory();
+00392     mem\_used = (mem\_used > overhead) ? mem\_used-overhead : 0;
+00393 
+00394     \textcolor{comment}{/* Check if we are still over the memory limit. */}
+00395     \textcolor{keywordflow}{if} (mem\_used <= server.maxmemory) \textcolor{keywordflow}{return} \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK};
+00396 
+00397     \textcolor{comment}{/* Compute how much memory we need to free. */}
+00398     mem\_tofree = mem\_used - server.maxmemory;
+00399     mem\_freed = 0;
+00400 
+00401     \textcolor{keywordflow}{if} (server.maxmemory\_policy == \hyperlink{server_8h_a418e5a222cf659c003df77830f1ae343}{MAXMEMORY\_NO\_EVICTION})
+00402         \textcolor{keywordflow}{goto} cant\_free; \textcolor{comment}{/* We need to free memory, but policy forbids. */}
+00403 
+00404     \hyperlink{latency_8h_a87d7b5b368dad97457f13466d760b0e1}{latencyStartMonitor}(latency);
+00405     \textcolor{keywordflow}{while} (mem\_freed < mem\_tofree) \{
+00406         \textcolor{keywordtype}{int} j, k, i, keys\_freed = 0;
+00407         \textcolor{keyword}{static} \textcolor{keywordtype}{int} next\_db = 0;
+00408         sds bestkey = NULL;
+00409         \textcolor{keywordtype}{int} bestdbid;
+00410         redisDb *db;
+00411         dict *dict;
+00412         dictEntry *de;
+00413 
+00414         \textcolor{keywordflow}{if} (server.maxmemory\_policy & (\hyperlink{server_8h_a9f9503e7c7ba52df66b097c2b0b4c6d0}{MAXMEMORY\_FLAG\_LRU}|
+      \hyperlink{server_8h_aac2d3ad7a604f87e06e25233dbd01c9b}{MAXMEMORY\_FLAG\_LFU}) ||
+00415             server.maxmemory\_policy == \hyperlink{server_8h_a463db85c87bf7ecf91e3f9d182397969}{MAXMEMORY\_VOLATILE\_TTL})
+00416         \{
+00417             \textcolor{keyword}{struct} evictionPoolEntry *pool = EvictionPoolLRU;
+00418 
+00419             \textcolor{keywordflow}{while}(bestkey == NULL) \{
+00420                 \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} total\_keys = 0, keys;
+00421 
+00422                 \textcolor{comment}{/* We don't want to make local-db choices when expiring keys,}
+00423 \textcolor{comment}{                 * so to start populate the eviction pool sampling keys from}
+00424 \textcolor{comment}{                 * every DB. */}
+00425                 \textcolor{keywordflow}{for} (i = 0; i < server.dbnum; i++) \{
+00426                     db = server.db+i;
+00427                     dict = (server.maxmemory\_policy & 
+      \hyperlink{server_8h_a6fccff10a0d37e23fb8114d5c87737d0}{MAXMEMORY\_FLAG\_ALLKEYS}) ?
+00428                             db->dict : db->expires;
+00429                     \textcolor{keywordflow}{if} ((keys = \hyperlink{dict_8h_af193430dd3d5579a52b194512f72c1f0}{dictSize}(dict)) != 0) \{
+00430                         evictionPoolPopulate(i, dict, db->dict, pool);
+00431                         total\_keys += keys;
+00432                     \}
+00433                 \}
+00434                 \textcolor{keywordflow}{if} (!total\_keys) \textcolor{keywordflow}{break}; \textcolor{comment}{/* No keys to evict. */}
+00435 
+00436                 \textcolor{comment}{/* Go backward from best to worst element to evict. */}
+00437                 \textcolor{keywordflow}{for} (k = \hyperlink{evict_8c_a459751f47982906b9beb736ea3519e97}{EVPOOL\_SIZE}-1; k >= 0; k--) \{
+00438                     \textcolor{keywordflow}{if} (pool[k].key == NULL) \textcolor{keywordflow}{continue};
+00439                     bestdbid = pool[k].dbid;
+00440 
+00441                     \textcolor{keywordflow}{if} (server.maxmemory\_policy & \hyperlink{server_8h_a6fccff10a0d37e23fb8114d5c87737d0}{MAXMEMORY\_FLAG\_ALLKEYS}) \{
+00442                         de = dictFind(server.db[pool[k].dbid].dict,
+00443                             pool[k].key);
+00444                     \} \textcolor{keywordflow}{else} \{
+00445                         de = dictFind(server.db[pool[k].dbid].expires,
+00446                             pool[k].key);
+00447                     \}
+00448 
+00449                     \textcolor{comment}{/* Remove the entry from the pool. */}
+00450                     \textcolor{keywordflow}{if} (pool[k].key != pool[k].cached)
+00451                         sdsfree(pool[k].key);
+00452                     pool[k].key = NULL;
+00453                     pool[k].idle = 0;
+00454 
+00455                     \textcolor{comment}{/* If the key exists, is our pick. Otherwise it is}
+00456 \textcolor{comment}{                     * a ghost and we need to try the next element. */}
+00457                     \textcolor{keywordflow}{if} (de) \{
+00458                         bestkey = \hyperlink{dict_8h_a3271c334309904a3086deca94f96e46e}{dictGetKey}(de);
+00459                         \textcolor{keywordflow}{break};
+00460                     \} \textcolor{keywordflow}{else} \{
+00461                         \textcolor{comment}{/* Ghost... Iterate again. */}
+00462                     \}
+00463                 \}
+00464             \}
+00465         \}
+00466 
+00467         \textcolor{comment}{/* volatile-random and allkeys-random policy */}
+00468         \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (server.maxmemory\_policy == \hyperlink{server_8h_adcde0cca14eeb32039c92a26c4672961}{MAXMEMORY\_ALLKEYS\_RANDOM} ||
+00469                  server.maxmemory\_policy == \hyperlink{server_8h_a87a1f8341c97c33069827b359302a1c4}{MAXMEMORY\_VOLATILE\_RANDOM})
+00470         \{
+00471             \textcolor{comment}{/* When evicting a random key, we try to evict a key for}
+00472 \textcolor{comment}{             * each DB, so we use the static 'next\_db' variable to}
+00473 \textcolor{comment}{             * incrementally visit all DBs. */}
+00474             \textcolor{keywordflow}{for} (i = 0; i < server.dbnum; i++) \{
+00475                 j = (++next\_db) % server.dbnum;
+00476                 db = server.db+j;
+00477                 dict = (server.maxmemory\_policy == \hyperlink{server_8h_adcde0cca14eeb32039c92a26c4672961}{MAXMEMORY\_ALLKEYS\_RANDOM}) ?
+00478                         db->dict : db->expires;
+00479                 \textcolor{keywordflow}{if} (\hyperlink{dict_8h_af193430dd3d5579a52b194512f72c1f0}{dictSize}(dict) != 0) \{
+00480                     de = dictGetRandomKey(dict);
+00481                     bestkey = \hyperlink{dict_8h_a3271c334309904a3086deca94f96e46e}{dictGetKey}(de);
+00482                     bestdbid = j;
+00483                     \textcolor{keywordflow}{break};
+00484                 \}
+00485             \}
+00486         \}
+00487 
+00488         \textcolor{comment}{/* Finally remove the selected key. */}
+00489         \textcolor{keywordflow}{if} (bestkey) \{
+00490             db = server.db+bestdbid;
+00491             robj *keyobj = createStringObject(bestkey,sdslen(bestkey));
+00492             propagateExpire(db,keyobj,server.lazyfree\_lazy\_eviction);
+00493             \textcolor{comment}{/* We compute the amount of memory freed by db*Delete() alone.}
+00494 \textcolor{comment}{             * It is possible that actually the memory needed to propagate}
+00495 \textcolor{comment}{             * the DEL in AOF and replication link is greater than the one}
+00496 \textcolor{comment}{             * we are freeing removing the key, but we can't account for}
+00497 \textcolor{comment}{             * that otherwise we would never exit the loop.}
+00498 \textcolor{comment}{             *}
+00499 \textcolor{comment}{             * AOF and Output buffer memory will be freed eventually so}
+00500 \textcolor{comment}{             * we only care about memory used by the key space. */}
+00501             delta = (\textcolor{keywordtype}{long} \textcolor{keywordtype}{long}) zmalloc\_used\_memory();
+00502             \hyperlink{latency_8h_a87d7b5b368dad97457f13466d760b0e1}{latencyStartMonitor}(eviction\_latency);
+00503             \textcolor{keywordflow}{if} (server.lazyfree\_lazy\_eviction)
+00504                 dbAsyncDelete(db,keyobj);
+00505             \textcolor{keywordflow}{else}
+00506                 dbSyncDelete(db,keyobj);
+00507             \hyperlink{latency_8h_a88461aee20da0a648fe3332b5f068df7}{latencyEndMonitor}(eviction\_latency);
+00508             \hyperlink{latency_8h_a77922ab34035890c90f98831a9071359}{latencyAddSampleIfNeeded}(\textcolor{stringliteral}{"eviction-del"},eviction\_latency);
+00509             \hyperlink{latency_8h_a5a61a1e8705dbbb0dfbdf016fe32c6e4}{latencyRemoveNestedEvent}(latency,eviction\_latency);
+00510             delta -= (\textcolor{keywordtype}{long} \textcolor{keywordtype}{long}) zmalloc\_used\_memory();
+00511             mem\_freed += delta;
+00512             server.stat\_evictedkeys++;
+00513             notifyKeyspaceEvent(\hyperlink{server_8h_aefeeae0f3ac953537135a902b17bf63d}{NOTIFY\_EVICTED}, \textcolor{stringliteral}{"evicted"},
+00514                 keyobj, db->id);
+00515             decrRefCount(keyobj);
+00516             keys\_freed++;
+00517 
+00518             \textcolor{comment}{/* When the memory to free starts to be big enough, we may}
+00519 \textcolor{comment}{             * start spending so much time here that is impossible to}
+00520 \textcolor{comment}{             * deliver data to the slaves fast enough, so we force the}
+00521 \textcolor{comment}{             * transmission here inside the loop. */}
+00522             \textcolor{keywordflow}{if} (slaves) flushSlavesOutputBuffers();
+00523 
+00524             \textcolor{comment}{/* Normally our stop condition is the ability to release}
+00525 \textcolor{comment}{             * a fixed, pre-computed amount of memory. However when we}
+00526 \textcolor{comment}{             * are deleting objects in another thread, it's better to}
+00527 \textcolor{comment}{             * check, from time to time, if we already reached our target}
+00528 \textcolor{comment}{             * memory, since the "mem\_freed" amount is computed only}
+00529 \textcolor{comment}{             * across the dbAsyncDelete() call, while the thread can}
+00530 \textcolor{comment}{             * release the memory all the time. */}
+00531             \textcolor{keywordflow}{if} (server.lazyfree\_lazy\_eviction && !(keys\_freed % 16)) \{
+00532                 overhead = freeMemoryGetNotCountedMemory();
+00533                 mem\_used = zmalloc\_used\_memory();
+00534                 mem\_used = (mem\_used > overhead) ? mem\_used-overhead : 0;
+00535                 \textcolor{keywordflow}{if} (mem\_used <= server.maxmemory) \{
+00536                     mem\_freed = mem\_tofree;
+00537                 \}
+00538             \}
+00539         \}
+00540 
+00541         \textcolor{keywordflow}{if} (!keys\_freed) \{
+00542             \hyperlink{latency_8h_a88461aee20da0a648fe3332b5f068df7}{latencyEndMonitor}(latency);
+00543             \hyperlink{latency_8h_a77922ab34035890c90f98831a9071359}{latencyAddSampleIfNeeded}(\textcolor{stringliteral}{"eviction-cycle"},latency);
+00544             \textcolor{keywordflow}{goto} cant\_free; \textcolor{comment}{/* nothing to free... */}
+00545         \}
+00546     \}
+00547     \hyperlink{latency_8h_a88461aee20da0a648fe3332b5f068df7}{latencyEndMonitor}(latency);
+00548     \hyperlink{latency_8h_a77922ab34035890c90f98831a9071359}{latencyAddSampleIfNeeded}(\textcolor{stringliteral}{"eviction-cycle"},latency);
+00549     \textcolor{keywordflow}{return} \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK};
+00550 
+00551 cant\_free:
+00552     \textcolor{comment}{/* We are here if we are not able to reclaim memory. There is only one}
+00553 \textcolor{comment}{     * last thing we can try: check if the lazyfree thread has jobs in queue}
+00554 \textcolor{comment}{     * and wait... */}
+00555     \textcolor{keywordflow}{while}(bioPendingJobsOfType(\hyperlink{bio_8h_afdc82658b2e29c63afcdb2e808b8a510}{BIO\_LAZY\_FREE})) \{
+00556         \textcolor{keywordflow}{if} (((mem\_reported - zmalloc\_used\_memory()) + mem\_freed) >= mem\_tofree)
+00557             \textcolor{keywordflow}{break};
+00558         usleep(1000);
+00559     \}
+00560     \textcolor{keywordflow}{return} \hyperlink{server_8h_af98ac28d5f4d23d7ed5985188e6fb7d1}{C\_ERR};
+00561 \}
+\end{DoxyCode}

@@ -1,0 +1,59 @@
+\hypertarget{solarisfixes_8h_source}{}\section{solarisfixes.\+h}
+\label{solarisfixes_8h_source}\index{src/solarisfixes.\+h@{src/solarisfixes.\+h}}
+
+\begin{DoxyCode}
+00001 \textcolor{comment}{/* Solaris specific fixes.}
+00002 \textcolor{comment}{ *}
+00003 \textcolor{comment}{ * Copyright (c) 2009-2012, Salvatore Sanfilippo <antirez at gmail dot com>}
+00004 \textcolor{comment}{ * All rights reserved.}
+00005 \textcolor{comment}{ *}
+00006 \textcolor{comment}{ * Redistribution and use in source and binary forms, with or without}
+00007 \textcolor{comment}{ * modification, are permitted provided that the following conditions are met:}
+00008 \textcolor{comment}{ *}
+00009 \textcolor{comment}{ *   * Redistributions of source code must retain the above copyright notice,}
+00010 \textcolor{comment}{ *     this list of conditions and the following disclaimer.}
+00011 \textcolor{comment}{ *   * Redistributions in binary form must reproduce the above copyright}
+00012 \textcolor{comment}{ *     notice, this list of conditions and the following disclaimer in the}
+00013 \textcolor{comment}{ *     documentation and/or other materials provided with the distribution.}
+00014 \textcolor{comment}{ *   * Neither the name of Redis nor the names of its contributors may be used}
+00015 \textcolor{comment}{ *     to endorse or promote products derived from this software without}
+00016 \textcolor{comment}{ *     specific prior written permission.}
+00017 \textcolor{comment}{ *}
+00018 \textcolor{comment}{ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"}
+00019 \textcolor{comment}{ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE}
+00020 \textcolor{comment}{ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE}
+00021 \textcolor{comment}{ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE}
+00022 \textcolor{comment}{ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR}
+00023 \textcolor{comment}{ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF}
+00024 \textcolor{comment}{ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS}
+00025 \textcolor{comment}{ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN}
+00026 \textcolor{comment}{ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)}
+00027 \textcolor{comment}{ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE}
+00028 \textcolor{comment}{ * POSSIBILITY OF SUCH DAMAGE.}
+00029 \textcolor{comment}{ */}
+00030 
+00031 \textcolor{preprocessor}{#}\textcolor{preprocessor}{if} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_\_sun}\textcolor{preprocessor}{)}
+00032 
+00033 \textcolor{preprocessor}{#}\textcolor{preprocessor}{if} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_\_GNUC\_\_}\textcolor{preprocessor}{)}
+00034 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{math}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00035 \textcolor{preprocessor}{#}\textcolor{preprocessor}{undef} \textcolor{preprocessor}{isnan}
+00036 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{isnan}\textcolor{preprocessor}{(}\textcolor{preprocessor}{x}\textcolor{preprocessor}{)}
+00037      \textcolor{preprocessor}{\_\_extension\_\_}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\{} \textcolor{preprocessor}{\_\_typeof} \textcolor{preprocessor}{(}\textcolor{preprocessor}{x}\textcolor{preprocessor}{)} \textcolor{preprocessor}{\_\_x\_a} \textcolor{preprocessor}{=} \textcolor{preprocessor}{(}\textcolor{preprocessor}{x}\textcolor{preprocessor}{)}\textcolor{preprocessor}{;}
+00038      \textcolor{preprocessor}{\_\_builtin\_expect}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_\_x\_a} \textcolor{preprocessor}{!=} \textcolor{preprocessor}{\_\_x\_a}\textcolor{preprocessor}{,} 0\textcolor{preprocessor}{)}\textcolor{preprocessor}{;} \textcolor{preprocessor}{\}}\textcolor{preprocessor}{)}
+00039 
+00040 \textcolor{preprocessor}{#}\textcolor{preprocessor}{undef} \textcolor{preprocessor}{isfinite}
+00041 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{isfinite}\textcolor{preprocessor}{(}\textcolor{preprocessor}{x}\textcolor{preprocessor}{)}
+00042      \textcolor{preprocessor}{\_\_extension\_\_} \textcolor{preprocessor}{(}\textcolor{preprocessor}{\{} \textcolor{preprocessor}{\_\_typeof} \textcolor{preprocessor}{(}\textcolor{preprocessor}{x}\textcolor{preprocessor}{)} \textcolor{preprocessor}{\_\_x\_f} \textcolor{preprocessor}{=} \textcolor{preprocessor}{(}\textcolor{preprocessor}{x}\textcolor{preprocessor}{)}\textcolor{preprocessor}{;}
+00043      \textcolor{preprocessor}{\_\_builtin\_expect}\textcolor{preprocessor}{(}\textcolor{preprocessor}{!}\textcolor{preprocessor}{isnan}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_\_x\_f} \textcolor{preprocessor}{-} \textcolor{preprocessor}{\_\_x\_f}\textcolor{preprocessor}{)}\textcolor{preprocessor}{,} 1\textcolor{preprocessor}{)}\textcolor{preprocessor}{;} \textcolor{preprocessor}{\}}\textcolor{preprocessor}{)}
+00044 
+00045 \textcolor{preprocessor}{#}\textcolor{preprocessor}{undef} \textcolor{preprocessor}{isinf}
+00046 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{isinf}\textcolor{preprocessor}{(}\textcolor{preprocessor}{x}\textcolor{preprocessor}{)}
+00047      \textcolor{preprocessor}{\_\_extension\_\_} \textcolor{preprocessor}{(}\textcolor{preprocessor}{\{} \textcolor{preprocessor}{\_\_typeof} \textcolor{preprocessor}{(}\textcolor{preprocessor}{x}\textcolor{preprocessor}{)} \textcolor{preprocessor}{\_\_x\_i} \textcolor{preprocessor}{=} \textcolor{preprocessor}{(}\textcolor{preprocessor}{x}\textcolor{preprocessor}{)}\textcolor{preprocessor}{;}
+00048      \textcolor{preprocessor}{\_\_builtin\_expect}\textcolor{preprocessor}{(}\textcolor{preprocessor}{!}\textcolor{preprocessor}{isnan}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_\_x\_i}\textcolor{preprocessor}{)} \textcolor{preprocessor}{&&} \textcolor{preprocessor}{!}\textcolor{preprocessor}{isfinite}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_\_x\_i}\textcolor{preprocessor}{)}\textcolor{preprocessor}{,} 0\textcolor{preprocessor}{)}\textcolor{preprocessor}{;} \textcolor{preprocessor}{\}}\textcolor{preprocessor}{)}
+00049 
+00050 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{u\_int} \textcolor{preprocessor}{uint}
+00051 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{u\_int32\_t} \textcolor{preprocessor}{uint32\_t}
+00052 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif} \textcolor{comment}{/* \_\_GNUC\_\_ */}
+00053 
+00054 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif} \textcolor{comment}{/* \_\_sun */}
+\end{DoxyCode}

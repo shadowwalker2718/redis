@@ -1,0 +1,1061 @@
+\hypertarget{t__stream_8c_source}{}\section{t\+\_\+stream.\+c}
+\label{t__stream_8c_source}\index{src/t\+\_\+stream.\+c@{src/t\+\_\+stream.\+c}}
+
+\begin{DoxyCode}
+00001 \textcolor{comment}{/*}
+00002 \textcolor{comment}{ * Copyright (c) 2017, Salvatore Sanfilippo <antirez at gmail dot com>}
+00003 \textcolor{comment}{ * All rights reserved.}
+00004 \textcolor{comment}{ *}
+00005 \textcolor{comment}{ * Redistribution and use in source and binary forms, with or without}
+00006 \textcolor{comment}{ * modification, are permitted provided that the following conditions are met:}
+00007 \textcolor{comment}{ *}
+00008 \textcolor{comment}{ *   * Redistributions of source code must retain the above copyright notice,}
+00009 \textcolor{comment}{ *     this list of conditions and the following disclaimer.}
+00010 \textcolor{comment}{ *   * Redistributions in binary form must reproduce the above copyright}
+00011 \textcolor{comment}{ *     notice, this list of conditions and the following disclaimer in the}
+00012 \textcolor{comment}{ *     documentation and/or other materials provided with the distribution.}
+00013 \textcolor{comment}{ *   * Neither the name of Redis nor the names of its contributors may be used}
+00014 \textcolor{comment}{ *     to endorse or promote products derived from this software without}
+00015 \textcolor{comment}{ *     specific prior written permission.}
+00016 \textcolor{comment}{ *}
+00017 \textcolor{comment}{ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"}
+00018 \textcolor{comment}{ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE}
+00019 \textcolor{comment}{ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE}
+00020 \textcolor{comment}{ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE}
+00021 \textcolor{comment}{ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR}
+00022 \textcolor{comment}{ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF}
+00023 \textcolor{comment}{ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS}
+00024 \textcolor{comment}{ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN}
+00025 \textcolor{comment}{ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)}
+00026 \textcolor{comment}{ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE}
+00027 \textcolor{comment}{ * POSSIBILITY OF SUCH DAMAGE.}
+00028 \textcolor{comment}{ */}
+00029 
+00030 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \hyperlink{server_8h}{"server.h"}
+00031 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \hyperlink{endianconv_8h}{"endianconv.h"}
+00032 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \hyperlink{stream_8h}{"stream.h"}
+00033 
+00034 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{STREAM\_BYTES\_PER\_LISTPACK} 2048
+00035 
+00036 \textcolor{comment}{/* Every stream item inside the listpack, has a flags field that is used to}
+00037 \textcolor{comment}{ * mark the entry as deleted, or having the same field as the "master"}
+00038 \textcolor{comment}{ * entry at the start of the listpack> */}
+00039 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{STREAM\_ITEM\_FLAG\_NONE} 0             \textcolor{comment}{/* No special flags. */}
+00040 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{STREAM\_ITEM\_FLAG\_DELETED} \textcolor{preprocessor}{(}1\textcolor{preprocessor}{<<}0\textcolor{preprocessor}{)}     \textcolor{comment}{/* Entry is delted. Skip it. */}
+00041 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{STREAM\_ITEM\_FLAG\_SAMEFIELDS} \textcolor{preprocessor}{(}1\textcolor{preprocessor}{<<}1\textcolor{preprocessor}{)}  \textcolor{comment}{/* Same fields as master entry. */}
+00042 
+00043 \textcolor{comment}{/* -----------------------------------------------------------------------}
+00044 \textcolor{comment}{ * Low level stream encoding: a radix tree of listpacks.}
+00045 \textcolor{comment}{ * ----------------------------------------------------------------------- */}
+00046 
+00047 \textcolor{comment}{/* Create a new stream data structure. */}
+00048 stream *streamNew(\textcolor{keywordtype}{void}) \{
+00049     stream *s = zmalloc(\textcolor{keyword}{sizeof}(*s));
+00050     s->rax = raxNew();
+00051     s->length = 0;
+00052     s->last\_id.ms = 0;
+00053     s->last\_id.seq = 0;
+00054     \textcolor{keywordflow}{return} s;
+00055 \}
+00056 
+00057 \textcolor{comment}{/* Free a stream, including the listpacks stored inside the radix tree. */}
+00058 \textcolor{keywordtype}{void} freeStream(stream *s) \{
+00059     raxFreeWithCallback(s->rax,(\textcolor{keywordtype}{void}(*)(\textcolor{keywordtype}{void}*))lpFree);
+00060     zfree(s);
+00061 \}
+00062 
+00063 \textcolor{comment}{/* Generate the next stream item ID given the previous one. If the current}
+00064 \textcolor{comment}{ * milliseconds Unix time is greater than the previous one, just use this}
+00065 \textcolor{comment}{ * as time part and start with sequence part of zero. Otherwise we use the}
+00066 \textcolor{comment}{ * previous time (and never go backward) and increment the sequence. */}
+00067 \textcolor{keywordtype}{void} streamNextID(streamID *last\_id, streamID *new\_id) \{
+00068     uint64\_t ms = mstime();
+00069     \textcolor{keywordflow}{if} (ms > last\_id->ms) \{
+00070         new\_id->ms = ms;
+00071         new\_id->seq = 0;
+00072     \} \textcolor{keywordflow}{else} \{
+00073         new\_id->ms = last\_id->ms;
+00074         new\_id->seq = last\_id->seq+1;
+00075     \}
+00076 \}
+00077 
+00078 \textcolor{comment}{/* This is just a wrapper for lpAppend() to directly use a 64 bit integer}
+00079 \textcolor{comment}{ * instead of a string. */}
+00080 \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *lpAppendInteger(\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *lp, int64\_t value) \{
+00081     \textcolor{keywordtype}{char} buf[\hyperlink{server_8h_a39ec35278876f65fc1ef70b049856ca3}{LONG\_STR\_SIZE}];
+00082     \textcolor{keywordtype}{int} slen = ll2string(buf,\textcolor{keyword}{sizeof}(buf),value);
+00083     \textcolor{keywordflow}{return} lpAppend(lp,(\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char}*)buf,slen);
+00084 \}
+00085 
+00086 \textcolor{comment}{/* This is just a wrapper for lpReplace() to directly use a 64 bit integer}
+00087 \textcolor{comment}{ * instead of a string to replace the current element. The function returns}
+00088 \textcolor{comment}{ * the new listpack as return value, and also updates the current cursor}
+00089 \textcolor{comment}{ * by updating '*pos'. */}
+00090 \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *lpReplaceInteger(\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *lp, \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} **pos, int64\_t value) \{
+00091     \textcolor{keywordtype}{char} buf[\hyperlink{server_8h_a39ec35278876f65fc1ef70b049856ca3}{LONG\_STR\_SIZE}];
+00092     \textcolor{keywordtype}{int} slen = ll2string(buf,\textcolor{keyword}{sizeof}(buf),value);
+00093     \textcolor{keywordflow}{return} lpInsert(lp, (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char}*)buf, slen, *pos, \hyperlink{listpack_8h_a29d3b9a55d47053582a5025dd85d7fe6}{LP\_REPLACE}, pos);
+00094 \}
+00095 
+00096 \textcolor{comment}{/* This is a wrapper function for lpGet() to directly get an integer value}
+00097 \textcolor{comment}{ * from the listpack (that may store numbers as a string), converting}
+00098 \textcolor{comment}{ * the string if needed. */}
+00099 int64\_t lpGetInteger(\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *ele) \{
+00100     int64\_t v;
+00101     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *e = lpGet(ele,&v,NULL);
+00102     \textcolor{keywordflow}{if} (e == NULL) \textcolor{keywordflow}{return} v;
+00103     \textcolor{comment}{/* The following code path should never be used for how listpacks work:}
+00104 \textcolor{comment}{     * they should always be able to store an int64\_t value in integer}
+00105 \textcolor{comment}{     * encoded form. However the implementation may change. */}
+00106     \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} ll;
+00107     \textcolor{keywordtype}{int} retval = string2ll((\textcolor{keywordtype}{char}*)e,v,&ll);
+00108     \hyperlink{server_8h_a88114b5169b4c382df6b56506285e56a}{serverAssert}(retval != 0);
+00109     v = ll;
+00110     \textcolor{keywordflow}{return} v;
+00111 \}
+00112 
+00113 \textcolor{comment}{/* Debugging function to log the full content of a listpack. Useful}
+00114 \textcolor{comment}{ * for development and debugging. */}
+00115 \textcolor{keywordtype}{void} streamLogListpackContent(\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *lp) \{
+00116     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *p = lpFirst(lp);
+00117     \textcolor{keywordflow}{while}(p) \{
+00118         \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} buf[\hyperlink{listpack_8h_ab31e5c173b595ae4e703b72eb435a6e9}{LP\_INTBUF\_SIZE}];
+00119         int64\_t v;
+00120         \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *ele = lpGet(p,&v,buf);
+00121         serverLog(\hyperlink{server_8h_a31229b9334bba7d6be2a72970967a14b}{LL\_WARNING},\textcolor{stringliteral}{"- [%d] '%.*s'"}, (\textcolor{keywordtype}{int})v, (\textcolor{keywordtype}{int})v, ele);
+00122         p = lpNext(lp,p);
+00123     \}
+00124 \}
+00125 
+00126 \textcolor{comment}{/* Convert the specified stream entry ID as a 128 bit big endian number, so}
+00127 \textcolor{comment}{ * that the IDs can be sorted lexicographically. */}
+00128 \textcolor{keywordtype}{void} streamEncodeID(\textcolor{keywordtype}{void} *buf, streamID *id) \{
+00129     uint64\_t e[2];
+00130     e[0] = \hyperlink{endianconv_8h_a41a6b64ba8dec362f605f615e528fcf3}{htonu64}(id->ms);
+00131     e[1] = \hyperlink{endianconv_8h_a41a6b64ba8dec362f605f615e528fcf3}{htonu64}(id->seq);
+00132     memcpy(buf,e,\textcolor{keyword}{sizeof}(e));
+00133 \}
+00134 
+00135 \textcolor{comment}{/* This is the reverse of streamEncodeID(): the decoded ID will be stored}
+00136 \textcolor{comment}{ * in the 'id' structure passed by reference. The buffer 'buf' must point}
+00137 \textcolor{comment}{ * to a 128 bit big-endian encoded ID. */}
+00138 \textcolor{keywordtype}{void} streamDecodeID(\textcolor{keywordtype}{void} *buf, streamID *id) \{
+00139     uint64\_t e[2];
+00140     memcpy(e,buf,\textcolor{keyword}{sizeof}(e));
+00141     id->ms = \hyperlink{endianconv_8h_ab6e7416a2faac85cd6d50180e7348a1b}{ntohu64}(e[0]);
+00142     id->seq = \hyperlink{endianconv_8h_ab6e7416a2faac85cd6d50180e7348a1b}{ntohu64}(e[1]);
+00143 \}
+00144 
+00145 \textcolor{comment}{/* Adds a new item into the stream 's' having the specified number of}
+00146 \textcolor{comment}{ * field-value pairs as specified in 'numfields' and stored into 'argv'.}
+00147 \textcolor{comment}{ * Returns the new entry ID populating the 'added\_id' structure.}
+00148 \textcolor{comment}{ *}
+00149 \textcolor{comment}{ * If 'use\_id' is not NULL, the ID is not auto-generated by the function,}
+00150 \textcolor{comment}{ * but instead the passed ID is uesd to add the new entry. In this case}
+00151 \textcolor{comment}{ * adding the entry may fail as specified later in this comment.}
+00152 \textcolor{comment}{ *}
+00153 \textcolor{comment}{ * The function returns C\_OK if the item was added, this is always true}
+00154 \textcolor{comment}{ * if the ID was generated by the function. However the function may return}
+00155 \textcolor{comment}{ * C\_ERR if an ID was given via 'use\_id', but adding it failed since the}
+00156 \textcolor{comment}{ * current top ID is greater or equal. */}
+00157 \textcolor{keywordtype}{int} streamAppendItem(stream *s, robj **argv, \textcolor{keywordtype}{int} numfields, streamID *added\_id, streamID *use\_id) \{
+00158     \textcolor{comment}{/* If an ID was given, check that it's greater than the last entry ID}
+00159 \textcolor{comment}{     * or return an error. */}
+00160     \textcolor{keywordflow}{if} (use\_id && (use\_id->ms < s->last\_id.ms ||
+00161                    (use\_id->ms == s->last\_id.ms &&
+00162                     use\_id->seq <= s->last\_id.seq))) \textcolor{keywordflow}{return} \hyperlink{server_8h_af98ac28d5f4d23d7ed5985188e6fb7d1}{C\_ERR};
+00163 
+00164     \textcolor{comment}{/* Add the new entry. */}
+00165     \hyperlink{structraxIterator}{raxIterator} ri;
+00166     raxStart(&ri,s->rax);
+00167     raxSeek(&ri,\textcolor{stringliteral}{"$"},NULL,0);
+00168 
+00169     size\_t lp\_bytes = 0;        \textcolor{comment}{/* Total bytes in the tail listpack. */}
+00170     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *lp = NULL;   \textcolor{comment}{/* Tail listpack pointer. */}
+00171 
+00172     \textcolor{comment}{/* Get a reference to the tail node listpack. */}
+00173     \textcolor{keywordflow}{if} (raxNext(&ri)) \{
+00174         lp = ri.data;
+00175         lp\_bytes = lpBytes(lp);
+00176     \}
+00177     raxStop(&ri);
+00178 
+00179     \textcolor{comment}{/* Generate the new entry ID. */}
+00180     streamID id;
+00181     \textcolor{keywordflow}{if} (use\_id)
+00182         id = *use\_id;
+00183     \textcolor{keywordflow}{else}
+00184         streamNextID(&s->last\_id,&id);
+00185 
+00186     \textcolor{comment}{/* We have to add the key into the radix tree in lexicographic order,}
+00187 \textcolor{comment}{     * to do so we consider the ID as a single 128 bit number written in}
+00188 \textcolor{comment}{     * big endian, so that the most significant bytes are the first ones. */}
+00189     uint64\_t rax\_key[2];    \textcolor{comment}{/* Key in the radix tree containing the listpack.*/}
+00190     streamID master\_id;     \textcolor{comment}{/* ID of the master entry in the listpack. */}
+00191 
+00192     \textcolor{comment}{/* Create a new listpack and radix tree node if needed. Note that when}
+00193 \textcolor{comment}{     * a new listpack is created, we populate it with a "master entry". This}
+00194 \textcolor{comment}{     * is just a set of fields that is taken as refernce in order to compress}
+00195 \textcolor{comment}{     * the stream entries that we'll add inside the listpack.}
+00196 \textcolor{comment}{     *}
+00197 \textcolor{comment}{     * Note that while we use the first added entry fields to create}
+00198 \textcolor{comment}{     * the master entry, the first added entry is NOT represented in the master}
+00199 \textcolor{comment}{     * entry, which is a stand alone object. But of course, the first entry}
+00200 \textcolor{comment}{     * will compress well because it's used as reference.}
+00201 \textcolor{comment}{     *}
+00202 \textcolor{comment}{     * The master entry is composed like in the following example:}
+00203 \textcolor{comment}{     *}
+00204 \textcolor{comment}{     * +-------+---------+------------+---------+--/--+---------+---------+-+}
+00205 \textcolor{comment}{     * | count | deleted | num-fields | field\_1 | field\_2 | ... | field\_N |0|}
+00206 \textcolor{comment}{     * +-------+---------+------------+---------+--/--+---------+---------+-+}
+00207 \textcolor{comment}{     *}
+00208 \textcolor{comment}{     * count and deleted just represent respectively the total number of}
+00209 \textcolor{comment}{     * entires inside the listpack that are valid, and marked as deleted}
+00210 \textcolor{comment}{     * (delted flag in the entry flags set). So the total number of items}
+00211 \textcolor{comment}{     * actually inside the listpack (both deleted and not) is count+deleted.}
+00212 \textcolor{comment}{     *}
+00213 \textcolor{comment}{     * The real entries will be encoded with an ID that is just the}
+00214 \textcolor{comment}{     * millisecond and sequence difference compared to the key stored at}
+00215 \textcolor{comment}{     * the radix tree node containing the listpack (delta encoding), and}
+00216 \textcolor{comment}{     * if the fields of the entry are the same as the master enty fields, the}
+00217 \textcolor{comment}{     * entry flags will specify this fact and the entry fields and number}
+00218 \textcolor{comment}{     * of fields will be omitted (see later in the code of this function).}
+00219 \textcolor{comment}{     *}
+00220 \textcolor{comment}{     * The "0" entry at the end is the same as the 'lp-count' entry in the}
+00221 \textcolor{comment}{     * regular stream entries (see below), and marks the fact that there are}
+00222 \textcolor{comment}{     * no more entires, when we scan the stream from right to left. */}
+00223 
+00224     \textcolor{keywordtype}{int} flags = \hyperlink{t__stream_8c_a984a9c72198b288332d9d3603336efeb}{STREAM\_ITEM\_FLAG\_NONE};
+00225     \textcolor{keywordflow}{if} (lp == NULL || lp\_bytes > \hyperlink{t__stream_8c_a9c3553abeeeb8af68091fe9803dcbf95}{STREAM\_BYTES\_PER\_LISTPACK}) \{
+00226         master\_id = id;
+00227         streamEncodeID(rax\_key,&id);
+00228         \textcolor{comment}{/* Create the listpack having the master entry ID and fields. */}
+00229         lp = lpNew();
+00230         lp = lpAppendInteger(lp,1); \textcolor{comment}{/* One item, the one we are adding. */}
+00231         lp = lpAppendInteger(lp,0); \textcolor{comment}{/* Zero deleted so far. */}
+00232         lp = lpAppendInteger(lp,numfields);
+00233         \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} i = 0; i < numfields; i++) \{
+00234             sds field = argv[i*2]->ptr;
+00235             lp = lpAppend(lp,(\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char}*)field,sdslen(field));
+00236         \}
+00237         lp = lpAppendInteger(lp,0); \textcolor{comment}{/* Master entry zero terminator. */}
+00238         raxInsert(s->rax,(\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char}*)&rax\_key,\textcolor{keyword}{sizeof}(rax\_key),lp,NULL);
+00239         \textcolor{comment}{/* The first entry we insert, has obviously the same fields of the}
+00240 \textcolor{comment}{         * master entry. */}
+00241         flags |= \hyperlink{t__stream_8c_a6977b456a646762a7650d432a06dc6c5}{STREAM\_ITEM\_FLAG\_SAMEFIELDS};
+00242     \} \textcolor{keywordflow}{else} \{
+00243         \hyperlink{server_8h_a88114b5169b4c382df6b56506285e56a}{serverAssert}(ri.key\_len == \textcolor{keyword}{sizeof}(rax\_key));
+00244         memcpy(rax\_key,ri.key,\textcolor{keyword}{sizeof}(rax\_key));
+00245 
+00246         \textcolor{comment}{/* Read the master ID from the radix tree key. */}
+00247         streamDecodeID(rax\_key,&master\_id);
+00248         \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *lp\_ele = lpFirst(lp);
+00249 
+00250         \textcolor{comment}{/* Update count and skip the deleted fields. */}
+00251         int64\_t count = lpGetInteger(lp\_ele);
+00252         lp = lpReplaceInteger(lp,&lp\_ele,count+1);
+00253         lp\_ele = lpNext(lp,lp\_ele); \textcolor{comment}{/* seek delted. */}
+00254         lp\_ele = lpNext(lp,lp\_ele); \textcolor{comment}{/* seek master entry num fields. */}
+00255 
+00256         \textcolor{comment}{/* Check if the entry we are adding, have the same fields}
+00257 \textcolor{comment}{         * as the master entry. */}
+00258         \textcolor{keywordtype}{int} master\_fields\_count = lpGetInteger(lp\_ele);
+00259         lp\_ele = lpNext(lp,lp\_ele);
+00260         \textcolor{keywordflow}{if} (numfields == master\_fields\_count) \{
+00261             \textcolor{keywordtype}{int} i;
+00262             \textcolor{keywordflow}{for} (i = 0; i < master\_fields\_count; i++) \{
+00263                 sds field = argv[i*2]->ptr;
+00264                 int64\_t e\_len;
+00265                 \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} buf[\hyperlink{listpack_8h_ab31e5c173b595ae4e703b72eb435a6e9}{LP\_INTBUF\_SIZE}];
+00266                 \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *e = lpGet(lp\_ele,&e\_len,buf);
+00267                 \textcolor{comment}{/* Stop if there is a mismatch. */}
+00268                 \textcolor{keywordflow}{if} (sdslen(field) != (size\_t)e\_len ||
+00269                     memcmp(e,field,e\_len) != 0) \textcolor{keywordflow}{break};
+00270                 lp\_ele = lpNext(lp,lp\_ele);
+00271             \}
+00272             \textcolor{comment}{/* All fields are the same! We can compress the field names}
+00273 \textcolor{comment}{             * setting a single bit in the flags. */}
+00274             \textcolor{keywordflow}{if} (i == master\_fields\_count) flags |= 
+      \hyperlink{t__stream_8c_a6977b456a646762a7650d432a06dc6c5}{STREAM\_ITEM\_FLAG\_SAMEFIELDS};
+00275         \}
+00276     \}
+00277 
+00278     \textcolor{comment}{/* Populate the listpack with the new entry. We use the following}
+00279 \textcolor{comment}{     * encoding:}
+00280 \textcolor{comment}{     *}
+00281 \textcolor{comment}{     * +-----+--------+----------+-------+-------+-/-+-------+-------+--------+}
+00282 \textcolor{comment}{     * |flags|entry-id|num-fields|field-1|value-1|...|field-N|value-N|lp-count|}
+00283 \textcolor{comment}{     * +-----+--------+----------+-------+-------+-/-+-------+-------+--------+}
+00284 \textcolor{comment}{     *}
+00285 \textcolor{comment}{     * However if the SAMEFIELD flag is set, we have just to populate}
+00286 \textcolor{comment}{     * the entry with the values, so it becomes:}
+00287 \textcolor{comment}{     *}
+00288 \textcolor{comment}{     * +-----+--------+-------+-/-+-------+--------+}
+00289 \textcolor{comment}{     * |flags|entry-id|value-1|...|value-N|lp-count|}
+00290 \textcolor{comment}{     * +-----+--------+-------+-/-+-------+--------+}
+00291 \textcolor{comment}{     *}
+00292 \textcolor{comment}{     * The entry-id field is actually two separated fields: the ms}
+00293 \textcolor{comment}{     * and seq difference compared to the master entry.}
+00294 \textcolor{comment}{     *}
+00295 \textcolor{comment}{     * The lp-count field is a number that states the number of listpack pieces}
+00296 \textcolor{comment}{     * that compose the entry, so that it's possible to travel the entry}
+00297 \textcolor{comment}{     * in reverse order: we can just start from the end of the listpack, read}
+00298 \textcolor{comment}{     * the entry, and jump back N times to seek the "flags" field to read}
+00299 \textcolor{comment}{     * the stream full entry. */}
+00300     lp = lpAppendInteger(lp,flags);
+00301     lp = lpAppendInteger(lp,id.ms - master\_id.ms);
+00302     lp = lpAppendInteger(lp,id.seq - master\_id.seq);
+00303     \textcolor{keywordflow}{if} (!(flags & \hyperlink{t__stream_8c_a6977b456a646762a7650d432a06dc6c5}{STREAM\_ITEM\_FLAG\_SAMEFIELDS}))
+00304         lp = lpAppendInteger(lp,numfields);
+00305     \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} i = 0; i < numfields; i++) \{
+00306         sds field = argv[i*2]->ptr, value = argv[i*2+1]->ptr;
+00307         \textcolor{keywordflow}{if} (!(flags & \hyperlink{t__stream_8c_a6977b456a646762a7650d432a06dc6c5}{STREAM\_ITEM\_FLAG\_SAMEFIELDS}))
+00308             lp = lpAppend(lp,(\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char}*)field,sdslen(field));
+00309         lp = lpAppend(lp,(\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char}*)value,sdslen(value));
+00310     \}
+00311     \textcolor{comment}{/* Compute and store the lp-count field. */}
+00312     \textcolor{keywordtype}{int} lp\_count = numfields;
+00313     lp\_count += 3; \textcolor{comment}{/* Add the 3 fixed fields flags + ms-diff + seq-diff. */}
+00314     \textcolor{keywordflow}{if} (!(flags & \hyperlink{t__stream_8c_a6977b456a646762a7650d432a06dc6c5}{STREAM\_ITEM\_FLAG\_SAMEFIELDS})) \{
+00315         \textcolor{comment}{/* If the item is not compressed, it also has the fields other than}
+00316 \textcolor{comment}{         * the values, and an additional num-fileds field. */}
+00317         lp\_count += numfields+1;
+00318     \}
+00319     lp = lpAppendInteger(lp,lp\_count);
+00320 
+00321     \textcolor{comment}{/* Insert back into the tree in order to update the listpack pointer. */}
+00322     raxInsert(s->rax,(\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char}*)&rax\_key,\textcolor{keyword}{sizeof}(rax\_key),lp,NULL);
+00323     s->length++;
+00324     s->last\_id = id;
+00325     \textcolor{keywordflow}{if} (added\_id) *added\_id = id;
+00326     \textcolor{keywordflow}{return} \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK};
+00327 \}
+00328 
+00329 \textcolor{comment}{/* Trim the stream 's' to have no more than maxlen elements, and return the}
+00330 \textcolor{comment}{ * number of elements removed from the stream. The 'approx' option, if non-zero,}
+00331 \textcolor{comment}{ * specifies that the trimming must be performed in a approximated way in}
+00332 \textcolor{comment}{ * order to maximize performances. This means that the stream may contain}
+00333 \textcolor{comment}{ * more elements than 'maxlen', and elements are only removed if we can remove}
+00334 \textcolor{comment}{ * a *whole* node of the radix tree. The elements are removed from the head}
+00335 \textcolor{comment}{ * of the stream (older elements).}
+00336 \textcolor{comment}{ *}
+00337 \textcolor{comment}{ * The function may return zero if:}
+00338 \textcolor{comment}{ *}
+00339 \textcolor{comment}{ * 1) The stream is already shorter or equal to the specified max length.}
+00340 \textcolor{comment}{ * 2) The 'approx' option is true and the head node had not enough elements}
+00341 \textcolor{comment}{ *    to be deleted, leaving the stream with a number of elements >= maxlen.}
+00342 \textcolor{comment}{ */}
+00343 int64\_t streamTrimByLength(stream *s, size\_t maxlen, \textcolor{keywordtype}{int} approx) \{
+00344     \textcolor{keywordflow}{if} (s->length <= maxlen) \textcolor{keywordflow}{return} 0;
+00345 
+00346     \hyperlink{structraxIterator}{raxIterator} ri;
+00347     raxStart(&ri,s->rax);
+00348     raxSeek(&ri,\textcolor{stringliteral}{"^"},NULL,0);
+00349 
+00350     int64\_t deleted = 0;
+00351     \textcolor{keywordflow}{while}(s->length > maxlen && raxNext(&ri)) \{
+00352         \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *lp = ri.data, *p = lpFirst(lp);
+00353         int64\_t entries = lpGetInteger(p);
+00354 
+00355         \textcolor{comment}{/* Check if we can remove the whole node, and still have at}
+00356 \textcolor{comment}{         * least maxlen elements. */}
+00357         \textcolor{keywordflow}{if} (s->length - entries >= maxlen) \{
+00358             lpFree(lp);
+00359             raxRemove(s->rax,ri.key,ri.key\_len,NULL);
+00360             raxSeek(&ri,\textcolor{stringliteral}{">="},ri.key,ri.key\_len);
+00361             s->length -= entries;
+00362             deleted += entries;
+00363             \textcolor{keywordflow}{continue};
+00364         \}
+00365 
+00366         \textcolor{comment}{/* If we cannot remove a whole element, and approx is true,}
+00367 \textcolor{comment}{         * stop here. */}
+00368         \textcolor{keywordflow}{if} (approx) \textcolor{keywordflow}{break};
+00369 
+00370         \textcolor{comment}{/* Otherwise, we have to mark single entries inside the listpack}
+00371 \textcolor{comment}{         * as deleted. We start by updating the entries/deleted counters. */}
+00372         int64\_t to\_delete = s->length - maxlen;
+00373         \hyperlink{server_8h_a88114b5169b4c382df6b56506285e56a}{serverAssert}(to\_delete < entries);
+00374         lp = lpReplaceInteger(lp,&p,entries-to\_delete);
+00375         p = lpNext(lp,p); \textcolor{comment}{/* Seek deleted field. */}
+00376         int64\_t marked\_deleted = lpGetInteger(p);
+00377         lp = lpReplaceInteger(lp,&p,marked\_deleted+to\_delete);
+00378         p = lpNext(lp,p); \textcolor{comment}{/* Seek num-of-fields in the master entry. */}
+00379 
+00380         \textcolor{comment}{/* Skip all the master fields. */}
+00381         int64\_t master\_fields\_count = lpGetInteger(p);
+00382         p = lpNext(lp,p); \textcolor{comment}{/* Seek the first field. */}
+00383         \textcolor{keywordflow}{for} (int64\_t j = 0; j < master\_fields\_count; j++)
+00384             p = lpNext(lp,p); \textcolor{comment}{/* Skip all master fields. */}
+00385         p = lpNext(lp,p); \textcolor{comment}{/* Skip the zero master entry terminator. */}
+00386 
+00387         \textcolor{comment}{/* 'p' is now pointing to the first entry inside the listpack.}
+00388 \textcolor{comment}{         * We have to run entry after entry, marking entries as deleted}
+00389 \textcolor{comment}{         * if they are already not deleted. */}
+00390         \textcolor{keywordflow}{while}(p) \{
+00391             \textcolor{keywordtype}{int} flags = lpGetInteger(p);
+00392             \textcolor{keywordtype}{int} to\_skip;
+00393 
+00394             \textcolor{comment}{/* Mark the entry as deleted. */}
+00395             \textcolor{keywordflow}{if} (!(flags & \hyperlink{t__stream_8c_ad2bde2408044756f3f418ae3c72e575f}{STREAM\_ITEM\_FLAG\_DELETED})) \{
+00396                 flags |= \hyperlink{t__stream_8c_ad2bde2408044756f3f418ae3c72e575f}{STREAM\_ITEM\_FLAG\_DELETED};
+00397                 lp = lpReplaceInteger(lp,&p,flags);
+00398                 deleted++;
+00399                 s->length--;
+00400                 \textcolor{keywordflow}{if} (s->length <= maxlen) \textcolor{keywordflow}{break}; \textcolor{comment}{/* Enough entries deleted. */}
+00401             \}
+00402 
+00403             p = lpNext(lp,p); \textcolor{comment}{/* Skip ID ms delta. */}
+00404             p = lpNext(lp,p); \textcolor{comment}{/* Skip ID seq delta. */}
+00405             p = lpNext(lp,p); \textcolor{comment}{/* Seek num-fields or values (if compressed). */}
+00406             \textcolor{keywordflow}{if} (flags & \hyperlink{t__stream_8c_a6977b456a646762a7650d432a06dc6c5}{STREAM\_ITEM\_FLAG\_SAMEFIELDS}) \{
+00407                 to\_skip = master\_fields\_count;
+00408             \} \textcolor{keywordflow}{else} \{
+00409                 to\_skip = lpGetInteger(p);
+00410                 to\_skip = 1+(to\_skip*2);
+00411             \}
+00412 
+00413             \textcolor{keywordflow}{while}(to\_skip--) p = lpNext(lp,p); \textcolor{comment}{/* Skip the whole entry. */}
+00414             p = lpNext(lp,p); \textcolor{comment}{/* Skip the final lp-count field. */}
+00415         \}
+00416 
+00417         \textcolor{comment}{/* Here we should perform garbage collection in case at this point}
+00418 \textcolor{comment}{         * there are too many entries deleted inside the listpack. */}
+00419         entries -= to\_delete;
+00420         marked\_deleted += to\_delete;
+00421         \textcolor{keywordflow}{if} (entries + marked\_deleted > 10 && marked\_deleted > entries/2) \{
+00422             \textcolor{comment}{/* TODO: perform a garbage collection. */}
+00423         \}
+00424 
+00425         \textcolor{keywordflow}{break}; \textcolor{comment}{/* If we are here, there was enough to delete in the current}
+00426 \textcolor{comment}{                  node, so no need to go to the next node. */}
+00427     \}
+00428 
+00429     raxStop(&ri);
+00430     \textcolor{keywordflow}{return} deleted;
+00431 \}
+00432 
+00433 \textcolor{comment}{/* Initialize the stream iterator, so that we can call iterating functions}
+00434 \textcolor{comment}{ * to get the next items. This requires a corresponding streamIteratorStop()}
+00435 \textcolor{comment}{ * at the end. The 'rev' parameter controls the direction. If it's zero the}
+00436 \textcolor{comment}{ * iteration is from the start to the end element (inclusive), otherwise}
+00437 \textcolor{comment}{ * if rev is non-zero, the iteration is reversed.}
+00438 \textcolor{comment}{ *}
+00439 \textcolor{comment}{ * Once the iterator is initalized, we iterate like this:}
+00440 \textcolor{comment}{ *}
+00441 \textcolor{comment}{ *  streamIterator myiterator;}
+00442 \textcolor{comment}{ *  streamIteratorStart(&myiterator,...);}
+00443 \textcolor{comment}{ *  int64\_t numfields;}
+00444 \textcolor{comment}{ *  while(streamIteratorGetID(&myitereator,&ID,&numfields)) \{}
+00445 \textcolor{comment}{ *      while(numfields--) \{}
+00446 \textcolor{comment}{ *          unsigned char *key, *value;}
+00447 \textcolor{comment}{ *          size\_t key\_len, value\_len;}
+00448 \textcolor{comment}{ *          streamIteratorGetField(&myiterator,&key,&value,&key\_len,&value\_len);}
+00449 \textcolor{comment}{ *}
+00450 \textcolor{comment}{ *          ... do what you want with key and value ...}
+00451 \textcolor{comment}{ *      \}}
+00452 \textcolor{comment}{ *  \}}
+00453 \textcolor{comment}{ *  streamIteratorStop(&myiterator); */}
+00454 \textcolor{keywordtype}{void} streamIteratorStart(\hyperlink{structstreamIterator}{streamIterator} *si, stream *s, streamID *start, streamID *end, \textcolor{keywordtype}{
+      int} rev) \{
+00455     \textcolor{comment}{/* Intialize the iterator and translates the iteration start/stop}
+00456 \textcolor{comment}{     * elements into a 128 big big-endian number. */}
+00457     \textcolor{keywordflow}{if} (start) \{
+00458         streamEncodeID(si->start\_key,start);
+00459     \} \textcolor{keywordflow}{else} \{
+00460         si->start\_key[0] = 0;
+00461         si->start\_key[0] = 0;
+00462     \}
+00463 
+00464     \textcolor{keywordflow}{if} (end) \{
+00465         streamEncodeID(si->end\_key,end);
+00466     \} \textcolor{keywordflow}{else} \{
+00467         si->end\_key[0] = UINT64\_MAX;
+00468         si->end\_key[0] = UINT64\_MAX;
+00469     \}
+00470 
+00471     \textcolor{comment}{/* Seek the correct node in the radix tree. */}
+00472     raxStart(&si->ri,s->rax);
+00473     \textcolor{keywordflow}{if} (!rev) \{
+00474         \textcolor{keywordflow}{if} (start && (start->ms || start->seq)) \{
+00475             raxSeek(&si->ri,\textcolor{stringliteral}{"<="},(\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char}*)si->start\_key,
+00476                     \textcolor{keyword}{sizeof}(si->start\_key));
+00477             \textcolor{keywordflow}{if} (raxEOF(&si->ri)) raxSeek(&si->ri,\textcolor{stringliteral}{"^"},NULL,0);
+00478         \} \textcolor{keywordflow}{else} \{
+00479             raxSeek(&si->ri,\textcolor{stringliteral}{"^"},NULL,0);
+00480         \}
+00481     \} \textcolor{keywordflow}{else} \{
+00482         \textcolor{keywordflow}{if} (end && (end->ms || end->seq)) \{
+00483             raxSeek(&si->ri,\textcolor{stringliteral}{"<="},(\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char}*)si->end\_key,
+00484                     \textcolor{keyword}{sizeof}(si->end\_key));
+00485             \textcolor{keywordflow}{if} (raxEOF(&si->ri)) raxSeek(&si->ri,\textcolor{stringliteral}{"$"},NULL,0);
+00486         \} \textcolor{keywordflow}{else} \{
+00487             raxSeek(&si->ri,\textcolor{stringliteral}{"$"},NULL,0);
+00488         \}
+00489     \}
+00490     si->lp = NULL; \textcolor{comment}{/* There is no current listpack right now. */}
+00491     si->lp\_ele = NULL; \textcolor{comment}{/* Current listpack cursor. */}
+00492     si->rev = rev;  \textcolor{comment}{/* Direction, if non-zero reversed, from end to start. */}
+00493 \}
+00494 
+00495 \textcolor{comment}{/* Return 1 and store the current item ID at 'id' if there are still}
+00496 \textcolor{comment}{ * elements within the iteration range, otherwise return 0 in order to}
+00497 \textcolor{comment}{ * signal the iteration terminated. */}
+00498 \textcolor{keywordtype}{int} streamIteratorGetID(\hyperlink{structstreamIterator}{streamIterator} *si, streamID *id, int64\_t *numfields) \{
+00499     \textcolor{keywordflow}{while}(1) \{ \textcolor{comment}{/* Will stop when element > stop\_key or end of radix tree. */}
+00500         \textcolor{comment}{/* If the current listpack is set to NULL, this is the start of the}
+00501 \textcolor{comment}{         * iteration or the previous listpack was completely iterated.}
+00502 \textcolor{comment}{         * Go to the next node. */}
+00503         \textcolor{keywordflow}{if} (si->lp == NULL || si->lp\_ele == NULL) \{
+00504             \textcolor{keywordflow}{if} (!si->rev && !raxNext(&si->ri)) \textcolor{keywordflow}{return} 0;
+00505             \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (si->rev && !raxPrev(&si->ri)) \textcolor{keywordflow}{return} 0;
+00506             \hyperlink{server_8h_a88114b5169b4c382df6b56506285e56a}{serverAssert}(si->ri.key\_len == \textcolor{keyword}{sizeof}(streamID));
+00507             \textcolor{comment}{/* Get the master ID. */}
+00508             streamDecodeID(si->ri.key,&si->master\_id);
+00509             \textcolor{comment}{/* Get the master fields count. */}
+00510             si->lp = si->ri.data;
+00511             si->lp\_ele = lpFirst(si->lp);           \textcolor{comment}{/* Seek items count */}
+00512             si->lp\_ele = lpNext(si->lp,si->lp\_ele); \textcolor{comment}{/* Seek deleted count. */}
+00513             si->lp\_ele = lpNext(si->lp,si->lp\_ele); \textcolor{comment}{/* Seek num fields. */}
+00514             si->master\_fields\_count = lpGetInteger(si->lp\_ele);
+00515             si->lp\_ele = lpNext(si->lp,si->lp\_ele); \textcolor{comment}{/* Seek first field. */}
+00516             si->master\_fields\_start = si->lp\_ele;
+00517             \textcolor{comment}{/* Skip master fileds to seek the first entry. */}
+00518             \textcolor{keywordflow}{for} (uint64\_t i = 0; i < si->master\_fields\_count; i++)
+00519                 si->lp\_ele = lpNext(si->lp,si->lp\_ele);
+00520             \textcolor{comment}{/* We are now pointing the zero term of the master entry. If}
+00521 \textcolor{comment}{             * we are iterating in reverse order, we need to seek the}
+00522 \textcolor{comment}{             * end of the listpack. */}
+00523             \textcolor{keywordflow}{if} (si->rev) si->lp\_ele = lpLast(si->lp);
+00524         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (si->rev) \{
+00525             \textcolor{comment}{/* If we are itereating in the reverse order, and this is not}
+00526 \textcolor{comment}{             * the first entry emitted for this listpack, then we already}
+00527 \textcolor{comment}{             * emitted the current entry, and have to go back to the previous}
+00528 \textcolor{comment}{             * one. */}
+00529             \textcolor{keywordtype}{int} lp\_count = lpGetInteger(si->lp\_ele);
+00530             \textcolor{keywordflow}{while}(lp\_count--) si->lp\_ele = lpPrev(si->lp,si->lp\_ele);
+00531             \textcolor{comment}{/* Seek lp-count of prev entry. */}
+00532             si->lp\_ele = lpPrev(si->lp,si->lp\_ele);
+00533         \}
+00534 
+00535         \textcolor{comment}{/* For every radix tree node, iterate the corresponding listpack,}
+00536 \textcolor{comment}{         * returning elements when they are within range. */}
+00537         \textcolor{keywordflow}{while}(1) \{
+00538             \textcolor{keywordflow}{if} (!si->rev) \{
+00539                 \textcolor{comment}{/* If we are going forward, skip the previous entry}
+00540 \textcolor{comment}{                 * lp-count field (or in case of the master entry, the zero}
+00541 \textcolor{comment}{                 * term field) */}
+00542                 si->lp\_ele = lpNext(si->lp,si->lp\_ele);
+00543                 \textcolor{keywordflow}{if} (si->lp\_ele == NULL) \textcolor{keywordflow}{break};
+00544             \} \textcolor{keywordflow}{else} \{
+00545                 \textcolor{comment}{/* If we are going backward, read the number of elements this}
+00546 \textcolor{comment}{                 * entry is composed of, and jump backward N times to seek}
+00547 \textcolor{comment}{                 * its start. */}
+00548                 \textcolor{keywordtype}{int} lp\_count = lpGetInteger(si->lp\_ele);
+00549                 \textcolor{keywordflow}{if} (lp\_count == 0) \{ \textcolor{comment}{/* We reached the master entry. */}
+00550                     si->lp = NULL;
+00551                     si->lp\_ele = NULL;
+00552                     \textcolor{keywordflow}{break};
+00553                 \}
+00554                 \textcolor{keywordflow}{while}(lp\_count--) si->lp\_ele = lpPrev(si->lp,si->lp\_ele);
+00555             \}
+00556 
+00557             \textcolor{comment}{/* Get the flags entry. */}
+00558             \textcolor{keywordtype}{int} flags = lpGetInteger(si->lp\_ele);
+00559             si->lp\_ele = lpNext(si->lp,si->lp\_ele); \textcolor{comment}{/* Seek ID. */}
+00560 
+00561             \textcolor{comment}{/* Get the ID: it is encoded as difference between the master}
+00562 \textcolor{comment}{             * ID and this entry ID. */}
+00563             *id = si->master\_id;
+00564             id->ms += lpGetInteger(si->lp\_ele);
+00565             si->lp\_ele = lpNext(si->lp,si->lp\_ele);
+00566             id->seq += lpGetInteger(si->lp\_ele);
+00567             si->lp\_ele = lpNext(si->lp,si->lp\_ele);
+00568             \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} buf[\textcolor{keyword}{sizeof}(streamID)];
+00569             streamEncodeID(buf,id);
+00570 
+00571             \textcolor{comment}{/* The number of entries is here or not depending on the}
+00572 \textcolor{comment}{             * flags. */}
+00573             \textcolor{keywordflow}{if} (flags & \hyperlink{t__stream_8c_a6977b456a646762a7650d432a06dc6c5}{STREAM\_ITEM\_FLAG\_SAMEFIELDS}) \{
+00574                 *numfields = si->master\_fields\_count;
+00575             \} \textcolor{keywordflow}{else} \{
+00576                 *numfields = lpGetInteger(si->lp\_ele);
+00577                 si->lp\_ele = lpNext(si->lp,si->lp\_ele);
+00578             \}
+00579 
+00580             \textcolor{comment}{/* If current >= start, and the entry is not marked as}
+00581 \textcolor{comment}{             * deleted, emit it. */}
+00582             \textcolor{keywordflow}{if} (!si->rev) \{
+00583                 \textcolor{keywordflow}{if} (memcmp(buf,si->start\_key,\textcolor{keyword}{sizeof}(streamID)) >= 0 &&
+00584                     !(flags & \hyperlink{t__stream_8c_ad2bde2408044756f3f418ae3c72e575f}{STREAM\_ITEM\_FLAG\_DELETED}))
+00585                 \{
+00586                     \textcolor{keywordflow}{if} (memcmp(buf,si->end\_key,\textcolor{keyword}{sizeof}(streamID)) > 0)
+00587                         \textcolor{keywordflow}{return} 0; \textcolor{comment}{/* We are already out of range. */}
+00588                     si->entry\_flags = flags;
+00589                     \textcolor{keywordflow}{if} (flags & \hyperlink{t__stream_8c_a6977b456a646762a7650d432a06dc6c5}{STREAM\_ITEM\_FLAG\_SAMEFIELDS})
+00590                         si->master\_fields\_ptr = si->master\_fields\_start;
+00591                     \textcolor{keywordflow}{return} 1; \textcolor{comment}{/* Valid item returned. */}
+00592                 \}
+00593             \} \textcolor{keywordflow}{else} \{
+00594                 \textcolor{keywordflow}{if} (memcmp(buf,si->end\_key,\textcolor{keyword}{sizeof}(streamID)) <= 0 &&
+00595                     !(flags & \hyperlink{t__stream_8c_ad2bde2408044756f3f418ae3c72e575f}{STREAM\_ITEM\_FLAG\_DELETED}))
+00596                 \{
+00597                     \textcolor{keywordflow}{if} (memcmp(buf,si->start\_key,\textcolor{keyword}{sizeof}(streamID)) < 0)
+00598                         \textcolor{keywordflow}{return} 0; \textcolor{comment}{/* We are already out of range. */}
+00599                     si->entry\_flags = flags;
+00600                     \textcolor{keywordflow}{if} (flags & \hyperlink{t__stream_8c_a6977b456a646762a7650d432a06dc6c5}{STREAM\_ITEM\_FLAG\_SAMEFIELDS})
+00601                         si->master\_fields\_ptr = si->master\_fields\_start;
+00602                     \textcolor{keywordflow}{return} 1; \textcolor{comment}{/* Valid item returned. */}
+00603                 \}
+00604             \}
+00605 
+00606             \textcolor{comment}{/* If we do not emit, we have to discard if we are going}
+00607 \textcolor{comment}{             * forward, or seek the previous entry if we are going}
+00608 \textcolor{comment}{             * backward. */}
+00609             \textcolor{keywordflow}{if} (!si->rev) \{
+00610                 \textcolor{keywordtype}{int} to\_discard = (flags & \hyperlink{t__stream_8c_a6977b456a646762a7650d432a06dc6c5}{STREAM\_ITEM\_FLAG\_SAMEFIELDS}) ?
+00611                                     *numfields : *numfields*2;
+00612                 \textcolor{keywordflow}{for} (int64\_t i = 0; i < to\_discard; i++)
+00613                     si->lp\_ele = lpNext(si->lp,si->lp\_ele);
+00614             \} \textcolor{keywordflow}{else} \{
+00615                 \textcolor{keywordtype}{int} prev\_times = 4; \textcolor{comment}{/* flag + id ms/seq diff + numfields. */}
+00616                 \textcolor{keywordflow}{while}(prev\_times--) si->lp\_ele = lpPrev(si->lp,si->lp\_ele);
+00617             \}
+00618         \}
+00619 
+00620         \textcolor{comment}{/* End of listpack reached. Try the next/prev radix tree node. */}
+00621     \}
+00622 \}
+00623 
+00624 \textcolor{comment}{/* Get the field and value of the current item we are iterating. This should}
+00625 \textcolor{comment}{ * be called immediately after streamIteratorGetID(), and for each field}
+00626 \textcolor{comment}{ * according to the number of fields returned by streamIteratorGetID().}
+00627 \textcolor{comment}{ * The function populates the field and value pointers and the corresponding}
+00628 \textcolor{comment}{ * lengths by reference, that are valid until the next iterator call, assuming}
+00629 \textcolor{comment}{ * no one touches the stream meanwhile. */}
+00630 \textcolor{keywordtype}{void} streamIteratorGetField(\hyperlink{structstreamIterator}{streamIterator} *si, \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} **fieldptr, \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} 
+      **valueptr, int64\_t *fieldlen, int64\_t *valuelen) \{
+00631     \textcolor{keywordflow}{if} (si->entry\_flags & \hyperlink{t__stream_8c_a6977b456a646762a7650d432a06dc6c5}{STREAM\_ITEM\_FLAG\_SAMEFIELDS}) \{
+00632         *fieldptr = lpGet(si->master\_fields\_ptr,fieldlen,si->field\_buf);
+00633         si->master\_fields\_ptr = lpNext(si->lp,si->master\_fields\_ptr);
+00634     \} \textcolor{keywordflow}{else} \{
+00635         *fieldptr = lpGet(si->lp\_ele,fieldlen,si->field\_buf);
+00636         si->lp\_ele = lpNext(si->lp,si->lp\_ele);
+00637     \}
+00638     *valueptr = lpGet(si->lp\_ele,valuelen,si->value\_buf);
+00639     si->lp\_ele = lpNext(si->lp,si->lp\_ele);
+00640 \}
+00641 
+00642 \textcolor{comment}{/* Stop the stream iterator. The only cleanup we need is to free the rax}
+00643 \textcolor{comment}{ * itereator, since the stream iterator itself is supposed to be stack}
+00644 \textcolor{comment}{ * allocated. */}
+00645 \textcolor{keywordtype}{void} streamIteratorStop(\hyperlink{structstreamIterator}{streamIterator} *si) \{
+00646     raxStop(&si->ri);
+00647 \}
+00648 
+00649 \textcolor{comment}{/* Send the specified range to the client 'c'. The range the client will}
+00650 \textcolor{comment}{ * receive is between start and end inclusive, if 'count' is non zero, no more}
+00651 \textcolor{comment}{ * than 'count' elemnets are sent. The 'end' pointer can be NULL to mean that}
+00652 \textcolor{comment}{ * we want all the elements from 'start' till the end of the stream. If 'rev'}
+00653 \textcolor{comment}{ * is non zero, elements are produced in reversed order from end to start. */}
+00654 size\_t streamReplyWithRange(client *c, stream *s, streamID *start, streamID *end, size\_t count, \textcolor{keywordtype}{int} 
+      rev) \{
+00655     \textcolor{keywordtype}{void} *arraylen\_ptr = addDeferredMultiBulkLength(c);
+00656     size\_t arraylen = 0;
+00657     \hyperlink{structstreamIterator}{streamIterator} si;
+00658     int64\_t numfields;
+00659     streamID id;
+00660 
+00661     streamIteratorStart(&si,s,start,end,rev);
+00662     \textcolor{keywordflow}{while}(streamIteratorGetID(&si,&id,&numfields)) \{
+00663         \textcolor{comment}{/* Emit a two elements array for each item. The first is}
+00664 \textcolor{comment}{         * the ID, the second is an array of field-value pairs. */}
+00665         sds replyid = sdscatfmt(sdsempty(),\textcolor{stringliteral}{"+%U-%U\(\backslash\)r\(\backslash\)n"},id.ms,id.seq);
+00666         addReplyMultiBulkLen(c,2);
+00667         addReplySds(c,replyid);
+00668         addReplyMultiBulkLen(c,numfields*2);
+00669 
+00670         \textcolor{comment}{/* Emit the field-value pairs. */}
+00671         \textcolor{keywordflow}{while}(numfields--) \{
+00672             \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *key, *value;
+00673             int64\_t key\_len, value\_len;
+00674             streamIteratorGetField(&si,&key,&value,&key\_len,&value\_len);
+00675             addReplyBulkCBuffer(c,key,key\_len);
+00676             addReplyBulkCBuffer(c,value,value\_len);
+00677         \}
+00678         arraylen++;
+00679         \textcolor{keywordflow}{if} (count && count == arraylen) \textcolor{keywordflow}{break};
+00680     \}
+00681     streamIteratorStop(&si);
+00682     setDeferredMultiBulkLength(c,arraylen\_ptr,arraylen);
+00683     \textcolor{keywordflow}{return} arraylen;
+00684 \}
+00685 
+00686 \textcolor{comment}{/* -----------------------------------------------------------------------}
+00687 \textcolor{comment}{ * Stream commands implementation}
+00688 \textcolor{comment}{ * ----------------------------------------------------------------------- */}
+00689 
+00690 \textcolor{comment}{/* Look the stream at 'key' and return the corresponding stream object.}
+00691 \textcolor{comment}{ * The function creates a key setting it to an empty stream if needed. */}
+00692 robj *streamTypeLookupWriteOrCreate(\hyperlink{structclient}{client} *c, robj *key) \{
+00693     robj *o = lookupKeyWrite(c->db,key);
+00694     \textcolor{keywordflow}{if} (o == NULL) \{
+00695         o = createStreamObject();
+00696         dbAdd(c->db,key,o);
+00697     \} \textcolor{keywordflow}{else} \{
+00698         \textcolor{keywordflow}{if} (o->type != \hyperlink{server_8h_a2c2cc41300ca6b9daca7ea8a6d66edc6}{OBJ\_STREAM}) \{
+00699             addReply(c,shared.wrongtypeerr);
+00700             \textcolor{keywordflow}{return} NULL;
+00701         \}
+00702     \}
+00703     \textcolor{keywordflow}{return} o;
+00704 \}
+00705 
+00706 \textcolor{comment}{/* Helper function to convert a string to an unsigned long long value.}
+00707 \textcolor{comment}{ * The function attempts to use the faster string2ll() function inside}
+00708 \textcolor{comment}{ * Redis: if it fails, strtoull() is used instead. The function returns}
+00709 \textcolor{comment}{ * 1 if the conversion happened successfully or 0 if the number is}
+00710 \textcolor{comment}{ * invalid or out of range. */}
+00711 \textcolor{keywordtype}{int} string2ull(\textcolor{keyword}{const} \textcolor{keywordtype}{char} *s, \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} *value) \{
+00712     \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} ll;
+00713     \textcolor{keywordflow}{if} (string2ll(s,strlen(s),&ll)) \{
+00714         \textcolor{keywordflow}{if} (ll < 0) \textcolor{keywordflow}{return} 0; \textcolor{comment}{/* Negative values are out of range. */}
+00715         *value = ll;
+00716         \textcolor{keywordflow}{return} 1;
+00717     \}
+00718     errno = 0;
+00719     *value = strtoull(s,NULL,10);
+00720     \textcolor{keywordflow}{if} (errno == EINVAL || errno == ERANGE) \textcolor{keywordflow}{return} 0; \textcolor{comment}{/* strtoull() failed. */}
+00721     \textcolor{keywordflow}{return} 1; \textcolor{comment}{/* Conversion done! */}
+00722 \}
+00723 
+00724 \textcolor{comment}{/* Parse a stream ID in the format given by clients to Redis, that is}
+00725 \textcolor{comment}{ * <ms>.<seq>, and converts it into a streamID structure. If}
+00726 \textcolor{comment}{ * the specified ID is invalid C\_ERR is returned and an error is reported}
+00727 \textcolor{comment}{ * to the client, otherwise C\_OK is returned. The ID may be in incomplete}
+00728 \textcolor{comment}{ * form, just stating the milliseconds time part of the stream. In such a case}
+00729 \textcolor{comment}{ * the missing part is set according to the value of 'missing\_seq' parameter.}
+00730 \textcolor{comment}{ * The IDs "-" and "+" specify respectively the minimum and maximum IDs}
+00731 \textcolor{comment}{ * that can be represented.}
+00732 \textcolor{comment}{ *}
+00733 \textcolor{comment}{ * If 'c' is set to NULL, no reply is sent to the client. */}
+00734 \textcolor{keywordtype}{int} streamParseIDOrReply(\hyperlink{structclient}{client} *c, robj *o, streamID *id, uint64\_t missing\_seq) \{
+00735     \textcolor{keywordtype}{char} buf[128];
+00736     \textcolor{keywordflow}{if} (sdslen(o->ptr) > \textcolor{keyword}{sizeof}(buf)-1) \textcolor{keywordflow}{goto} invalid;
+00737     memcpy(buf,o->ptr,sdslen(o->ptr)+1);
+00738 
+00739     \textcolor{comment}{/* Handle the "-" and "+" special cases. */}
+00740     \textcolor{keywordflow}{if} (buf[0] == \textcolor{stringliteral}{'-'} && buf[1] == \textcolor{stringliteral}{'\(\backslash\)0'}) \{
+00741         id->ms = 0;
+00742         id->seq = 0;
+00743         \textcolor{keywordflow}{return} \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK};
+00744     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (buf[0] == \textcolor{stringliteral}{'+'} && buf[1] == \textcolor{stringliteral}{'\(\backslash\)0'}) \{
+00745         id->ms = UINT64\_MAX;
+00746         id->seq = UINT64\_MAX;
+00747         \textcolor{keywordflow}{return} \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK};
+00748     \}
+00749 
+00750     \textcolor{comment}{/* Parse <ms>.<seq> form. */}
+00751     \textcolor{keywordtype}{char} *dot = strchr(buf,\textcolor{stringliteral}{'-'});
+00752     \textcolor{keywordflow}{if} (dot) *dot = \textcolor{stringliteral}{'\(\backslash\)0'};
+00753     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} ms, seq;
+00754     \textcolor{keywordflow}{if} (string2ull(buf,&ms) == 0) \textcolor{keywordflow}{goto} invalid;
+00755     \textcolor{keywordflow}{if} (dot && string2ull(dot+1,&seq) == 0) \textcolor{keywordflow}{goto} invalid;
+00756     \textcolor{keywordflow}{if} (!dot) seq = missing\_seq;
+00757     id->ms = ms;
+00758     id->seq = seq;
+00759     \textcolor{keywordflow}{return} \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK};
+00760 
+00761 invalid:
+00762     \textcolor{keywordflow}{if} (c) addReplyError(c,\textcolor{stringliteral}{"Invalid stream ID specified as stream "}
+00763                            \textcolor{stringliteral}{"command argument"});
+00764     \textcolor{keywordflow}{return} \hyperlink{server_8h_af98ac28d5f4d23d7ed5985188e6fb7d1}{C\_ERR};
+00765 \}
+00766 
+00767 \textcolor{comment}{/* XADD key [MAXLEN <count>] <ID or *> [field value] [field value] ... */}
+00768 \textcolor{keywordtype}{void} xaddCommand(\hyperlink{structclient}{client} *c) \{
+00769     streamID id;
+00770     \textcolor{keywordtype}{int} id\_given = 0; \textcolor{comment}{/* Was an ID different than "*" specified? */}
+00771     \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} maxlen = 0;   \textcolor{comment}{/* 0 means no maximum length. */}
+00772     \textcolor{keywordtype}{int} approx\_maxlen = 0;  \textcolor{comment}{/* If 1 only delete whole radix tree nodes, so}
+00773 \textcolor{comment}{                               the maxium length is not applied verbatim. */}
+00774     \textcolor{keywordtype}{int} maxlen\_arg\_idx = 0; \textcolor{comment}{/* Index of the count in MAXLEN, for rewriting. */}
+00775 
+00776     \textcolor{comment}{/* Parse options. */}
+00777     \textcolor{keywordtype}{int} i = 2; \textcolor{comment}{/* This is the first argument position where we could}
+00778 \textcolor{comment}{                  find an option, or the ID. */}
+00779     \textcolor{keywordflow}{for} (; i < c->argc; i++) \{
+00780         \textcolor{keywordtype}{int} moreargs = (c->argc-1) - i; \textcolor{comment}{/* Number of additional arguments. */}
+00781         \textcolor{keywordtype}{char} *opt = c->argv[i]->ptr;
+00782         \textcolor{keywordflow}{if} (opt[0] == \textcolor{stringliteral}{'*'} && opt[1] == \textcolor{stringliteral}{'\(\backslash\)0'}) \{
+00783             \textcolor{comment}{/* This is just a fast path for the common case of auto-ID}
+00784 \textcolor{comment}{             * creation. */}
+00785             \textcolor{keywordflow}{break};
+00786         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcasecmp(opt,\textcolor{stringliteral}{"maxlen"}) && moreargs) \{
+00787             \textcolor{keywordtype}{char} *next = c->argv[i+1]->ptr;
+00788             \textcolor{comment}{/* Check for the form MAXLEN ~ <count>. */}
+00789             \textcolor{keywordflow}{if} (moreargs >= 2 && next[0] == \textcolor{stringliteral}{'~'} && next[1] == \textcolor{stringliteral}{'\(\backslash\)0'}) \{
+00790                 approx\_maxlen = 1;
+00791                 i++;
+00792             \}
+00793             \textcolor{keywordflow}{if} (getLongLongFromObjectOrReply(c,c->argv[i+1],&maxlen,NULL)
+00794                 != \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK}) \textcolor{keywordflow}{return};
+00795             i++;
+00796             maxlen\_arg\_idx = i;
+00797         \} \textcolor{keywordflow}{else} \{
+00798             \textcolor{comment}{/* If we are here is a syntax error or a valid ID. */}
+00799             \textcolor{keywordflow}{if} (streamParseIDOrReply(NULL,c->argv[i],&id,0) == \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK}) \{
+00800                 id\_given = 1;
+00801                 \textcolor{keywordflow}{break};
+00802             \} \textcolor{keywordflow}{else} \{
+00803                 addReply(c,shared.syntaxerr);
+00804                 \textcolor{keywordflow}{return};
+00805             \}
+00806         \}
+00807     \}
+00808     \textcolor{keywordtype}{int} field\_pos = i+1;
+00809 
+00810     \textcolor{comment}{/* Check arity. */}
+00811     \textcolor{keywordflow}{if} ((c->argc - field\_pos) < 2 || (c->argc-field\_pos % 2) == 1) \{
+00812         addReplyError(c,\textcolor{stringliteral}{"wrong number of arguments for XADD"});
+00813         \textcolor{keywordflow}{return};
+00814     \}
+00815 
+00816     \textcolor{comment}{/* Lookup the stream at key. */}
+00817     robj *o;
+00818     stream *s;
+00819     \textcolor{keywordflow}{if} ((o = streamTypeLookupWriteOrCreate(c,c->argv[1])) == NULL) \textcolor{keywordflow}{return};
+00820     s = o->ptr;
+00821 
+00822     \textcolor{comment}{/* Append using the low level function and return the ID. */}
+00823     \textcolor{keywordflow}{if} (streamAppendItem(s,c->argv+field\_pos,(c->argc-field\_pos)/2,
+00824         &id, id\_given ? &id : NULL)
+00825         == \hyperlink{server_8h_af98ac28d5f4d23d7ed5985188e6fb7d1}{C\_ERR})
+00826     \{
+00827         addReplyError(c,\textcolor{stringliteral}{"The ID specified in XADD is smaller than the "}
+00828                         \textcolor{stringliteral}{"target stream top item"});
+00829         \textcolor{keywordflow}{return};
+00830     \}
+00831     sds reply = sdscatfmt(sdsempty(),\textcolor{stringliteral}{"+%U-%U\(\backslash\)r\(\backslash\)n"},id.ms,id.seq);
+00832     addReplySds(c,reply);
+00833 
+00834     signalModifiedKey(c->db,c->argv[1]);
+00835     notifyKeyspaceEvent(\hyperlink{server_8h_a045eabb1c5cc4dd02abfbfbae1d27c84}{NOTIFY\_STREAM},\textcolor{stringliteral}{"xadd"},c->argv[1],c->db->id);
+00836     server.dirty++;
+00837 
+00838     \textcolor{comment}{/* Remove older elements if MAXLEN was specified. */}
+00839     \textcolor{keywordflow}{if} (maxlen) \{
+00840         \textcolor{keywordflow}{if} (!streamTrimByLength(s,maxlen,approx\_maxlen)) \{
+00841             \textcolor{comment}{/* If no trimming was performed, for instance because approximated}
+00842 \textcolor{comment}{             * trimming length was specified, rewrite the MAXLEN argument}
+00843 \textcolor{comment}{             * as zero, so that the command is propagated without trimming. */}
+00844             robj *zeroobj = createStringObjectFromLongLong(0);
+00845             rewriteClientCommandArgument(c,maxlen\_arg\_idx,zeroobj);
+00846             decrRefCount(zeroobj);
+00847         \} \textcolor{keywordflow}{else} \{
+00848             notifyKeyspaceEvent(\hyperlink{server_8h_a045eabb1c5cc4dd02abfbfbae1d27c84}{NOTIFY\_STREAM},\textcolor{stringliteral}{"xtrim"},c->argv[1],c->db->id);
+00849         \}
+00850     \}
+00851 
+00852     \textcolor{comment}{/* Let's rewrite the ID argument with the one actually generated for}
+00853 \textcolor{comment}{     * AOF/replication propagation. */}
+00854     robj *idarg = createObject(\hyperlink{server_8h_a65236ea160f69cdef33ec942092af88f}{OBJ\_STRING},
+00855                   sdscatfmt(sdsempty(),\textcolor{stringliteral}{"%U-%U"},id.ms,id.seq));
+00856     rewriteClientCommandArgument(c,i,idarg);
+00857     decrRefCount(idarg);
+00858 
+00859     \textcolor{comment}{/* We need to signal to blocked clients that there is new data on this}
+00860 \textcolor{comment}{     * stream. */}
+00861     \textcolor{keywordflow}{if} (server.blocked\_clients\_by\_type[\hyperlink{server_8h_a1f48bb63f9d0c061421044b92b46f679}{BLOCKED\_STREAM}])
+00862         signalKeyAsReady(c->db, c->argv[1]);
+00863 \}
+00864 
+00865 \textcolor{comment}{/* XRANGE/XREVRANGE actual implementation. */}
+00866 \textcolor{keywordtype}{void} xrangeGenericCommand(\hyperlink{structclient}{client} *c, \textcolor{keywordtype}{int} rev) \{
+00867     robj *o;
+00868     stream *s;
+00869     streamID startid, endid;
+00870     \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} count = 0;
+00871     robj *startarg = rev ? c->argv[3] : c->argv[2];
+00872     robj *endarg = rev ? c->argv[2] : c->argv[3];
+00873 
+00874     \textcolor{keywordflow}{if} (streamParseIDOrReply(c,startarg,&startid,0) == \hyperlink{server_8h_af98ac28d5f4d23d7ed5985188e6fb7d1}{C\_ERR}) \textcolor{keywordflow}{return};
+00875     \textcolor{keywordflow}{if} (streamParseIDOrReply(c,endarg,&endid,UINT64\_MAX) == \hyperlink{server_8h_af98ac28d5f4d23d7ed5985188e6fb7d1}{C\_ERR}) \textcolor{keywordflow}{return};
+00876 
+00877     \textcolor{comment}{/* Parse the COUNT option if any. */}
+00878     \textcolor{keywordflow}{if} (c->argc > 4) \{
+00879         \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} j = 4; j < c->argc; j++) \{
+00880             \textcolor{keywordtype}{int} additional = c->argc-j-1;
+00881             \textcolor{keywordflow}{if} (strcasecmp(c->argv[j]->ptr,\textcolor{stringliteral}{"COUNT"}) == 0 && additional >= 1) \{
+00882                 \textcolor{keywordflow}{if} (getLongLongFromObjectOrReply(c,c->argv[j+1],&count,NULL)
+00883                     != \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK}) \textcolor{keywordflow}{return};
+00884                 \textcolor{keywordflow}{if} (count < 0) count = 0;
+00885                 j++; \textcolor{comment}{/* Consume additional arg. */}
+00886             \} \textcolor{keywordflow}{else} \{
+00887                 addReply(c,shared.syntaxerr);
+00888                 \textcolor{keywordflow}{return};
+00889             \}
+00890         \}
+00891     \}
+00892 
+00893     \textcolor{comment}{/* Return the specified range to the user. */}
+00894     \textcolor{keywordflow}{if} ((o = lookupKeyReadOrReply(c,c->argv[1],shared.emptymultibulk)) == NULL
+00895         || checkType(c,o,\hyperlink{server_8h_a2c2cc41300ca6b9daca7ea8a6d66edc6}{OBJ\_STREAM})) \textcolor{keywordflow}{return};
+00896     s = o->ptr;
+00897     streamReplyWithRange(c,s,&startid,&endid,count,rev);
+00898 \}
+00899 
+00900 \textcolor{comment}{/* XRANGE key start end [COUNT <n>] */}
+00901 \textcolor{keywordtype}{void} xrangeCommand(\hyperlink{structclient}{client} *c) \{
+00902     xrangeGenericCommand(c,0);
+00903 \}
+00904 
+00905 \textcolor{comment}{/* XREVRANGE key end start [COUNT <n>] */}
+00906 \textcolor{keywordtype}{void} xrevrangeCommand(\hyperlink{structclient}{client} *c) \{
+00907     xrangeGenericCommand(c,1);
+00908 \}
+00909 
+00910 \textcolor{comment}{/* XLEN */}
+00911 \textcolor{keywordtype}{void} xlenCommand(\hyperlink{structclient}{client} *c) \{
+00912     robj *o;
+00913     \textcolor{keywordflow}{if} ((o = lookupKeyReadOrReply(c,c->argv[1],shared.czero)) == NULL
+00914         || checkType(c,o,\hyperlink{server_8h_a2c2cc41300ca6b9daca7ea8a6d66edc6}{OBJ\_STREAM})) \textcolor{keywordflow}{return};
+00915     stream *s = o->ptr;
+00916     addReplyLongLong(c,s->length);
+00917 \}
+00918 
+00919 \textcolor{comment}{/* XREAD [BLOCK <milliseconds>] [COUNT <count>] [GROUP <groupname> <ttl>]}
+00920 \textcolor{comment}{ *       [RETRY <milliseconds> <ttl>] STREAMS key\_1 key\_2 ... key\_N}
+00921 \textcolor{comment}{ *       ID\_1 ID\_2 ... ID\_N */}
+00922 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{XREAD\_BLOCKED\_DEFAULT\_COUNT} 1000
+00923 \textcolor{keywordtype}{void} xreadCommand(\hyperlink{structclient}{client} *c) \{
+00924     \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} timeout = -1; \textcolor{comment}{/* -1 means, no BLOCK argument given. */}
+00925     \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} count = 0;
+00926     \textcolor{keywordtype}{int} streams\_count = 0;
+00927     \textcolor{keywordtype}{int} streams\_arg = 0;
+00928     \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{STREAMID\_STATIC\_VECTOR\_LEN} 8
+00929     streamID static\_ids[\hyperlink{t__stream_8c_a3198b5313f2414b2a54b05140a44a437}{STREAMID\_STATIC\_VECTOR\_LEN}];
+00930     streamID *ids = static\_ids;
+00931 
+00932     \textcolor{comment}{/* Parse arguments. */}
+00933     \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} i = 1; i < c->argc; i++) \{
+00934         \textcolor{keywordtype}{int} moreargs = i != c->argc-1;
+00935         \textcolor{keywordtype}{char} *o = c->argv[i]->ptr;
+00936         \textcolor{keywordflow}{if} (!strcasecmp(o,\textcolor{stringliteral}{"BLOCK"}) && moreargs) \{
+00937             i++;
+00938             \textcolor{keywordflow}{if} (getTimeoutFromObjectOrReply(c,c->argv[i],&timeout,
+00939                 \hyperlink{server_8h_a259de972533409a75b736bfc799a8e2d}{UNIT\_MILLISECONDS}) != \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK}) \textcolor{keywordflow}{return};
+00940         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcasecmp(o,\textcolor{stringliteral}{"COUNT"}) && moreargs) \{
+00941             i++;
+00942             \textcolor{keywordflow}{if} (getLongLongFromObjectOrReply(c,c->argv[i],&count,NULL) != 
+      \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK})
+00943                 \textcolor{keywordflow}{return};
+00944             \textcolor{keywordflow}{if} (count < 0) count = 0;
+00945         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcasecmp(o,\textcolor{stringliteral}{"STREAMS"}) && moreargs) \{
+00946             streams\_arg = i+1;
+00947             streams\_count = (c->argc-streams\_arg);
+00948             \textcolor{keywordflow}{if} ((streams\_count % 2) != 0) \{
+00949                 addReplyError(c,\textcolor{stringliteral}{"Unbalanced XREAD list of streams: "}
+00950                                 \textcolor{stringliteral}{"for each stream key an ID or '$' must be "}
+00951                                 \textcolor{stringliteral}{"specified."});
+00952                 \textcolor{keywordflow}{return};
+00953             \}
+00954             streams\_count /= 2; \textcolor{comment}{/* We have two arguments for each stream. */}
+00955             \textcolor{keywordflow}{break};
+00956         \} \textcolor{keywordflow}{else} \{
+00957             addReply(c,shared.syntaxerr);
+00958             \textcolor{keywordflow}{return};
+00959         \}
+00960     \}
+00961 
+00962     \textcolor{comment}{/* STREAMS option is mandatory. */}
+00963     \textcolor{keywordflow}{if} (streams\_arg == 0) \{
+00964         addReply(c,shared.syntaxerr);
+00965         \textcolor{keywordflow}{return};
+00966     \}
+00967 
+00968     \textcolor{comment}{/* Parse the IDs. */}
+00969     \textcolor{keywordflow}{if} (streams\_count > \hyperlink{t__stream_8c_a3198b5313f2414b2a54b05140a44a437}{STREAMID\_STATIC\_VECTOR\_LEN})
+00970         ids = zmalloc(\textcolor{keyword}{sizeof}(streamID)*streams\_count);
+00971 
+00972     \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} i = streams\_arg + streams\_count; i < c->argc; i++) \{
+00973         \textcolor{comment}{/* Specifying "$" as last-known-id means that the client wants to be}
+00974 \textcolor{comment}{         * served with just the messages that will arrive into the stream}
+00975 \textcolor{comment}{         * starting from now. */}
+00976         \textcolor{keywordtype}{int} id\_idx = i - streams\_arg - streams\_count;
+00977         \textcolor{keywordflow}{if} (strcmp(c->argv[i]->ptr,\textcolor{stringliteral}{"$"}) == 0) \{
+00978             robj *o = lookupKeyRead(c->db,c->argv[i-streams\_count]);
+00979             \textcolor{keywordflow}{if} (o) \{
+00980                 stream *s = o->ptr;
+00981                 ids[id\_idx] = s->last\_id;
+00982             \} \textcolor{keywordflow}{else} \{
+00983                 ids[id\_idx].ms = 0;
+00984                 ids[id\_idx].seq = 0;
+00985             \}
+00986             \textcolor{keywordflow}{continue};
+00987         \}
+00988         \textcolor{keywordflow}{if} (streamParseIDOrReply(c,c->argv[i],ids+id\_idx,0) != \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK})
+00989             \textcolor{keywordflow}{goto} cleanup;
+00990     \}
+00991 
+00992     \textcolor{comment}{/* Try to serve the client synchronously. */}
+00993     size\_t arraylen = 0;
+00994     \textcolor{keywordtype}{void} *arraylen\_ptr = NULL;
+00995     \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} i = 0; i < streams\_count; i++) \{
+00996         robj *o = lookupKeyRead(c->db,c->argv[streams\_arg+i]);
+00997         \textcolor{keywordflow}{if} (o == NULL) \textcolor{keywordflow}{continue};
+00998         stream *s = o->ptr;
+00999         streamID *gt = ids+i; \textcolor{comment}{/* ID must be greater than this. */}
+01000         \textcolor{keywordflow}{if} (s->last\_id.ms > gt->ms ||
+01001             (s->last\_id.ms == gt->ms && s->last\_id.seq > gt->seq))
+01002         \{
+01003             arraylen++;
+01004             \textcolor{keywordflow}{if} (arraylen == 1) arraylen\_ptr = addDeferredMultiBulkLength(c);
+01005             \textcolor{comment}{/* streamReplyWithRange() handles the 'start' ID as inclusive,}
+01006 \textcolor{comment}{             * so start from the next ID, since we want only messages with}
+01007 \textcolor{comment}{             * IDs greater than start. */}
+01008             streamID start = *gt;
+01009             start.seq++; \textcolor{comment}{/* Can't overflow, it's an uint64\_t */}
+01010 
+01011             \textcolor{comment}{/* Emit the two elements sub-array consisting of the name}
+01012 \textcolor{comment}{             * of the stream and the data we extracted from it. */}
+01013             addReplyMultiBulkLen(c,2);
+01014             addReplyBulk(c,c->argv[i+streams\_arg]);
+01015             streamReplyWithRange(c,s,&start,NULL,count,0);
+01016         \}
+01017     \}
+01018 
+01019      \textcolor{comment}{/* We replied synchronously! Set the top array len and return to caller. */}
+01020     \textcolor{keywordflow}{if} (arraylen) \{
+01021         setDeferredMultiBulkLength(c,arraylen\_ptr,arraylen);
+01022         \textcolor{keywordflow}{goto} cleanup;
+01023     \}
+01024 
+01025     \textcolor{comment}{/* Block if needed. */}
+01026     \textcolor{keywordflow}{if} (timeout != -1) \{
+01027         \textcolor{comment}{/* If we are inside a MULTI/EXEC and the list is empty the only thing}
+01028 \textcolor{comment}{         * we can do is treating it as a timeout (even with timeout 0). */}
+01029         \textcolor{keywordflow}{if} (c->flags & \hyperlink{server_8h_a7f61f783f429419f8c593291a509b03a}{CLIENT\_MULTI}) \{
+01030             addReply(c,shared.nullmultibulk);
+01031             \textcolor{keywordflow}{goto} cleanup;
+01032         \}
+01033         blockForKeys(c, \hyperlink{server_8h_a1f48bb63f9d0c061421044b92b46f679}{BLOCKED\_STREAM}, c->argv+streams\_arg, streams\_count,
+01034                      timeout, NULL, ids);
+01035         \textcolor{comment}{/* If no COUNT is given and we block, set a relatively small count:}
+01036 \textcolor{comment}{         * in case the ID provided is too low, we do not want the server to}
+01037 \textcolor{comment}{         * block just to serve this client a huge stream of messages. */}
+01038         c->bpop.xread\_count = count ? count : \hyperlink{t__stream_8c_af5248c95e8c43b00dd40934a0862556e}{XREAD\_BLOCKED\_DEFAULT\_COUNT};
+01039         c->bpop.xread\_group = NULL; \textcolor{comment}{/* Not used for now. */}
+01040         \textcolor{keywordflow}{goto} cleanup;
+01041     \}
+01042 
+01043     \textcolor{comment}{/* No BLOCK option, nor any stream we can serve. Reply as with a}
+01044 \textcolor{comment}{     * timeout happened. */}
+01045     addReply(c,shared.nullmultibulk);
+01046     \textcolor{comment}{/* Continue to cleanup... */}
+01047 
+01048 cleanup:
+01049     \textcolor{comment}{/* Cleanup. */}
+01050     \textcolor{keywordflow}{if} (ids != static\_ids) zfree(ids);
+01051 \}
+\end{DoxyCode}

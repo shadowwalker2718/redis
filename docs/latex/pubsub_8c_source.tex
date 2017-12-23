@@ -1,0 +1,386 @@
+\hypertarget{pubsub_8c_source}{}\section{pubsub.\+c}
+\label{pubsub_8c_source}\index{src/pubsub.\+c@{src/pubsub.\+c}}
+
+\begin{DoxyCode}
+00001 \textcolor{comment}{/*}
+00002 \textcolor{comment}{ * Copyright (c) 2009-2012, Salvatore Sanfilippo <antirez at gmail dot com>}
+00003 \textcolor{comment}{ * All rights reserved.}
+00004 \textcolor{comment}{ *}
+00005 \textcolor{comment}{ * Redistribution and use in source and binary forms, with or without}
+00006 \textcolor{comment}{ * modification, are permitted provided that the following conditions are met:}
+00007 \textcolor{comment}{ *}
+00008 \textcolor{comment}{ *   * Redistributions of source code must retain the above copyright notice,}
+00009 \textcolor{comment}{ *     this list of conditions and the following disclaimer.}
+00010 \textcolor{comment}{ *   * Redistributions in binary form must reproduce the above copyright}
+00011 \textcolor{comment}{ *     notice, this list of conditions and the following disclaimer in the}
+00012 \textcolor{comment}{ *     documentation and/or other materials provided with the distribution.}
+00013 \textcolor{comment}{ *   * Neither the name of Redis nor the names of its contributors may be used}
+00014 \textcolor{comment}{ *     to endorse or promote products derived from this software without}
+00015 \textcolor{comment}{ *     specific prior written permission.}
+00016 \textcolor{comment}{ *}
+00017 \textcolor{comment}{ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"}
+00018 \textcolor{comment}{ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE}
+00019 \textcolor{comment}{ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE}
+00020 \textcolor{comment}{ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE}
+00021 \textcolor{comment}{ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR}
+00022 \textcolor{comment}{ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF}
+00023 \textcolor{comment}{ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS}
+00024 \textcolor{comment}{ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN}
+00025 \textcolor{comment}{ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)}
+00026 \textcolor{comment}{ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE}
+00027 \textcolor{comment}{ * POSSIBILITY OF SUCH DAMAGE.}
+00028 \textcolor{comment}{ */}
+00029 
+00030 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \hyperlink{server_8h}{"server.h"}
+00031 
+00032 \textcolor{comment}{/*-----------------------------------------------------------------------------}
+00033 \textcolor{comment}{ * Pubsub low level API}
+00034 \textcolor{comment}{ *----------------------------------------------------------------------------*/}
+00035 
+00036 \textcolor{keywordtype}{void} freePubsubPattern(\textcolor{keywordtype}{void} *p) \{
+00037     pubsubPattern *pat = p;
+00038 
+00039     decrRefCount(pat->pattern);
+00040     zfree(pat);
+00041 \}
+00042 
+00043 \textcolor{keywordtype}{int} listMatchPubsubPattern(\textcolor{keywordtype}{void} *a, \textcolor{keywordtype}{void} *b) \{
+00044     pubsubPattern *pa = a, *pb = b;
+00045 
+00046     \textcolor{keywordflow}{return} (pa->client == pb->client) &&
+00047            (equalStringObjects(pa->pattern,pb->pattern));
+00048 \}
+00049 
+00050 \textcolor{comment}{/* Return the number of channels + patterns a client is subscribed to. */}
+00051 \textcolor{keywordtype}{int} clientSubscriptionsCount(\hyperlink{structclient}{client} *c) \{
+00052     \textcolor{keywordflow}{return} \hyperlink{dict_8h_af193430dd3d5579a52b194512f72c1f0}{dictSize}(c->pubsub\_channels)+
+00053            \hyperlink{adlist_8h_afde0ab079f934670e82119b43120e94b}{listLength}(c->pubsub\_patterns);
+00054 \}
+00055 
+00056 \textcolor{comment}{/* Subscribe a client to a channel. Returns 1 if the operation succeeded, or}
+00057 \textcolor{comment}{ * 0 if the client was already subscribed to that channel. */}
+00058 \textcolor{keywordtype}{int} pubsubSubscribeChannel(\hyperlink{structclient}{client} *c, robj *channel) \{
+00059     dictEntry *de;
+00060     list *clients = NULL;
+00061     \textcolor{keywordtype}{int} retval = 0;
+00062 
+00063     \textcolor{comment}{/* Add the channel to the client -> channels hash table */}
+00064     \textcolor{keywordflow}{if} (dictAdd(c->pubsub\_channels,channel,NULL) == \hyperlink{dict_8h_a2afecbeab8f7efbc183048f52f6d17e5}{DICT\_OK}) \{
+00065         retval = 1;
+00066         incrRefCount(channel);
+00067         \textcolor{comment}{/* Add the client to the channel -> list of clients hash table */}
+00068         de = dictFind(server.pubsub\_channels,channel);
+00069         \textcolor{keywordflow}{if} (de == NULL) \{
+00070             clients = listCreate();
+00071             dictAdd(server.pubsub\_channels,channel,clients);
+00072             incrRefCount(channel);
+00073         \} \textcolor{keywordflow}{else} \{
+00074             clients = \hyperlink{dict_8h_ae8d2cc391873b2bea2b87c4f80f43120}{dictGetVal}(de);
+00075         \}
+00076         listAddNodeTail(clients,c);
+00077     \}
+00078     \textcolor{comment}{/* Notify the client */}
+00079     addReply(c,shared.mbulkhdr[3]);
+00080     addReply(c,shared.subscribebulk);
+00081     addReplyBulk(c,channel);
+00082     addReplyLongLong(c,clientSubscriptionsCount(c));
+00083     \textcolor{keywordflow}{return} retval;
+00084 \}
+00085 
+00086 \textcolor{comment}{/* Unsubscribe a client from a channel. Returns 1 if the operation succeeded, or}
+00087 \textcolor{comment}{ * 0 if the client was not subscribed to the specified channel. */}
+00088 \textcolor{keywordtype}{int} pubsubUnsubscribeChannel(\hyperlink{structclient}{client} *c, robj *channel, \textcolor{keywordtype}{int} notify) \{
+00089     dictEntry *de;
+00090     list *clients;
+00091     listNode *ln;
+00092     \textcolor{keywordtype}{int} retval = 0;
+00093 
+00094     \textcolor{comment}{/* Remove the channel from the client -> channels hash table */}
+00095     incrRefCount(channel); \textcolor{comment}{/* channel may be just a pointer to the same object}
+00096 \textcolor{comment}{                            we have in the hash tables. Protect it... */}
+00097     \textcolor{keywordflow}{if} (dictDelete(c->pubsub\_channels,channel) == \hyperlink{dict_8h_a2afecbeab8f7efbc183048f52f6d17e5}{DICT\_OK}) \{
+00098         retval = 1;
+00099         \textcolor{comment}{/* Remove the client from the channel -> clients list hash table */}
+00100         de = dictFind(server.pubsub\_channels,channel);
+00101         \hyperlink{server_8h_a7308f76cbff9a8d3797fe78190b91282}{serverAssertWithInfo}(c,NULL,de != NULL);
+00102         clients = \hyperlink{dict_8h_ae8d2cc391873b2bea2b87c4f80f43120}{dictGetVal}(de);
+00103         ln = listSearchKey(clients,c);
+00104         \hyperlink{server_8h_a7308f76cbff9a8d3797fe78190b91282}{serverAssertWithInfo}(c,NULL,ln != NULL);
+00105         listDelNode(clients,ln);
+00106         \textcolor{keywordflow}{if} (\hyperlink{adlist_8h_afde0ab079f934670e82119b43120e94b}{listLength}(clients) == 0) \{
+00107             \textcolor{comment}{/* Free the list and associated hash entry at all if this was}
+00108 \textcolor{comment}{             * the latest client, so that it will be possible to abuse}
+00109 \textcolor{comment}{             * Redis PUBSUB creating millions of channels. */}
+00110             dictDelete(server.pubsub\_channels,channel);
+00111         \}
+00112     \}
+00113     \textcolor{comment}{/* Notify the client */}
+00114     \textcolor{keywordflow}{if} (notify) \{
+00115         addReply(c,shared.mbulkhdr[3]);
+00116         addReply(c,shared.unsubscribebulk);
+00117         addReplyBulk(c,channel);
+00118         addReplyLongLong(c,\hyperlink{dict_8h_af193430dd3d5579a52b194512f72c1f0}{dictSize}(c->pubsub\_channels)+
+00119                        \hyperlink{adlist_8h_afde0ab079f934670e82119b43120e94b}{listLength}(c->pubsub\_patterns));
+00120 
+00121     \}
+00122     decrRefCount(channel); \textcolor{comment}{/* it is finally safe to release it */}
+00123     \textcolor{keywordflow}{return} retval;
+00124 \}
+00125 
+00126 \textcolor{comment}{/* Subscribe a client to a pattern. Returns 1 if the operation succeeded, or 0 if the client was
+       already subscribed to that pattern. */}
+00127 \textcolor{keywordtype}{int} pubsubSubscribePattern(\hyperlink{structclient}{client} *c, robj *pattern) \{
+00128     \textcolor{keywordtype}{int} retval = 0;
+00129 
+00130     \textcolor{keywordflow}{if} (listSearchKey(c->pubsub\_patterns,pattern) == NULL) \{
+00131         retval = 1;
+00132         pubsubPattern *pat;
+00133         listAddNodeTail(c->pubsub\_patterns,pattern);
+00134         incrRefCount(pattern);
+00135         pat = zmalloc(\textcolor{keyword}{sizeof}(*pat));
+00136         pat->pattern = getDecodedObject(pattern);
+00137         pat->client = c;
+00138         listAddNodeTail(server.pubsub\_patterns,pat);
+00139     \}
+00140     \textcolor{comment}{/* Notify the client */}
+00141     addReply(c,shared.mbulkhdr[3]);
+00142     addReply(c,shared.psubscribebulk);
+00143     addReplyBulk(c,pattern);
+00144     addReplyLongLong(c,clientSubscriptionsCount(c));
+00145     \textcolor{keywordflow}{return} retval;
+00146 \}
+00147 
+00148 \textcolor{comment}{/* Unsubscribe a client from a channel. Returns 1 if the operation succeeded, or}
+00149 \textcolor{comment}{ * 0 if the client was not subscribed to the specified channel. */}
+00150 \textcolor{keywordtype}{int} pubsubUnsubscribePattern(\hyperlink{structclient}{client} *c, robj *pattern, \textcolor{keywordtype}{int} notify) \{
+00151     listNode *ln;
+00152     pubsubPattern pat;
+00153     \textcolor{keywordtype}{int} retval = 0;
+00154 
+00155     incrRefCount(pattern); \textcolor{comment}{/* Protect the object. May be the same we remove */}
+00156     \textcolor{keywordflow}{if} ((ln = listSearchKey(c->pubsub\_patterns,pattern)) != NULL) \{
+00157         retval = 1;
+00158         listDelNode(c->pubsub\_patterns,ln);
+00159         pat.client = c;
+00160         pat.pattern = pattern;
+00161         ln = listSearchKey(server.pubsub\_patterns,&pat);
+00162         listDelNode(server.pubsub\_patterns,ln);
+00163     \}
+00164     \textcolor{comment}{/* Notify the client */}
+00165     \textcolor{keywordflow}{if} (notify) \{
+00166         addReply(c,shared.mbulkhdr[3]);
+00167         addReply(c,shared.punsubscribebulk);
+00168         addReplyBulk(c,pattern);
+00169         addReplyLongLong(c,\hyperlink{dict_8h_af193430dd3d5579a52b194512f72c1f0}{dictSize}(c->pubsub\_channels)+
+00170                        \hyperlink{adlist_8h_afde0ab079f934670e82119b43120e94b}{listLength}(c->pubsub\_patterns));
+00171     \}
+00172     decrRefCount(pattern);
+00173     \textcolor{keywordflow}{return} retval;
+00174 \}
+00175 
+00176 \textcolor{comment}{/* Unsubscribe from all the channels. Return the number of channels the}
+00177 \textcolor{comment}{ * client was subscribed to. */}
+00178 \textcolor{keywordtype}{int} pubsubUnsubscribeAllChannels(\hyperlink{structclient}{client} *c, \textcolor{keywordtype}{int} notify) \{
+00179     dictIterator *di = dictGetSafeIterator(c->pubsub\_channels);
+00180     dictEntry *de;
+00181     \textcolor{keywordtype}{int} count = 0;
+00182 
+00183     \textcolor{keywordflow}{while}((de = dictNext(di)) != NULL) \{
+00184         robj *channel = \hyperlink{dict_8h_a3271c334309904a3086deca94f96e46e}{dictGetKey}(de);
+00185 
+00186         count += pubsubUnsubscribeChannel(c,channel,notify);
+00187     \}
+00188     \textcolor{comment}{/* We were subscribed to nothing? Still reply to the client. */}
+00189     \textcolor{keywordflow}{if} (notify && count == 0) \{
+00190         addReply(c,shared.mbulkhdr[3]);
+00191         addReply(c,shared.unsubscribebulk);
+00192         addReply(c,shared.nullbulk);
+00193         addReplyLongLong(c,\hyperlink{dict_8h_af193430dd3d5579a52b194512f72c1f0}{dictSize}(c->pubsub\_channels)+
+00194                        \hyperlink{adlist_8h_afde0ab079f934670e82119b43120e94b}{listLength}(c->pubsub\_patterns));
+00195     \}
+00196     dictReleaseIterator(di);
+00197     \textcolor{keywordflow}{return} count;
+00198 \}
+00199 
+00200 \textcolor{comment}{/* Unsubscribe from all the patterns. Return the number of patterns the}
+00201 \textcolor{comment}{ * client was subscribed from. */}
+00202 \textcolor{keywordtype}{int} pubsubUnsubscribeAllPatterns(\hyperlink{structclient}{client} *c, \textcolor{keywordtype}{int} notify) \{
+00203     listNode *ln;
+00204     listIter li;
+00205     \textcolor{keywordtype}{int} count = 0;
+00206 
+00207     listRewind(c->pubsub\_patterns,&li);
+00208     \textcolor{keywordflow}{while} ((ln = listNext(&li)) != NULL) \{
+00209         robj *pattern = ln->value;
+00210 
+00211         count += pubsubUnsubscribePattern(c,pattern,notify);
+00212     \}
+00213     \textcolor{keywordflow}{if} (notify && count == 0) \{
+00214         \textcolor{comment}{/* We were subscribed to nothing? Still reply to the client. */}
+00215         addReply(c,shared.mbulkhdr[3]);
+00216         addReply(c,shared.punsubscribebulk);
+00217         addReply(c,shared.nullbulk);
+00218         addReplyLongLong(c,\hyperlink{dict_8h_af193430dd3d5579a52b194512f72c1f0}{dictSize}(c->pubsub\_channels)+
+00219                        \hyperlink{adlist_8h_afde0ab079f934670e82119b43120e94b}{listLength}(c->pubsub\_patterns));
+00220     \}
+00221     \textcolor{keywordflow}{return} count;
+00222 \}
+00223 
+00224 \textcolor{comment}{/* Publish a message */}
+00225 \textcolor{keywordtype}{int} pubsubPublishMessage(robj *channel, robj *message) \{
+00226     \textcolor{keywordtype}{int} receivers = 0;
+00227     dictEntry *de;
+00228     listNode *ln;
+00229     listIter li;
+00230 
+00231     \textcolor{comment}{/* Send to clients listening for that channel */}
+00232     de = dictFind(server.pubsub\_channels,channel);
+00233     \textcolor{keywordflow}{if} (de) \{
+00234         list *list = \hyperlink{dict_8h_ae8d2cc391873b2bea2b87c4f80f43120}{dictGetVal}(de);
+00235         listNode *ln;
+00236         listIter li;
+00237 
+00238         listRewind(list,&li);
+00239         \textcolor{keywordflow}{while} ((ln = listNext(&li)) != NULL) \{
+00240             \hyperlink{structclient}{client} *c = ln->value;
+00241 
+00242             addReply(c,shared.mbulkhdr[3]);
+00243             addReply(c,shared.messagebulk);
+00244             addReplyBulk(c,channel);
+00245             addReplyBulk(c,message);
+00246             receivers++;
+00247         \}
+00248     \}
+00249     \textcolor{comment}{/* Send to clients listening to matching channels */}
+00250     \textcolor{keywordflow}{if} (\hyperlink{adlist_8h_afde0ab079f934670e82119b43120e94b}{listLength}(server.pubsub\_patterns)) \{
+00251         listRewind(server.pubsub\_patterns,&li);
+00252         channel = getDecodedObject(channel);
+00253         \textcolor{keywordflow}{while} ((ln = listNext(&li)) != NULL) \{
+00254             pubsubPattern *pat = ln->value;
+00255 
+00256             \textcolor{keywordflow}{if} (stringmatchlen((\textcolor{keywordtype}{char}*)pat->pattern->ptr,
+00257                                 sdslen(pat->pattern->ptr),
+00258                                 (\textcolor{keywordtype}{char}*)channel->ptr,
+00259                                 sdslen(channel->ptr),0)) \{
+00260                 addReply(pat->client,shared.mbulkhdr[4]);
+00261                 addReply(pat->client,shared.pmessagebulk);
+00262                 addReplyBulk(pat->client,pat->pattern);
+00263                 addReplyBulk(pat->client,channel);
+00264                 addReplyBulk(pat->client,message);
+00265                 receivers++;
+00266             \}
+00267         \}
+00268         decrRefCount(channel);
+00269     \}
+00270     \textcolor{keywordflow}{return} receivers;
+00271 \}
+00272 
+00273 \textcolor{comment}{/*-----------------------------------------------------------------------------}
+00274 \textcolor{comment}{ * Pubsub commands implementation}
+00275 \textcolor{comment}{ *----------------------------------------------------------------------------*/}
+00276 
+00277 \textcolor{keywordtype}{void} subscribeCommand(\hyperlink{structclient}{client} *c) \{
+00278     \textcolor{keywordtype}{int} j;
+00279 
+00280     \textcolor{keywordflow}{for} (j = 1; j < c->argc; j++)
+00281         pubsubSubscribeChannel(c,c->argv[j]);
+00282     c->flags |= \hyperlink{server_8h_a20f2f5380db97cd09013118ffc9411cc}{CLIENT\_PUBSUB};
+00283 \}
+00284 
+00285 \textcolor{keywordtype}{void} unsubscribeCommand(\hyperlink{structclient}{client} *c) \{
+00286     \textcolor{keywordflow}{if} (c->argc == 1) \{
+00287         pubsubUnsubscribeAllChannels(c,1);
+00288     \} \textcolor{keywordflow}{else} \{
+00289         \textcolor{keywordtype}{int} j;
+00290 
+00291         \textcolor{keywordflow}{for} (j = 1; j < c->argc; j++)
+00292             pubsubUnsubscribeChannel(c,c->argv[j],1);
+00293     \}
+00294     \textcolor{keywordflow}{if} (clientSubscriptionsCount(c) == 0) c->flags &= ~\hyperlink{server_8h_a20f2f5380db97cd09013118ffc9411cc}{CLIENT\_PUBSUB};
+00295 \}
+00296 
+00297 \textcolor{keywordtype}{void} psubscribeCommand(\hyperlink{structclient}{client} *c) \{
+00298     \textcolor{keywordtype}{int} j;
+00299 
+00300     \textcolor{keywordflow}{for} (j = 1; j < c->argc; j++)
+00301         pubsubSubscribePattern(c,c->argv[j]);
+00302     c->flags |= \hyperlink{server_8h_a20f2f5380db97cd09013118ffc9411cc}{CLIENT\_PUBSUB};
+00303 \}
+00304 
+00305 \textcolor{keywordtype}{void} punsubscribeCommand(\hyperlink{structclient}{client} *c) \{
+00306     \textcolor{keywordflow}{if} (c->argc == 1) \{
+00307         pubsubUnsubscribeAllPatterns(c,1);
+00308     \} \textcolor{keywordflow}{else} \{
+00309         \textcolor{keywordtype}{int} j;
+00310 
+00311         \textcolor{keywordflow}{for} (j = 1; j < c->argc; j++)
+00312             pubsubUnsubscribePattern(c,c->argv[j],1);
+00313     \}
+00314     \textcolor{keywordflow}{if} (clientSubscriptionsCount(c) == 0) c->flags &= ~\hyperlink{server_8h_a20f2f5380db97cd09013118ffc9411cc}{CLIENT\_PUBSUB};
+00315 \}
+00316 
+00317 \textcolor{keywordtype}{void} publishCommand(\hyperlink{structclient}{client} *c) \{
+00318     \textcolor{keywordtype}{int} receivers = pubsubPublishMessage(c->argv[1],c->argv[2]);
+00319     \textcolor{keywordflow}{if} (server.cluster\_enabled)
+00320         clusterPropagatePublish(c->argv[1],c->argv[2]);
+00321     \textcolor{keywordflow}{else}
+00322         forceCommandPropagation(c,\hyperlink{server_8h_a59c6e025b4ed85642a0472fc3e73e298}{PROPAGATE\_REPL});
+00323     addReplyLongLong(c,receivers);
+00324 \}
+00325 
+00326 \textcolor{comment}{/* PUBSUB command for Pub/Sub introspection. */}
+00327 \textcolor{keywordtype}{void} pubsubCommand(\hyperlink{structclient}{client} *c) \{
+00328     \textcolor{keywordflow}{if} (c->argc == 2 && !strcasecmp(c->argv[1]->ptr,\textcolor{stringliteral}{"help"})) \{
+00329         \textcolor{keyword}{const} \textcolor{keywordtype}{char} *help[] = \{
+00330 \textcolor{stringliteral}{"channels [<pattern>] -- Return the currently active channels matching a pattern (default: all)."},
+00331 \textcolor{stringliteral}{"numpat -- Return number of subscriptions to patterns."},
+00332 \textcolor{stringliteral}{"numsub [channel-1 .. channel-N] -- Returns the number of subscribers for the specified channels
+       (excluding patterns, default: none)."},
+00333 NULL
+00334         \};
+00335         addReplyHelp(c, help);
+00336     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcasecmp(c->argv[1]->ptr,\textcolor{stringliteral}{"channels"}) &&
+00337         (c->argc == 2 || c->argc == 3))
+00338     \{
+00339         \textcolor{comment}{/* PUBSUB CHANNELS [<pattern>] */}
+00340         sds pat = (c->argc == 2) ? NULL : c->argv[2]->ptr;
+00341         dictIterator *di = dictGetIterator(server.pubsub\_channels);
+00342         dictEntry *de;
+00343         \textcolor{keywordtype}{long} mblen = 0;
+00344         \textcolor{keywordtype}{void} *replylen;
+00345 
+00346         replylen = addDeferredMultiBulkLength(c);
+00347         \textcolor{keywordflow}{while}((de = dictNext(di)) != NULL) \{
+00348             robj *cobj = \hyperlink{dict_8h_a3271c334309904a3086deca94f96e46e}{dictGetKey}(de);
+00349             sds channel = cobj->ptr;
+00350 
+00351             \textcolor{keywordflow}{if} (!pat || stringmatchlen(pat, sdslen(pat),
+00352                                        channel, sdslen(channel),0))
+00353             \{
+00354                 addReplyBulk(c,cobj);
+00355                 mblen++;
+00356             \}
+00357         \}
+00358         dictReleaseIterator(di);
+00359         setDeferredMultiBulkLength(c,replylen,mblen);
+00360     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcasecmp(c->argv[1]->ptr,\textcolor{stringliteral}{"numsub"}) && c->argc >= 2) \{
+00361         \textcolor{comment}{/* PUBSUB NUMSUB [Channel\_1 ... Channel\_N] */}
+00362         \textcolor{keywordtype}{int} j;
+00363 
+00364         addReplyMultiBulkLen(c,(c->argc-2)*2);
+00365         \textcolor{keywordflow}{for} (j = 2; j < c->argc; j++) \{
+00366             list *l = dictFetchValue(server.pubsub\_channels,c->argv[j]);
+00367 
+00368             addReplyBulk(c,c->argv[j]);
+00369             addReplyLongLong(c,l ? \hyperlink{adlist_8h_afde0ab079f934670e82119b43120e94b}{listLength}(l) : 0);
+00370         \}
+00371     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcasecmp(c->argv[1]->ptr,\textcolor{stringliteral}{"numpat"}) && c->argc == 2) \{
+00372         \textcolor{comment}{/* PUBSUB NUMPAT */}
+00373         addReplyLongLong(c,\hyperlink{adlist_8h_afde0ab079f934670e82119b43120e94b}{listLength}(server.pubsub\_patterns));
+00374     \} \textcolor{keywordflow}{else} \{
+00375         addReplyErrorFormat(c, \textcolor{stringliteral}{"Unknown subcommand or wrong number of arguments for '%s'. Try PUBSUB
+       HELP"},
+00376             (\textcolor{keywordtype}{char}*)c->argv[1]->ptr);
+00377     \}
+00378 \}
+\end{DoxyCode}

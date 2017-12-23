@@ -1,0 +1,839 @@
+\hypertarget{util_8c_source}{}\section{util.\+c}
+\label{util_8c_source}\index{src/util.\+c@{src/util.\+c}}
+
+\begin{DoxyCode}
+00001 \textcolor{comment}{/*}
+00002 \textcolor{comment}{ * Copyright (c) 2009-2012, Salvatore Sanfilippo <antirez at gmail dot com>}
+00003 \textcolor{comment}{ * All rights reserved.}
+00004 \textcolor{comment}{ *}
+00005 \textcolor{comment}{ * Redistribution and use in source and binary forms, with or without}
+00006 \textcolor{comment}{ * modification, are permitted provided that the following conditions are met:}
+00007 \textcolor{comment}{ *}
+00008 \textcolor{comment}{ *   * Redistributions of source code must retain the above copyright notice,}
+00009 \textcolor{comment}{ *     this list of conditions and the following disclaimer.}
+00010 \textcolor{comment}{ *   * Redistributions in binary form must reproduce the above copyright}
+00011 \textcolor{comment}{ *     notice, this list of conditions and the following disclaimer in the}
+00012 \textcolor{comment}{ *     documentation and/or other materials provided with the distribution.}
+00013 \textcolor{comment}{ *   * Neither the name of Redis nor the names of its contributors may be used}
+00014 \textcolor{comment}{ *     to endorse or promote products derived from this software without}
+00015 \textcolor{comment}{ *     specific prior written permission.}
+00016 \textcolor{comment}{ *}
+00017 \textcolor{comment}{ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"}
+00018 \textcolor{comment}{ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE}
+00019 \textcolor{comment}{ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE}
+00020 \textcolor{comment}{ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE}
+00021 \textcolor{comment}{ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR}
+00022 \textcolor{comment}{ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF}
+00023 \textcolor{comment}{ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS}
+00024 \textcolor{comment}{ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN}
+00025 \textcolor{comment}{ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)}
+00026 \textcolor{comment}{ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE}
+00027 \textcolor{comment}{ * POSSIBILITY OF SUCH DAMAGE.}
+00028 \textcolor{comment}{ */}
+00029 
+00030 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \hyperlink{fmacros_8h}{"fmacros.h"}
+00031 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{stdlib}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00032 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{stdio}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00033 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{string}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00034 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{ctype}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00035 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{limits}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00036 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{math}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00037 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{unistd}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00038 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{sys}\textcolor{preprocessor}{/}\textcolor{preprocessor}{time}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00039 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{keywordtype}{float}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00040 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{stdint}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00041 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{errno}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00042 
+00043 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \hyperlink{util_8h}{"util.h"}
+00044 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \hyperlink{sha1_8h}{"sha1.h"}
+00045 
+00046 \textcolor{comment}{/* Glob-style pattern matching. */}
+00047 \textcolor{keywordtype}{int} stringmatchlen(\textcolor{keyword}{const} \textcolor{keywordtype}{char} *pattern, \textcolor{keywordtype}{int} patternLen,
+00048         \textcolor{keyword}{const} \textcolor{keywordtype}{char} *string, \textcolor{keywordtype}{int} stringLen, \textcolor{keywordtype}{int} nocase)
+00049 \{
+00050     \textcolor{keywordflow}{while}(patternLen) \{
+00051         \textcolor{keywordflow}{switch}(pattern[0]) \{
+00052         \textcolor{keywordflow}{case} \textcolor{stringliteral}{'*'}:
+00053             \textcolor{keywordflow}{while} (pattern[1] == \textcolor{stringliteral}{'*'}) \{
+00054                 pattern++;
+00055                 patternLen--;
+00056             \}
+00057             \textcolor{keywordflow}{if} (patternLen == 1)
+00058                 \textcolor{keywordflow}{return} 1; \textcolor{comment}{/* match */}
+00059             \textcolor{keywordflow}{while}(stringLen) \{
+00060                 \textcolor{keywordflow}{if} (stringmatchlen(pattern+1, patternLen-1,
+00061                             string, stringLen, nocase))
+00062                     \textcolor{keywordflow}{return} 1; \textcolor{comment}{/* match */}
+00063                 string++;
+00064                 stringLen--;
+00065             \}
+00066             \textcolor{keywordflow}{return} 0; \textcolor{comment}{/* no match */}
+00067             \textcolor{keywordflow}{break};
+00068         \textcolor{keywordflow}{case} \textcolor{stringliteral}{'?'}:
+00069             \textcolor{keywordflow}{if} (stringLen == 0)
+00070                 \textcolor{keywordflow}{return} 0; \textcolor{comment}{/* no match */}
+00071             string++;
+00072             stringLen--;
+00073             \textcolor{keywordflow}{break};
+00074         \textcolor{keywordflow}{case} \textcolor{stringliteral}{'['}:
+00075         \{
+00076             \textcolor{keywordtype}{int} \textcolor{keyword}{not}, match;
+00077 
+00078             pattern++;
+00079             patternLen--;
+00080             \textcolor{keyword}{not} = pattern[0] == \textcolor{stringliteral}{'^'};
+00081             \textcolor{keywordflow}{if} (\textcolor{keyword}{not}) \{
+00082                 pattern++;
+00083                 patternLen--;
+00084             \}
+00085             match = 0;
+00086             \textcolor{keywordflow}{while}(1) \{
+00087                 \textcolor{keywordflow}{if} (pattern[0] == \textcolor{stringliteral}{'\(\backslash\)\(\backslash\)'} && patternLen >= 2) \{
+00088                     pattern++;
+00089                     patternLen--;
+00090                     \textcolor{keywordflow}{if} (pattern[0] == string[0])
+00091                         match = 1;
+00092                 \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (pattern[0] == \textcolor{stringliteral}{']'}) \{
+00093                     \textcolor{keywordflow}{break};
+00094                 \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (patternLen == 0) \{
+00095                     pattern--;
+00096                     patternLen++;
+00097                     \textcolor{keywordflow}{break};
+00098                 \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (pattern[1] == \textcolor{stringliteral}{'-'} && patternLen >= 3) \{
+00099                     \textcolor{keywordtype}{int} start = pattern[0];
+00100                     \textcolor{keywordtype}{int} end = pattern[2];
+00101                     \textcolor{keywordtype}{int} c = string[0];
+00102                     \textcolor{keywordflow}{if} (start > end) \{
+00103                         \textcolor{keywordtype}{int} t = start;
+00104                         start = end;
+00105                         end = t;
+00106                     \}
+00107                     \textcolor{keywordflow}{if} (nocase) \{
+00108                         start = tolower(start);
+00109                         end = tolower(end);
+00110                         c = tolower(c);
+00111                     \}
+00112                     pattern += 2;
+00113                     patternLen -= 2;
+00114                     \textcolor{keywordflow}{if} (c >= start && c <= end)
+00115                         match = 1;
+00116                 \} \textcolor{keywordflow}{else} \{
+00117                     \textcolor{keywordflow}{if} (!nocase) \{
+00118                         \textcolor{keywordflow}{if} (pattern[0] == string[0])
+00119                             match = 1;
+00120                     \} \textcolor{keywordflow}{else} \{
+00121                         \textcolor{keywordflow}{if} (tolower((\textcolor{keywordtype}{int})pattern[0]) == tolower((\textcolor{keywordtype}{int})string[0]))
+00122                             match = 1;
+00123                     \}
+00124                 \}
+00125                 pattern++;
+00126                 patternLen--;
+00127             \}
+00128             \textcolor{keywordflow}{if} (\textcolor{keyword}{not})
+00129                 match = !match;
+00130             \textcolor{keywordflow}{if} (!match)
+00131                 \textcolor{keywordflow}{return} 0; \textcolor{comment}{/* no match */}
+00132             string++;
+00133             stringLen--;
+00134             \textcolor{keywordflow}{break};
+00135         \}
+00136         \textcolor{keywordflow}{case} \textcolor{stringliteral}{'\(\backslash\)\(\backslash\)'}:
+00137             \textcolor{keywordflow}{if} (patternLen >= 2) \{
+00138                 pattern++;
+00139                 patternLen--;
+00140             \}
+00141             \textcolor{comment}{/* fall through */}
+00142         \textcolor{keywordflow}{default}:
+00143             \textcolor{keywordflow}{if} (!nocase) \{
+00144                 \textcolor{keywordflow}{if} (pattern[0] != string[0])
+00145                     \textcolor{keywordflow}{return} 0; \textcolor{comment}{/* no match */}
+00146             \} \textcolor{keywordflow}{else} \{
+00147                 \textcolor{keywordflow}{if} (tolower((\textcolor{keywordtype}{int})pattern[0]) != tolower((\textcolor{keywordtype}{int})string[0]))
+00148                     \textcolor{keywordflow}{return} 0; \textcolor{comment}{/* no match */}
+00149             \}
+00150             string++;
+00151             stringLen--;
+00152             \textcolor{keywordflow}{break};
+00153         \}
+00154         pattern++;
+00155         patternLen--;
+00156         \textcolor{keywordflow}{if} (stringLen == 0) \{
+00157             \textcolor{keywordflow}{while}(*pattern == \textcolor{stringliteral}{'*'}) \{
+00158                 pattern++;
+00159                 patternLen--;
+00160             \}
+00161             \textcolor{keywordflow}{break};
+00162         \}
+00163     \}
+00164     \textcolor{keywordflow}{if} (patternLen == 0 && stringLen == 0)
+00165         \textcolor{keywordflow}{return} 1;
+00166     \textcolor{keywordflow}{return} 0;
+00167 \}
+00168 
+00169 \textcolor{keywordtype}{int} stringmatch(\textcolor{keyword}{const} \textcolor{keywordtype}{char} *pattern, \textcolor{keyword}{const} \textcolor{keywordtype}{char} *string, \textcolor{keywordtype}{int} nocase) \{
+00170     \textcolor{keywordflow}{return} stringmatchlen(pattern,strlen(pattern),string,strlen(string),nocase);
+00171 \}
+00172 
+00173 \textcolor{comment}{/* Convert a string representing an amount of memory into the number of}
+00174 \textcolor{comment}{ * bytes, so for instance memtoll("1Gb") will return 1073741824 that is}
+00175 \textcolor{comment}{ * (1024*1024*1024).}
+00176 \textcolor{comment}{ *}
+00177 \textcolor{comment}{ * On parsing error, if *err is not NULL, it's set to 1, otherwise it's}
+00178 \textcolor{comment}{ * set to 0. On error the function return value is 0, regardless of the}
+00179 \textcolor{comment}{ * fact 'err' is NULL or not. */}
+00180 \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} memtoll(\textcolor{keyword}{const} \textcolor{keywordtype}{char} *p, \textcolor{keywordtype}{int} *err) \{
+00181     \textcolor{keyword}{const} \textcolor{keywordtype}{char} *u;
+00182     \textcolor{keywordtype}{char} buf[128];
+00183     \textcolor{keywordtype}{long} mul; \textcolor{comment}{/* unit multiplier */}
+00184     \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} val;
+00185     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{int} digits;
+00186 
+00187     \textcolor{keywordflow}{if} (err) *err = 0;
+00188 
+00189     \textcolor{comment}{/* Search the first non digit character. */}
+00190     u = p;
+00191     \textcolor{keywordflow}{if} (*u == \textcolor{stringliteral}{'-'}) u++;
+00192     \textcolor{keywordflow}{while}(*u && isdigit(*u)) u++;
+00193     \textcolor{keywordflow}{if} (*u == \textcolor{stringliteral}{'\(\backslash\)0'} || !strcasecmp(u,\textcolor{stringliteral}{"b"})) \{
+00194         mul = 1;
+00195     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcasecmp(u,\textcolor{stringliteral}{"k"})) \{
+00196         mul = 1000;
+00197     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcasecmp(u,\textcolor{stringliteral}{"kb"})) \{
+00198         mul = 1024;
+00199     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcasecmp(u,\textcolor{stringliteral}{"m"})) \{
+00200         mul = 1000*1000;
+00201     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcasecmp(u,\textcolor{stringliteral}{"mb"})) \{
+00202         mul = 1024*1024;
+00203     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcasecmp(u,\textcolor{stringliteral}{"g"})) \{
+00204         mul = 1000L*1000*1000;
+00205     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcasecmp(u,\textcolor{stringliteral}{"gb"})) \{
+00206         mul = 1024L*1024*1024;
+00207     \} \textcolor{keywordflow}{else} \{
+00208         \textcolor{keywordflow}{if} (err) *err = 1;
+00209         \textcolor{keywordflow}{return} 0;
+00210     \}
+00211 
+00212     \textcolor{comment}{/* Copy the digits into a buffer, we'll use strtoll() to convert}
+00213 \textcolor{comment}{     * the digit (without the unit) into a number. */}
+00214     digits = u-p;
+00215     \textcolor{keywordflow}{if} (digits >= \textcolor{keyword}{sizeof}(buf)) \{
+00216         \textcolor{keywordflow}{if} (err) *err = 1;
+00217         \textcolor{keywordflow}{return} 0;
+00218     \}
+00219     memcpy(buf,p,digits);
+00220     buf[digits] = \textcolor{stringliteral}{'\(\backslash\)0'};
+00221 
+00222     \textcolor{keywordtype}{char} *endptr;
+00223     errno = 0;
+00224     val = strtoll(buf,&endptr,10);
+00225     \textcolor{keywordflow}{if} ((val == 0 && errno == EINVAL) || *endptr != \textcolor{stringliteral}{'\(\backslash\)0'}) \{
+00226         \textcolor{keywordflow}{if} (err) *err = 1;
+00227         \textcolor{keywordflow}{return} 0;
+00228     \}
+00229     \textcolor{keywordflow}{return} val*mul;
+00230 \}
+00231 
+00232 \textcolor{comment}{/* Return the number of digits of 'v' when converted to string in radix 10.}
+00233 \textcolor{comment}{ * See ll2string() for more information. */}
+00234 uint32\_t digits10(uint64\_t v) \{
+00235     \textcolor{keywordflow}{if} (v < 10) \textcolor{keywordflow}{return} 1;
+00236     \textcolor{keywordflow}{if} (v < 100) \textcolor{keywordflow}{return} 2;
+00237     \textcolor{keywordflow}{if} (v < 1000) \textcolor{keywordflow}{return} 3;
+00238     \textcolor{keywordflow}{if} (v < 1000000000000UL) \{
+00239         \textcolor{keywordflow}{if} (v < 100000000UL) \{
+00240             \textcolor{keywordflow}{if} (v < 1000000) \{
+00241                 \textcolor{keywordflow}{if} (v < 10000) \textcolor{keywordflow}{return} 4;
+00242                 \textcolor{keywordflow}{return} 5 + (v >= 100000);
+00243             \}
+00244             \textcolor{keywordflow}{return} 7 + (v >= 10000000UL);
+00245         \}
+00246         \textcolor{keywordflow}{if} (v < 10000000000UL) \{
+00247             \textcolor{keywordflow}{return} 9 + (v >= 1000000000UL);
+00248         \}
+00249         \textcolor{keywordflow}{return} 11 + (v >= 100000000000UL);
+00250     \}
+00251     \textcolor{keywordflow}{return} 12 + digits10(v / 1000000000000UL);
+00252 \}
+00253 
+00254 \textcolor{comment}{/* Like digits10() but for signed values. */}
+00255 uint32\_t sdigits10(int64\_t v) \{
+00256     \textcolor{keywordflow}{if} (v < 0) \{
+00257         \textcolor{comment}{/* Abs value of LLONG\_MIN requires special handling. */}
+00258         uint64\_t uv = (v != LLONG\_MIN) ?
+00259                       (uint64\_t)-v : ((uint64\_t) LLONG\_MAX)+1;
+00260         \textcolor{keywordflow}{return} digits10(uv)+1; \textcolor{comment}{/* +1 for the minus. */}
+00261     \} \textcolor{keywordflow}{else} \{
+00262         \textcolor{keywordflow}{return} digits10(v);
+00263     \}
+00264 \}
+00265 
+00266 \textcolor{comment}{/* Convert a long long into a string. Returns the number of}
+00267 \textcolor{comment}{ * characters needed to represent the number.}
+00268 \textcolor{comment}{ * If the buffer is not big enough to store the string, 0 is returned.}
+00269 \textcolor{comment}{ *}
+00270 \textcolor{comment}{ * Based on the following article (that apparently does not provide a}
+00271 \textcolor{comment}{ * novel approach but only publicizes an already used technique):}
+00272 \textcolor{comment}{ *}
+00273 \textcolor{comment}{ * https://www.facebook.com/notes/facebook-engineering/three-optimization-tips-for-c/10151361643253920}
+00274 \textcolor{comment}{ *}
+00275 \textcolor{comment}{ * Modified in order to handle signed integers since the original code was}
+00276 \textcolor{comment}{ * designed for unsigned integers. */}
+00277 \textcolor{keywordtype}{int} ll2string(\textcolor{keywordtype}{char} *dst, size\_t dstlen, \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} svalue) \{
+00278     \textcolor{keyword}{static} \textcolor{keyword}{const} \textcolor{keywordtype}{char} digits[201] =
+00279         \textcolor{stringliteral}{"0001020304050607080910111213141516171819"}
+00280         \textcolor{stringliteral}{"2021222324252627282930313233343536373839"}
+00281         \textcolor{stringliteral}{"4041424344454647484950515253545556575859"}
+00282         \textcolor{stringliteral}{"6061626364656667686970717273747576777879"}
+00283         \textcolor{stringliteral}{"8081828384858687888990919293949596979899"};
+00284     \textcolor{keywordtype}{int} negative;
+00285     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} value;
+00286 
+00287     \textcolor{comment}{/* The main loop works with 64bit unsigned integers for simplicity, so}
+00288 \textcolor{comment}{     * we convert the number here and remember if it is negative. */}
+00289     \textcolor{keywordflow}{if} (svalue < 0) \{
+00290         \textcolor{keywordflow}{if} (svalue != LLONG\_MIN) \{
+00291             value = -svalue;
+00292         \} \textcolor{keywordflow}{else} \{
+00293             value = ((\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} \textcolor{keywordtype}{long}) LLONG\_MAX)+1;
+00294         \}
+00295         negative = 1;
+00296     \} \textcolor{keywordflow}{else} \{
+00297         value = svalue;
+00298         negative = 0;
+00299     \}
+00300 
+00301     \textcolor{comment}{/* Check length. */}
+00302     uint32\_t \textcolor{keyword}{const} length = digits10(value)+negative;
+00303     \textcolor{keywordflow}{if} (length >= dstlen) \textcolor{keywordflow}{return} 0;
+00304 
+00305     \textcolor{comment}{/* Null term. */}
+00306     uint32\_t next = length;
+00307     dst[next] = \textcolor{stringliteral}{'\(\backslash\)0'};
+00308     next--;
+00309     \textcolor{keywordflow}{while} (value >= 100) \{
+00310         \textcolor{keywordtype}{int} \textcolor{keyword}{const} i = (value % 100) * 2;
+00311         value /= 100;
+00312         dst[next] = digits[i + 1];
+00313         dst[next - 1] = digits[i];
+00314         next -= 2;
+00315     \}
+00316 
+00317     \textcolor{comment}{/* Handle last 1-2 digits. */}
+00318     \textcolor{keywordflow}{if} (value < 10) \{
+00319         dst[next] = \textcolor{stringliteral}{'0'} + (uint32\_t) value;
+00320     \} \textcolor{keywordflow}{else} \{
+00321         \textcolor{keywordtype}{int} i = (uint32\_t) value * 2;
+00322         dst[next] = digits[i + 1];
+00323         dst[next - 1] = digits[i];
+00324     \}
+00325 
+00326     \textcolor{comment}{/* Add sign. */}
+00327     \textcolor{keywordflow}{if} (negative) dst[0] = \textcolor{stringliteral}{'-'};
+00328     \textcolor{keywordflow}{return} length;
+00329 \}
+00330 
+00331 \textcolor{comment}{/* Convert a string into a long long. Returns 1 if the string could be parsed}
+00332 \textcolor{comment}{ * into a (non-overflowing) long long, 0 otherwise. The value will be set to}
+00333 \textcolor{comment}{ * the parsed value when appropriate.}
+00334 \textcolor{comment}{ *}
+00335 \textcolor{comment}{ * Note that this function demands that the string strictly represents}
+00336 \textcolor{comment}{ * a long long: no spaces or other characters before or after the string}
+00337 \textcolor{comment}{ * representing the number are accepted, nor zeroes at the start if not}
+00338 \textcolor{comment}{ * for the string "0" representing the zero number.}
+00339 \textcolor{comment}{ *}
+00340 \textcolor{comment}{ * Because of its strictness, it is safe to use this function to check if}
+00341 \textcolor{comment}{ * you can convert a string into a long long, and obtain back the string}
+00342 \textcolor{comment}{ * from the number without any loss in the string representation. */}
+00343 \textcolor{keywordtype}{int} string2ll(\textcolor{keyword}{const} \textcolor{keywordtype}{char} *s, size\_t slen, \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} *value) \{
+00344     \textcolor{keyword}{const} \textcolor{keywordtype}{char} *p = s;
+00345     size\_t plen = 0;
+00346     \textcolor{keywordtype}{int} negative = 0;
+00347     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} v;
+00348 
+00349     \textcolor{keywordflow}{if} (plen == slen)
+00350         \textcolor{keywordflow}{return} 0;
+00351 
+00352     \textcolor{comment}{/* Special case: first and only digit is 0. */}
+00353     \textcolor{keywordflow}{if} (slen == 1 && p[0] == \textcolor{stringliteral}{'0'}) \{
+00354         \textcolor{keywordflow}{if} (value != NULL) *value = 0;
+00355         \textcolor{keywordflow}{return} 1;
+00356     \}
+00357 
+00358     \textcolor{keywordflow}{if} (p[0] == \textcolor{stringliteral}{'-'}) \{
+00359         negative = 1;
+00360         p++; plen++;
+00361 
+00362         \textcolor{comment}{/* Abort on only a negative sign. */}
+00363         \textcolor{keywordflow}{if} (plen == slen)
+00364             \textcolor{keywordflow}{return} 0;
+00365     \}
+00366 
+00367     \textcolor{comment}{/* First digit should be 1-9, otherwise the string should just be 0. */}
+00368     \textcolor{keywordflow}{if} (p[0] >= \textcolor{stringliteral}{'1'} && p[0] <= \textcolor{stringliteral}{'9'}) \{
+00369         v = p[0]-\textcolor{stringliteral}{'0'};
+00370         p++; plen++;
+00371     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (p[0] == \textcolor{stringliteral}{'0'} && slen == 1) \{
+00372         *value = 0;
+00373         \textcolor{keywordflow}{return} 1;
+00374     \} \textcolor{keywordflow}{else} \{
+00375         \textcolor{keywordflow}{return} 0;
+00376     \}
+00377 
+00378     \textcolor{keywordflow}{while} (plen < slen && p[0] >= \textcolor{stringliteral}{'0'} && p[0] <= \textcolor{stringliteral}{'9'}) \{
+00379         \textcolor{keywordflow}{if} (v > (ULLONG\_MAX / 10)) \textcolor{comment}{/* Overflow. */}
+00380             \textcolor{keywordflow}{return} 0;
+00381         v *= 10;
+00382 
+00383         \textcolor{keywordflow}{if} (v > (ULLONG\_MAX - (p[0]-\textcolor{stringliteral}{'0'}))) \textcolor{comment}{/* Overflow. */}
+00384             \textcolor{keywordflow}{return} 0;
+00385         v += p[0]-\textcolor{stringliteral}{'0'};
+00386 
+00387         p++; plen++;
+00388     \}
+00389 
+00390     \textcolor{comment}{/* Return if not all bytes were used. */}
+00391     \textcolor{keywordflow}{if} (plen < slen)
+00392         \textcolor{keywordflow}{return} 0;
+00393 
+00394     \textcolor{keywordflow}{if} (negative) \{
+00395         \textcolor{keywordflow}{if} (v > ((\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} \textcolor{keywordtype}{long})(-(LLONG\_MIN+1))+1)) \textcolor{comment}{/* Overflow. */}
+00396             \textcolor{keywordflow}{return} 0;
+00397         \textcolor{keywordflow}{if} (value != NULL) *value = -v;
+00398     \} \textcolor{keywordflow}{else} \{
+00399         \textcolor{keywordflow}{if} (v > LLONG\_MAX) \textcolor{comment}{/* Overflow. */}
+00400             \textcolor{keywordflow}{return} 0;
+00401         \textcolor{keywordflow}{if} (value != NULL) *value = v;
+00402     \}
+00403     \textcolor{keywordflow}{return} 1;
+00404 \}
+00405 
+00406 \textcolor{comment}{/* Convert a string into a long. Returns 1 if the string could be parsed into a}
+00407 \textcolor{comment}{ * (non-overflowing) long, 0 otherwise. The value will be set to the parsed}
+00408 \textcolor{comment}{ * value when appropriate. */}
+00409 \textcolor{keywordtype}{int} string2l(\textcolor{keyword}{const} \textcolor{keywordtype}{char} *s, size\_t slen, \textcolor{keywordtype}{long} *lval) \{
+00410     \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} llval;
+00411 
+00412     \textcolor{keywordflow}{if} (!string2ll(s,slen,&llval))
+00413         \textcolor{keywordflow}{return} 0;
+00414 
+00415     \textcolor{keywordflow}{if} (llval < LONG\_MIN || llval > LONG\_MAX)
+00416         \textcolor{keywordflow}{return} 0;
+00417 
+00418     *lval = (\textcolor{keywordtype}{long})llval;
+00419     \textcolor{keywordflow}{return} 1;
+00420 \}
+00421 
+00422 \textcolor{comment}{/* Convert a string into a double. Returns 1 if the string could be parsed}
+00423 \textcolor{comment}{ * into a (non-overflowing) double, 0 otherwise. The value will be set to}
+00424 \textcolor{comment}{ * the parsed value when appropriate.}
+00425 \textcolor{comment}{ *}
+00426 \textcolor{comment}{ * Note that this function demands that the string strictly represents}
+00427 \textcolor{comment}{ * a double: no spaces or other characters before or after the string}
+00428 \textcolor{comment}{ * representing the number are accepted. */}
+00429 \textcolor{keywordtype}{int} string2ld(\textcolor{keyword}{const} \textcolor{keywordtype}{char} *s, size\_t slen, \textcolor{keywordtype}{long} \textcolor{keywordtype}{double} *dp) \{
+00430     \textcolor{keywordtype}{char} buf[256];
+00431     \textcolor{keywordtype}{long} \textcolor{keywordtype}{double} value;
+00432     \textcolor{keywordtype}{char} *eptr;
+00433 
+00434     \textcolor{keywordflow}{if} (slen >= \textcolor{keyword}{sizeof}(buf)) \textcolor{keywordflow}{return} 0;
+00435     memcpy(buf,s,slen);
+00436     buf[slen] = \textcolor{stringliteral}{'\(\backslash\)0'};
+00437 
+00438     errno = 0;
+00439     value = strtold(buf, &eptr);
+00440     \textcolor{keywordflow}{if} (isspace(buf[0]) || eptr[0] != \textcolor{stringliteral}{'\(\backslash\)0'} ||
+00441         (errno == ERANGE &&
+00442             (value == HUGE\_VAL || value == -HUGE\_VAL || value == 0)) ||
+00443         errno == EINVAL ||
+00444         isnan(value))
+00445         \textcolor{keywordflow}{return} 0;
+00446 
+00447     \textcolor{keywordflow}{if} (dp) *dp = value;
+00448     \textcolor{keywordflow}{return} 1;
+00449 \}
+00450 
+00451 \textcolor{comment}{/* Convert a double to a string representation. Returns the number of bytes}
+00452 \textcolor{comment}{ * required. The representation should always be parsable by strtod(3).}
+00453 \textcolor{comment}{ * This function does not support human-friendly formatting like ld2string}
+00454 \textcolor{comment}{ * does. It is intented mainly to be used inside t\_zset.c when writing scores}
+00455 \textcolor{comment}{ * into a ziplist representing a sorted set. */}
+00456 \textcolor{keywordtype}{int} d2string(\textcolor{keywordtype}{char} *buf, size\_t len, \textcolor{keywordtype}{double} value) \{
+00457     \textcolor{keywordflow}{if} (isnan(value)) \{
+00458         len = snprintf(buf,len,\textcolor{stringliteral}{"nan"});
+00459     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (isinf(value)) \{
+00460         \textcolor{keywordflow}{if} (value < 0)
+00461             len = snprintf(buf,len,\textcolor{stringliteral}{"-inf"});
+00462         \textcolor{keywordflow}{else}
+00463             len = snprintf(buf,len,\textcolor{stringliteral}{"inf"});
+00464     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (value == 0) \{
+00465         \textcolor{comment}{/* See: http://en.wikipedia.org/wiki/Signed\_zero, "Comparisons". */}
+00466         \textcolor{keywordflow}{if} (1.0/value < 0)
+00467             len = snprintf(buf,len,\textcolor{stringliteral}{"-0"});
+00468         \textcolor{keywordflow}{else}
+00469             len = snprintf(buf,len,\textcolor{stringliteral}{"0"});
+00470     \} \textcolor{keywordflow}{else} \{
+00471 \textcolor{preprocessor}{#}\textcolor{preprocessor}{if} \textcolor{preprocessor}{(}\textcolor{preprocessor}{DBL\_MANT\_DIG} \textcolor{preprocessor}{>=} 52\textcolor{preprocessor}{)} \textcolor{preprocessor}{&&} \textcolor{preprocessor}{(}LLONG\_MAX \textcolor{preprocessor}{==} 0x7fffffffffffffffLL\textcolor{preprocessor}{)}
+00472         \textcolor{comment}{/* Check if the float is in a safe range to be casted into a}
+00473 \textcolor{comment}{         * long long. We are assuming that long long is 64 bit here.}
+00474 \textcolor{comment}{         * Also we are assuming that there are no implementations around where}
+00475 \textcolor{comment}{         * double has precision < 52 bit.}
+00476 \textcolor{comment}{         *}
+00477 \textcolor{comment}{         * Under this assumptions we test if a double is inside an interval}
+00478 \textcolor{comment}{         * where casting to long long is safe. Then using two castings we}
+00479 \textcolor{comment}{         * make sure the decimal part is zero. If all this is true we use}
+00480 \textcolor{comment}{         * integer printing function that is much faster. */}
+00481         \textcolor{keywordtype}{double} min = -4503599627370495; \textcolor{comment}{/* (2^52)-1 */}
+00482         \textcolor{keywordtype}{double} max = 4503599627370496; \textcolor{comment}{/* -(2^52) */}
+00483         \textcolor{keywordflow}{if} (value > min && value < max && value == ((\textcolor{keywordtype}{double})((\textcolor{keywordtype}{long} \textcolor{keywordtype}{long})value)))
+00484             len = ll2string(buf,len,(\textcolor{keywordtype}{long} \textcolor{keywordtype}{long})value);
+00485         \textcolor{keywordflow}{else}
+00486 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00487             len = snprintf(buf,len,\textcolor{stringliteral}{"%.17g"},value);
+00488     \}
+00489 
+00490     \textcolor{keywordflow}{return} len;
+00491 \}
+00492 
+00493 \textcolor{comment}{/* Convert a long double into a string. If humanfriendly is non-zero}
+00494 \textcolor{comment}{ * it does not use exponential format and trims trailing zeroes at the end,}
+00495 \textcolor{comment}{ * however this results in loss of precision. Otherwise exp format is used}
+00496 \textcolor{comment}{ * and the output of snprintf() is not modified.}
+00497 \textcolor{comment}{ *}
+00498 \textcolor{comment}{ * The function returns the length of the string or zero if there was not}
+00499 \textcolor{comment}{ * enough buffer room to store it. */}
+00500 \textcolor{keywordtype}{int} ld2string(\textcolor{keywordtype}{char} *buf, size\_t len, \textcolor{keywordtype}{long} \textcolor{keywordtype}{double} value, \textcolor{keywordtype}{int} humanfriendly) \{
+00501     size\_t l;
+00502 
+00503     \textcolor{keywordflow}{if} (isinf(value)) \{
+00504         \textcolor{comment}{/* Libc in odd systems (Hi Solaris!) will format infinite in a}
+00505 \textcolor{comment}{         * different way, so better to handle it in an explicit way. */}
+00506         \textcolor{keywordflow}{if} (len < 5) \textcolor{keywordflow}{return} 0; \textcolor{comment}{/* No room. 5 is "-inf\(\backslash\)0" */}
+00507         \textcolor{keywordflow}{if} (value > 0) \{
+00508             memcpy(buf,\textcolor{stringliteral}{"inf"},3);
+00509             l = 3;
+00510         \} \textcolor{keywordflow}{else} \{
+00511             memcpy(buf,\textcolor{stringliteral}{"-inf"},4);
+00512             l = 4;
+00513         \}
+00514     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (humanfriendly) \{
+00515         \textcolor{comment}{/* We use 17 digits precision since with 128 bit floats that precision}
+00516 \textcolor{comment}{         * after rounding is able to represent most small decimal numbers in a}
+00517 \textcolor{comment}{         * way that is "non surprising" for the user (that is, most small}
+00518 \textcolor{comment}{         * decimal numbers will be represented in a way that when converted}
+00519 \textcolor{comment}{         * back into a string are exactly the same as what the user typed.) */}
+00520         l = snprintf(buf,len,\textcolor{stringliteral}{"%.17Lf"}, value);
+00521         \textcolor{keywordflow}{if} (l+1 > len) \textcolor{keywordflow}{return} 0; \textcolor{comment}{/* No room. */}
+00522         \textcolor{comment}{/* Now remove trailing zeroes after the '.' */}
+00523         \textcolor{keywordflow}{if} (strchr(buf,\textcolor{stringliteral}{'.'}) != NULL) \{
+00524             \textcolor{keywordtype}{char} *p = buf+l-1;
+00525             \textcolor{keywordflow}{while}(*p == \textcolor{stringliteral}{'0'}) \{
+00526                 p--;
+00527                 l--;
+00528             \}
+00529             \textcolor{keywordflow}{if} (*p == \textcolor{stringliteral}{'.'}) l--;
+00530         \}
+00531     \} \textcolor{keywordflow}{else} \{
+00532         l = snprintf(buf,len,\textcolor{stringliteral}{"%.17Lg"}, value);
+00533         \textcolor{keywordflow}{if} (l+1 > len) \textcolor{keywordflow}{return} 0; \textcolor{comment}{/* No room. */}
+00534     \}
+00535     buf[l] = \textcolor{stringliteral}{'\(\backslash\)0'};
+00536     \textcolor{keywordflow}{return} l;
+00537 \}
+00538 
+00539 \textcolor{comment}{/* Generate the Redis "Run ID", a SHA1-sized random number that identifies a}
+00540 \textcolor{comment}{ * given execution of Redis, so that if you are talking with an instance}
+00541 \textcolor{comment}{ * having run\_id == A, and you reconnect and it has run\_id == B, you can be}
+00542 \textcolor{comment}{ * sure that it is either a different instance or it was restarted. */}
+00543 \textcolor{keywordtype}{void} getRandomHexChars(\textcolor{keywordtype}{char} *p, \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{int} len) \{
+00544     \textcolor{keywordtype}{char} *charset = \textcolor{stringliteral}{"0123456789abcdef"};
+00545     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{int} j;
+00546 
+00547     \textcolor{comment}{/* Global state. */}
+00548     \textcolor{keyword}{static} \textcolor{keywordtype}{int} seed\_initialized = 0;
+00549     \textcolor{keyword}{static} \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} seed[20]; \textcolor{comment}{/* The SHA1 seed, from /dev/urandom. */}
+00550     \textcolor{keyword}{static} uint64\_t counter = 0; \textcolor{comment}{/* The counter we hash with the seed. */}
+00551 
+00552     \textcolor{keywordflow}{if} (!seed\_initialized) \{
+00553         \textcolor{comment}{/* Initialize a seed and use SHA1 in counter mode, where we hash}
+00554 \textcolor{comment}{         * the same seed with a progressive counter. For the goals of this}
+00555 \textcolor{comment}{         * function we just need non-colliding strings, there are no}
+00556 \textcolor{comment}{         * cryptographic security needs. */}
+00557         FILE *fp = fopen(\textcolor{stringliteral}{"/dev/urandom"},\textcolor{stringliteral}{"r"});
+00558         \textcolor{keywordflow}{if} (fp && fread(seed,\textcolor{keyword}{sizeof}(seed),1,fp) == 1)
+00559             seed\_initialized = 1;
+00560         \textcolor{keywordflow}{if} (fp) fclose(fp);
+00561     \}
+00562 
+00563     \textcolor{keywordflow}{if} (seed\_initialized) \{
+00564         \textcolor{keywordflow}{while}(len) \{
+00565             \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} digest[20];
+00566             SHA1\_CTX ctx;
+00567             \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{int} copylen = len > 20 ? 20 : len;
+00568 
+00569             SHA1Init(&ctx);
+00570             SHA1Update(&ctx, seed, \textcolor{keyword}{sizeof}(seed));
+00571             SHA1Update(&ctx, (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char}*)&counter,\textcolor{keyword}{sizeof}(counter));
+00572             SHA1Final(digest, &ctx);
+00573             counter++;
+00574 
+00575             memcpy(p,digest,copylen);
+00576             \textcolor{comment}{/* Convert to hex digits. */}
+00577             \textcolor{keywordflow}{for} (j = 0; j < copylen; j++) p[j] = charset[p[j] & 0x0F];
+00578             len -= copylen;
+00579             p += copylen;
+00580         \}
+00581     \} \textcolor{keywordflow}{else} \{
+00582         \textcolor{comment}{/* If we can't read from /dev/urandom, do some reasonable effort}
+00583 \textcolor{comment}{         * in order to create some entropy, since this function is used to}
+00584 \textcolor{comment}{         * generate run\_id and cluster instance IDs */}
+00585         \textcolor{keywordtype}{char} *x = p;
+00586         \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{int} l = len;
+00587         \textcolor{keyword}{struct} timeval tv;
+00588         pid\_t pid = getpid();
+00589 
+00590         \textcolor{comment}{/* Use time and PID to fill the initial array. */}
+00591         gettimeofday(&tv,NULL);
+00592         \textcolor{keywordflow}{if} (l >= \textcolor{keyword}{sizeof}(tv.tv\_usec)) \{
+00593             memcpy(x,&tv.tv\_usec,\textcolor{keyword}{sizeof}(tv.tv\_usec));
+00594             l -= \textcolor{keyword}{sizeof}(tv.tv\_usec);
+00595             x += \textcolor{keyword}{sizeof}(tv.tv\_usec);
+00596         \}
+00597         \textcolor{keywordflow}{if} (l >= \textcolor{keyword}{sizeof}(tv.tv\_sec)) \{
+00598             memcpy(x,&tv.tv\_sec,\textcolor{keyword}{sizeof}(tv.tv\_sec));
+00599             l -= \textcolor{keyword}{sizeof}(tv.tv\_sec);
+00600             x += \textcolor{keyword}{sizeof}(tv.tv\_sec);
+00601         \}
+00602         \textcolor{keywordflow}{if} (l >= \textcolor{keyword}{sizeof}(pid)) \{
+00603             memcpy(x,&pid,\textcolor{keyword}{sizeof}(pid));
+00604             l -= \textcolor{keyword}{sizeof}(pid);
+00605             x += \textcolor{keyword}{sizeof}(pid);
+00606         \}
+00607         \textcolor{comment}{/* Finally xor it with rand() output, that was already seeded with}
+00608 \textcolor{comment}{         * time() at startup, and convert to hex digits. */}
+00609         \textcolor{keywordflow}{for} (j = 0; j < len; j++) \{
+00610             p[j] ^= rand();
+00611             p[j] = charset[p[j] & 0x0F];
+00612         \}
+00613     \}
+00614 \}
+00615 
+00616 \textcolor{comment}{/* Given the filename, return the absolute path as an SDS string, or NULL}
+00617 \textcolor{comment}{ * if it fails for some reason. Note that "filename" may be an absolute path}
+00618 \textcolor{comment}{ * already, this will be detected and handled correctly.}
+00619 \textcolor{comment}{ *}
+00620 \textcolor{comment}{ * The function does not try to normalize everything, but only the obvious}
+00621 \textcolor{comment}{ * case of one or more "../" appearning at the start of "filename"}
+00622 \textcolor{comment}{ * relative path. */}
+00623 sds getAbsolutePath(\textcolor{keywordtype}{char} *filename) \{
+00624     \textcolor{keywordtype}{char} cwd[1024];
+00625     sds abspath;
+00626     sds relpath = sdsnew(filename);
+00627 
+00628     relpath = sdstrim(relpath,\textcolor{stringliteral}{" \(\backslash\)r\(\backslash\)n\(\backslash\)t"});
+00629     \textcolor{keywordflow}{if} (relpath[0] == \textcolor{stringliteral}{'/'}) \textcolor{keywordflow}{return} relpath; \textcolor{comment}{/* Path is already absolute. */}
+00630 
+00631     \textcolor{comment}{/* If path is relative, join cwd and relative path. */}
+00632     \textcolor{keywordflow}{if} (getcwd(cwd,\textcolor{keyword}{sizeof}(cwd)) == NULL) \{
+00633         sdsfree(relpath);
+00634         \textcolor{keywordflow}{return} NULL;
+00635     \}
+00636     abspath = sdsnew(cwd);
+00637     \textcolor{keywordflow}{if} (sdslen(abspath) && abspath[sdslen(abspath)-1] != \textcolor{stringliteral}{'/'})
+00638         abspath = sdscat(abspath,\textcolor{stringliteral}{"/"});
+00639 
+00640     \textcolor{comment}{/* At this point we have the current path always ending with "/", and}
+00641 \textcolor{comment}{     * the trimmed relative path. Try to normalize the obvious case of}
+00642 \textcolor{comment}{     * trailing ../ elements at the start of the path.}
+00643 \textcolor{comment}{     *}
+00644 \textcolor{comment}{     * For every "../" we find in the filename, we remove it and also remove}
+00645 \textcolor{comment}{     * the last element of the cwd, unless the current cwd is "/". */}
+00646     \textcolor{keywordflow}{while} (sdslen(relpath) >= 3 &&
+00647            relpath[0] == \textcolor{stringliteral}{'.'} && relpath[1] == \textcolor{stringliteral}{'.'} && relpath[2] == \textcolor{stringliteral}{'/'})
+00648     \{
+00649         sdsrange(relpath,3,-1);
+00650         \textcolor{keywordflow}{if} (sdslen(abspath) > 1) \{
+00651             \textcolor{keywordtype}{char} *p = abspath + sdslen(abspath)-2;
+00652             \textcolor{keywordtype}{int} trimlen = 1;
+00653 
+00654             \textcolor{keywordflow}{while}(*p != \textcolor{stringliteral}{'/'}) \{
+00655                 p--;
+00656                 trimlen++;
+00657             \}
+00658             sdsrange(abspath,0,-(trimlen+1));
+00659         \}
+00660     \}
+00661 
+00662     \textcolor{comment}{/* Finally glue the two parts together. */}
+00663     abspath = sdscatsds(abspath,relpath);
+00664     sdsfree(relpath);
+00665     \textcolor{keywordflow}{return} abspath;
+00666 \}
+00667 
+00668 \textcolor{comment}{/* Return true if the specified path is just a file basename without any}
+00669 \textcolor{comment}{ * relative or absolute path. This function just checks that no / or \(\backslash\)}
+00670 \textcolor{comment}{ * character exists inside the specified path, that's enough in the}
+00671 \textcolor{comment}{ * environments where Redis runs. */}
+00672 \textcolor{keywordtype}{int} pathIsBaseName(\textcolor{keywordtype}{char} *path) \{
+00673     \textcolor{keywordflow}{return} strchr(path,\textcolor{stringliteral}{'/'}) == NULL && strchr(path,\textcolor{stringliteral}{'\(\backslash\)\(\backslash\)'}) == NULL;
+00674 \}
+00675 
+00676 \textcolor{preprocessor}{#}\textcolor{preprocessor}{ifdef} \textcolor{preprocessor}{REDIS\_TEST}
+00677 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{assert}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00678 
+00679 \textcolor{keyword}{static} \textcolor{keywordtype}{void} test\_string2ll(\textcolor{keywordtype}{void}) \{
+00680     \textcolor{keywordtype}{char} buf[32];
+00681     \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} v;
+00682 
+00683     \textcolor{comment}{/* May not start with +. */}
+00684     strcpy(buf,\textcolor{stringliteral}{"+1"});
+00685     assert(string2ll(buf,strlen(buf),&v) == 0);
+00686 
+00687     \textcolor{comment}{/* Leading space. */}
+00688     strcpy(buf,\textcolor{stringliteral}{" 1"});
+00689     assert(string2ll(buf,strlen(buf),&v) == 0);
+00690 
+00691     \textcolor{comment}{/* Trailing space. */}
+00692     strcpy(buf,\textcolor{stringliteral}{"1 "});
+00693     assert(string2ll(buf,strlen(buf),&v) == 0);
+00694 
+00695     \textcolor{comment}{/* May not start with 0. */}
+00696     strcpy(buf,\textcolor{stringliteral}{"01"});
+00697     assert(string2ll(buf,strlen(buf),&v) == 0);
+00698 
+00699     strcpy(buf,\textcolor{stringliteral}{"-1"});
+00700     assert(string2ll(buf,strlen(buf),&v) == 1);
+00701     assert(v == -1);
+00702 
+00703     strcpy(buf,\textcolor{stringliteral}{"0"});
+00704     assert(string2ll(buf,strlen(buf),&v) == 1);
+00705     assert(v == 0);
+00706 
+00707     strcpy(buf,\textcolor{stringliteral}{"1"});
+00708     assert(string2ll(buf,strlen(buf),&v) == 1);
+00709     assert(v == 1);
+00710 
+00711     strcpy(buf,\textcolor{stringliteral}{"99"});
+00712     assert(string2ll(buf,strlen(buf),&v) == 1);
+00713     assert(v == 99);
+00714 
+00715     strcpy(buf,\textcolor{stringliteral}{"-99"});
+00716     assert(string2ll(buf,strlen(buf),&v) == 1);
+00717     assert(v == -99);
+00718 
+00719     strcpy(buf,\textcolor{stringliteral}{"-9223372036854775808"});
+00720     assert(string2ll(buf,strlen(buf),&v) == 1);
+00721     assert(v == LLONG\_MIN);
+00722 
+00723     strcpy(buf,\textcolor{stringliteral}{"-9223372036854775809"}); \textcolor{comment}{/* overflow */}
+00724     assert(string2ll(buf,strlen(buf),&v) == 0);
+00725 
+00726     strcpy(buf,\textcolor{stringliteral}{"9223372036854775807"});
+00727     assert(string2ll(buf,strlen(buf),&v) == 1);
+00728     assert(v == LLONG\_MAX);
+00729 
+00730     strcpy(buf,\textcolor{stringliteral}{"9223372036854775808"}); \textcolor{comment}{/* overflow */}
+00731     assert(string2ll(buf,strlen(buf),&v) == 0);
+00732 \}
+00733 
+00734 \textcolor{keyword}{static} \textcolor{keywordtype}{void} test\_string2l(\textcolor{keywordtype}{void}) \{
+00735     \textcolor{keywordtype}{char} buf[32];
+00736     \textcolor{keywordtype}{long} v;
+00737 
+00738     \textcolor{comment}{/* May not start with +. */}
+00739     strcpy(buf,\textcolor{stringliteral}{"+1"});
+00740     assert(string2l(buf,strlen(buf),&v) == 0);
+00741 
+00742     \textcolor{comment}{/* May not start with 0. */}
+00743     strcpy(buf,\textcolor{stringliteral}{"01"});
+00744     assert(string2l(buf,strlen(buf),&v) == 0);
+00745 
+00746     strcpy(buf,\textcolor{stringliteral}{"-1"});
+00747     assert(string2l(buf,strlen(buf),&v) == 1);
+00748     assert(v == -1);
+00749 
+00750     strcpy(buf,\textcolor{stringliteral}{"0"});
+00751     assert(string2l(buf,strlen(buf),&v) == 1);
+00752     assert(v == 0);
+00753 
+00754     strcpy(buf,\textcolor{stringliteral}{"1"});
+00755     assert(string2l(buf,strlen(buf),&v) == 1);
+00756     assert(v == 1);
+00757 
+00758     strcpy(buf,\textcolor{stringliteral}{"99"});
+00759     assert(string2l(buf,strlen(buf),&v) == 1);
+00760     assert(v == 99);
+00761 
+00762     strcpy(buf,\textcolor{stringliteral}{"-99"});
+00763     assert(string2l(buf,strlen(buf),&v) == 1);
+00764     assert(v == -99);
+00765 
+00766 \textcolor{preprocessor}{#}\textcolor{preprocessor}{if} \textcolor{preprocessor}{LONG\_MAX} \textcolor{preprocessor}{!=} \textcolor{preprocessor}{LLONG\_MAX}
+00767     strcpy(buf,\textcolor{stringliteral}{"-2147483648"});
+00768     assert(string2l(buf,strlen(buf),&v) == 1);
+00769     assert(v == LONG\_MIN);
+00770 
+00771     strcpy(buf,\textcolor{stringliteral}{"-2147483649"}); \textcolor{comment}{/* overflow */}
+00772     assert(string2l(buf,strlen(buf),&v) == 0);
+00773 
+00774     strcpy(buf,\textcolor{stringliteral}{"2147483647"});
+00775     assert(string2l(buf,strlen(buf),&v) == 1);
+00776     assert(v == LONG\_MAX);
+00777 
+00778     strcpy(buf,\textcolor{stringliteral}{"2147483648"}); \textcolor{comment}{/* overflow */}
+00779     assert(string2l(buf,strlen(buf),&v) == 0);
+00780 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00781 \}
+00782 
+00783 \textcolor{keyword}{static} \textcolor{keywordtype}{void} test\_ll2string(\textcolor{keywordtype}{void}) \{
+00784     \textcolor{keywordtype}{char} buf[32];
+00785     \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} v;
+00786     \textcolor{keywordtype}{int} sz;
+00787 
+00788     v = 0;
+00789     sz = ll2string(buf, \textcolor{keyword}{sizeof} buf, v);
+00790     assert(sz == 1);
+00791     assert(!strcmp(buf, \textcolor{stringliteral}{"0"}));
+00792 
+00793     v = -1;
+00794     sz = ll2string(buf, \textcolor{keyword}{sizeof} buf, v);
+00795     assert(sz == 2);
+00796     assert(!strcmp(buf, \textcolor{stringliteral}{"-1"}));
+00797 
+00798     v = 99;
+00799     sz = ll2string(buf, \textcolor{keyword}{sizeof} buf, v);
+00800     assert(sz == 2);
+00801     assert(!strcmp(buf, \textcolor{stringliteral}{"99"}));
+00802 
+00803     v = -99;
+00804     sz = ll2string(buf, \textcolor{keyword}{sizeof} buf, v);
+00805     assert(sz == 3);
+00806     assert(!strcmp(buf, \textcolor{stringliteral}{"-99"}));
+00807 
+00808     v = -2147483648;
+00809     sz = ll2string(buf, \textcolor{keyword}{sizeof} buf, v);
+00810     assert(sz == 11);
+00811     assert(!strcmp(buf, \textcolor{stringliteral}{"-2147483648"}));
+00812 
+00813     v = LLONG\_MIN;
+00814     sz = ll2string(buf, \textcolor{keyword}{sizeof} buf, v);
+00815     assert(sz == 20);
+00816     assert(!strcmp(buf, \textcolor{stringliteral}{"-9223372036854775808"}));
+00817 
+00818     v = LLONG\_MAX;
+00819     sz = ll2string(buf, \textcolor{keyword}{sizeof} buf, v);
+00820     assert(sz == 19);
+00821     assert(!strcmp(buf, \textcolor{stringliteral}{"9223372036854775807"}));
+00822 \}
+00823 
+00824 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{UNUSED}\textcolor{preprocessor}{(}\textcolor{preprocessor}{x}\textcolor{preprocessor}{)} \textcolor{preprocessor}{(}\textcolor{preprocessor}{void}\textcolor{preprocessor}{)}\textcolor{preprocessor}{(}\textcolor{preprocessor}{x}\textcolor{preprocessor}{)}
+00825 \textcolor{keywordtype}{int} utilTest(\textcolor{keywordtype}{int} argc, \textcolor{keywordtype}{char} **argv) \{
+00826     UNUSED(argc);
+00827     UNUSED(argv);
+00828 
+00829     test\_string2ll();
+00830     test\_string2l();
+00831     test\_ll2string();
+00832     \textcolor{keywordflow}{return} 0;
+00833 \}
+00834 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+\end{DoxyCode}

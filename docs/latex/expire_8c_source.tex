@@ -1,0 +1,515 @@
+\hypertarget{expire_8c_source}{}\section{expire.\+c}
+\label{expire_8c_source}\index{src/expire.\+c@{src/expire.\+c}}
+
+\begin{DoxyCode}
+00001 \textcolor{comment}{/* Implementation of EXPIRE (keys with fixed time to live).}
+00002 \textcolor{comment}{ *}
+00003 \textcolor{comment}{ * ----------------------------------------------------------------------------}
+00004 \textcolor{comment}{ *}
+00005 \textcolor{comment}{ * Copyright (c) 2009-2016, Salvatore Sanfilippo <antirez at gmail dot com>}
+00006 \textcolor{comment}{ * All rights reserved.}
+00007 \textcolor{comment}{ *}
+00008 \textcolor{comment}{ * Redistribution and use in source and binary forms, with or without}
+00009 \textcolor{comment}{ * modification, are permitted provided that the following conditions are met:}
+00010 \textcolor{comment}{ *}
+00011 \textcolor{comment}{ *   * Redistributions of source code must retain the above copyright notice,}
+00012 \textcolor{comment}{ *     this list of conditions and the following disclaimer.}
+00013 \textcolor{comment}{ *   * Redistributions in binary form must reproduce the above copyright}
+00014 \textcolor{comment}{ *     notice, this list of conditions and the following disclaimer in the}
+00015 \textcolor{comment}{ *     documentation and/or other materials provided with the distribution.}
+00016 \textcolor{comment}{ *   * Neither the name of Redis nor the names of its contributors may be used}
+00017 \textcolor{comment}{ *     to endorse or promote products derived from this software without}
+00018 \textcolor{comment}{ *     specific prior written permission.}
+00019 \textcolor{comment}{ *}
+00020 \textcolor{comment}{ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"}
+00021 \textcolor{comment}{ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE}
+00022 \textcolor{comment}{ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE}
+00023 \textcolor{comment}{ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE}
+00024 \textcolor{comment}{ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR}
+00025 \textcolor{comment}{ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF}
+00026 \textcolor{comment}{ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS}
+00027 \textcolor{comment}{ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN}
+00028 \textcolor{comment}{ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)}
+00029 \textcolor{comment}{ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE}
+00030 \textcolor{comment}{ * POSSIBILITY OF SUCH DAMAGE.}
+00031 \textcolor{comment}{ */}
+00032 
+00033 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \hyperlink{server_8h}{"server.h"}
+00034 
+00035 \textcolor{comment}{/*-----------------------------------------------------------------------------}
+00036 \textcolor{comment}{ * Incremental collection of expired keys.}
+00037 \textcolor{comment}{ *}
+00038 \textcolor{comment}{ * When keys are accessed they are expired on-access. However we need a}
+00039 \textcolor{comment}{ * mechanism in order to ensure keys are eventually removed when expired even}
+00040 \textcolor{comment}{ * if no access is performed on them.}
+00041 \textcolor{comment}{ *----------------------------------------------------------------------------*/}
+00042 
+00043 \textcolor{comment}{/* Helper function for the activeExpireCycle() function.}
+00044 \textcolor{comment}{ * This function will try to expire the key that is stored in the hash table}
+00045 \textcolor{comment}{ * entry 'de' of the 'expires' hash table of a Redis database.}
+00046 \textcolor{comment}{ *}
+00047 \textcolor{comment}{ * If the key is found to be expired, it is removed from the database and}
+00048 \textcolor{comment}{ * 1 is returned. Otherwise no operation is performed and 0 is returned.}
+00049 \textcolor{comment}{ *}
+00050 \textcolor{comment}{ * When a key is expired, server.stat\_expiredkeys is incremented.}
+00051 \textcolor{comment}{ *}
+00052 \textcolor{comment}{ * The parameter 'now' is the current time in milliseconds as is passed}
+00053 \textcolor{comment}{ * to the function to avoid too many gettimeofday() syscalls. */}
+00054 \textcolor{keywordtype}{int} activeExpireCycleTryExpire(redisDb *db, dictEntry *de, \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} now) \{
+00055     \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} t = \hyperlink{dict_8h_a31f34bf34a743e3ebf122fa231b28d57}{dictGetSignedIntegerVal}(de);
+00056     \textcolor{keywordflow}{if} (now > t) \{
+00057         sds key = \hyperlink{dict_8h_a3271c334309904a3086deca94f96e46e}{dictGetKey}(de);
+00058         robj *keyobj = createStringObject(key,sdslen(key));
+00059 
+00060         propagateExpire(db,keyobj,server.lazyfree\_lazy\_expire);
+00061         \textcolor{keywordflow}{if} (server.lazyfree\_lazy\_expire)
+00062             dbAsyncDelete(db,keyobj);
+00063         \textcolor{keywordflow}{else}
+00064             dbSyncDelete(db,keyobj);
+00065         notifyKeyspaceEvent(\hyperlink{server_8h_a6b6b55f4f6ffcd0b1648395fea5fafc1}{NOTIFY\_EXPIRED},
+00066             \textcolor{stringliteral}{"expired"},keyobj,db->id);
+00067         decrRefCount(keyobj);
+00068         server.stat\_expiredkeys++;
+00069         \textcolor{keywordflow}{return} 1;
+00070     \} \textcolor{keywordflow}{else} \{
+00071         \textcolor{keywordflow}{return} 0;
+00072     \}
+00073 \}
+00074 
+00075 \textcolor{comment}{/* Try to expire a few timed out keys. The algorithm used is adaptive and}
+00076 \textcolor{comment}{ * will use few CPU cycles if there are few expiring keys, otherwise}
+00077 \textcolor{comment}{ * it will get more aggressive to avoid that too much memory is used by}
+00078 \textcolor{comment}{ * keys that can be removed from the keyspace.}
+00079 \textcolor{comment}{ *}
+00080 \textcolor{comment}{ * No more than CRON\_DBS\_PER\_CALL databases are tested at every}
+00081 \textcolor{comment}{ * iteration.}
+00082 \textcolor{comment}{ *}
+00083 \textcolor{comment}{ * This kind of call is used when Redis detects that timelimit\_exit is}
+00084 \textcolor{comment}{ * true, so there is more work to do, and we do it more incrementally from}
+00085 \textcolor{comment}{ * the beforeSleep() function of the event loop.}
+00086 \textcolor{comment}{ *}
+00087 \textcolor{comment}{ * Expire cycle type:}
+00088 \textcolor{comment}{ *}
+00089 \textcolor{comment}{ * If type is ACTIVE\_EXPIRE\_CYCLE\_FAST the function will try to run a}
+00090 \textcolor{comment}{ * "fast" expire cycle that takes no longer than EXPIRE\_FAST\_CYCLE\_DURATION}
+00091 \textcolor{comment}{ * microseconds, and is not repeated again before the same amount of time.}
+00092 \textcolor{comment}{ *}
+00093 \textcolor{comment}{ * If type is ACTIVE\_EXPIRE\_CYCLE\_SLOW, that normal expire cycle is}
+00094 \textcolor{comment}{ * executed, where the time limit is a percentage of the REDIS\_HZ period}
+00095 \textcolor{comment}{ * as specified by the ACTIVE\_EXPIRE\_CYCLE\_SLOW\_TIME\_PERC define. */}
+00096 
+00097 \textcolor{keywordtype}{void} activeExpireCycle(\textcolor{keywordtype}{int} type) \{
+00098     \textcolor{comment}{/* This function has some global state in order to continue the work}
+00099 \textcolor{comment}{     * incrementally across calls. */}
+00100     \textcolor{keyword}{static} \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{int} current\_db = 0; \textcolor{comment}{/* Last DB tested. */}
+00101     \textcolor{keyword}{static} \textcolor{keywordtype}{int} timelimit\_exit = 0;      \textcolor{comment}{/* Time limit hit in previous call? */}
+00102     \textcolor{keyword}{static} \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} last\_fast\_cycle = 0; \textcolor{comment}{/* When last fast cycle ran. */}
+00103 
+00104     \textcolor{keywordtype}{int} j, iteration = 0;
+00105     \textcolor{keywordtype}{int} dbs\_per\_call = \hyperlink{server_8h_aaab0790ee1a625276dce078a9dbbe075}{CRON\_DBS\_PER\_CALL};
+00106     \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} start = ustime(), timelimit, elapsed;
+00107 
+00108     \textcolor{comment}{/* When clients are paused the dataset should be static not just from the}
+00109 \textcolor{comment}{     * POV of clients not being able to write, but also from the POV of}
+00110 \textcolor{comment}{     * expires and evictions of keys not being performed. */}
+00111     \textcolor{keywordflow}{if} (clientsArePaused()) \textcolor{keywordflow}{return};
+00112 
+00113     \textcolor{keywordflow}{if} (type == \hyperlink{server_8h_ae265e849da28d7e7793659e45579ee11}{ACTIVE\_EXPIRE\_CYCLE\_FAST}) \{
+00114         \textcolor{comment}{/* Don't start a fast cycle if the previous cycle did not exited}
+00115 \textcolor{comment}{         * for time limt. Also don't repeat a fast cycle for the same period}
+00116 \textcolor{comment}{         * as the fast cycle total duration itself. */}
+00117         \textcolor{keywordflow}{if} (!timelimit\_exit) \textcolor{keywordflow}{return};
+00118         \textcolor{keywordflow}{if} (start < last\_fast\_cycle + \hyperlink{server_8h_a2bf59f8f4da1fa65543af877d632ad63}{ACTIVE\_EXPIRE\_CYCLE\_FAST\_DURATION}
+      *2) \textcolor{keywordflow}{return};
+00119         last\_fast\_cycle = start;
+00120     \}
+00121 
+00122     \textcolor{comment}{/* We usually should test CRON\_DBS\_PER\_CALL per iteration, with}
+00123 \textcolor{comment}{     * two exceptions:}
+00124 \textcolor{comment}{     *}
+00125 \textcolor{comment}{     * 1) Don't test more DBs than we have.}
+00126 \textcolor{comment}{     * 2) If last time we hit the time limit, we want to scan all DBs}
+00127 \textcolor{comment}{     * in this iteration, as there is work to do in some DB and we don't want}
+00128 \textcolor{comment}{     * expired keys to use memory for too much time. */}
+00129     \textcolor{keywordflow}{if} (dbs\_per\_call > server.dbnum || timelimit\_exit)
+00130         dbs\_per\_call = server.dbnum;
+00131 
+00132     \textcolor{comment}{/* We can use at max ACTIVE\_EXPIRE\_CYCLE\_SLOW\_TIME\_PERC percentage of CPU time}
+00133 \textcolor{comment}{     * per iteration. Since this function gets called with a frequency of}
+00134 \textcolor{comment}{     * server.hz times per second, the following is the max amount of}
+00135 \textcolor{comment}{     * microseconds we can spend in this function. */}
+00136     timelimit = 1000000*\hyperlink{server_8h_ac934cb3813b44558144bd1560cc1645a}{ACTIVE\_EXPIRE\_CYCLE\_SLOW\_TIME\_PERC}/server.hz
+      /100;
+00137     timelimit\_exit = 0;
+00138     \textcolor{keywordflow}{if} (timelimit <= 0) timelimit = 1;
+00139 
+00140     \textcolor{keywordflow}{if} (type == \hyperlink{server_8h_ae265e849da28d7e7793659e45579ee11}{ACTIVE\_EXPIRE\_CYCLE\_FAST})
+00141         timelimit = \hyperlink{server_8h_a2bf59f8f4da1fa65543af877d632ad63}{ACTIVE\_EXPIRE\_CYCLE\_FAST\_DURATION}; \textcolor{comment}{/* in
+       microseconds. */}
+00142 
+00143     \textcolor{keywordflow}{for} (j = 0; j < dbs\_per\_call && timelimit\_exit == 0; j++) \{
+00144         \textcolor{keywordtype}{int} expired;
+00145         redisDb *db = server.db+(current\_db % server.dbnum);
+00146 
+00147         \textcolor{comment}{/* Increment the DB now so we are sure if we run out of time}
+00148 \textcolor{comment}{         * in the current DB we'll restart from the next. This allows to}
+00149 \textcolor{comment}{         * distribute the time evenly across DBs. */}
+00150         current\_db++;
+00151 
+00152         \textcolor{comment}{/* Continue to expire if at the end of the cycle more than 25%}
+00153 \textcolor{comment}{         * of the keys were expired. */}
+00154         \textcolor{keywordflow}{do} \{
+00155             \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} num, slots;
+00156             \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} now, ttl\_sum;
+00157             \textcolor{keywordtype}{int} ttl\_samples;
+00158             iteration++;
+00159 
+00160             \textcolor{comment}{/* If there is nothing to expire try next DB ASAP. */}
+00161             \textcolor{keywordflow}{if} ((num = \hyperlink{dict_8h_af193430dd3d5579a52b194512f72c1f0}{dictSize}(db->expires)) == 0) \{
+00162                 db->avg\_ttl = 0;
+00163                 \textcolor{keywordflow}{break};
+00164             \}
+00165             slots = \hyperlink{dict_8h_aca9596be4bcc2caa07c17dd8cebcceec}{dictSlots}(db->expires);
+00166             now = mstime();
+00167 
+00168             \textcolor{comment}{/* When there are less than 1% filled slots getting random}
+00169 \textcolor{comment}{             * keys is expensive, so stop here waiting for better times...}
+00170 \textcolor{comment}{             * The dictionary will be resized asap. */}
+00171             \textcolor{keywordflow}{if} (num && slots > \hyperlink{dict_8h_aff97c19d1616cf2c697573ee3f515692}{DICT\_HT\_INITIAL\_SIZE} &&
+00172                 (num*100/slots < 1)) \textcolor{keywordflow}{break};
+00173 
+00174             \textcolor{comment}{/* The main collection cycle. Sample random keys among keys}
+00175 \textcolor{comment}{             * with an expire set, checking for expired ones. */}
+00176             expired = 0;
+00177             ttl\_sum = 0;
+00178             ttl\_samples = 0;
+00179 
+00180             \textcolor{keywordflow}{if} (num > \hyperlink{server_8h_a85d8b4e82684730649464046a4a00be2}{ACTIVE\_EXPIRE\_CYCLE\_LOOKUPS\_PER\_LOOP})
+00181                 num = \hyperlink{server_8h_a85d8b4e82684730649464046a4a00be2}{ACTIVE\_EXPIRE\_CYCLE\_LOOKUPS\_PER\_LOOP};
+00182 
+00183             \textcolor{keywordflow}{while} (num--) \{
+00184                 dictEntry *de;
+00185                 \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} ttl;
+00186 
+00187                 \textcolor{keywordflow}{if} ((de = dictGetRandomKey(db->expires)) == NULL) \textcolor{keywordflow}{break};
+00188                 ttl = \hyperlink{dict_8h_a31f34bf34a743e3ebf122fa231b28d57}{dictGetSignedIntegerVal}(de)-now;
+00189                 \textcolor{keywordflow}{if} (activeExpireCycleTryExpire(db,de,now)) expired++;
+00190                 \textcolor{keywordflow}{if} (ttl > 0) \{
+00191                     \textcolor{comment}{/* We want the average TTL of keys yet not expired. */}
+00192                     ttl\_sum += ttl;
+00193                     ttl\_samples++;
+00194                 \}
+00195             \}
+00196 
+00197             \textcolor{comment}{/* Update the average TTL stats for this database. */}
+00198             \textcolor{keywordflow}{if} (ttl\_samples) \{
+00199                 \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} avg\_ttl = ttl\_sum/ttl\_samples;
+00200 
+00201                 \textcolor{comment}{/* Do a simple running average with a few samples.}
+00202 \textcolor{comment}{                 * We just use the current estimate with a weight of 2%}
+00203 \textcolor{comment}{                 * and the previous estimate with a weight of 98%. */}
+00204                 \textcolor{keywordflow}{if} (db->avg\_ttl == 0) db->avg\_ttl = avg\_ttl;
+00205                 db->avg\_ttl = (db->avg\_ttl/50)*49 + (avg\_ttl/50);
+00206             \}
+00207 
+00208             \textcolor{comment}{/* We can't block forever here even if there are many keys to}
+00209 \textcolor{comment}{             * expire. So after a given amount of milliseconds return to the}
+00210 \textcolor{comment}{             * caller waiting for the other active expire cycle. */}
+00211             \textcolor{keywordflow}{if} ((iteration & 0xf) == 0) \{ \textcolor{comment}{/* check once every 16 iterations. */}
+00212                 elapsed = ustime()-start;
+00213                 \textcolor{keywordflow}{if} (elapsed > timelimit) \{
+00214                     timelimit\_exit = 1;
+00215                     \textcolor{keywordflow}{break};
+00216                 \}
+00217             \}
+00218             \textcolor{comment}{/* We don't repeat the cycle if there are less than 25% of keys}
+00219 \textcolor{comment}{             * found expired in the current DB. */}
+00220         \} \textcolor{keywordflow}{while} (expired > \hyperlink{server_8h_a85d8b4e82684730649464046a4a00be2}{ACTIVE\_EXPIRE\_CYCLE\_LOOKUPS\_PER\_LOOP}/4)
+      ;
+00221     \}
+00222 
+00223     elapsed = ustime()-start;
+00224     \hyperlink{latency_8h_a77922ab34035890c90f98831a9071359}{latencyAddSampleIfNeeded}(\textcolor{stringliteral}{"expire-cycle"},elapsed/1000);
+00225 \}
+00226 
+00227 \textcolor{comment}{/*-----------------------------------------------------------------------------}
+00228 \textcolor{comment}{ * Expires of keys created in writable slaves}
+00229 \textcolor{comment}{ *}
+00230 \textcolor{comment}{ * Normally slaves do not process expires: they wait the masters to synthesize}
+00231 \textcolor{comment}{ * DEL operations in order to retain consistency. However writable slaves are}
+00232 \textcolor{comment}{ * an exception: if a key is created in the slave and an expire is assigned}
+00233 \textcolor{comment}{ * to it, we need a way to expire such a key, since the master does not know}
+00234 \textcolor{comment}{ * anything about such a key.}
+00235 \textcolor{comment}{ *}
+00236 \textcolor{comment}{ * In order to do so, we track keys created in the slave side with an expire}
+00237 \textcolor{comment}{ * set, and call the expireSlaveKeys() function from time to time in order to}
+00238 \textcolor{comment}{ * reclaim the keys if they already expired.}
+00239 \textcolor{comment}{ *}
+00240 \textcolor{comment}{ * Note that the use case we are trying to cover here, is a popular one where}
+00241 \textcolor{comment}{ * slaves are put in writable mode in order to compute slow operations in}
+00242 \textcolor{comment}{ * the slave side that are mostly useful to actually read data in a more}
+00243 \textcolor{comment}{ * processed way. Think at sets intersections in a tmp key, with an expire so}
+00244 \textcolor{comment}{ * that it is also used as a cache to avoid intersecting every time.}
+00245 \textcolor{comment}{ *}
+00246 \textcolor{comment}{ * This implementation is currently not perfect but a lot better than leaking}
+00247 \textcolor{comment}{ * the keys as implemented in 3.2.}
+00248 \textcolor{comment}{ *----------------------------------------------------------------------------*/}
+00249 
+00250 \textcolor{comment}{/* The dictionary where we remember key names and database ID of keys we may}
+00251 \textcolor{comment}{ * want to expire from the slave. Since this function is not often used we}
+00252 \textcolor{comment}{ * don't even care to initialize the database at startup. We'll do it once}
+00253 \textcolor{comment}{ * the feature is used the first time, that is, when rememberSlaveKeyWithExpire()}
+00254 \textcolor{comment}{ * is called.}
+00255 \textcolor{comment}{ *}
+00256 \textcolor{comment}{ * The dictionary has an SDS string representing the key as the hash table}
+00257 \textcolor{comment}{ * key, while the value is a 64 bit unsigned integer with the bits corresponding}
+00258 \textcolor{comment}{ * to the DB where the keys may exist set to 1. Currently the keys created}
+00259 \textcolor{comment}{ * with a DB id > 63 are not expired, but a trivial fix is to set the bitmap}
+00260 \textcolor{comment}{ * to the max 64 bit unsigned value when we know there is a key with a DB}
+00261 \textcolor{comment}{ * ID greater than 63, and check all the configured DBs in such a case. */}
+00262 dict *slaveKeysWithExpire = NULL;
+00263 
+00264 \textcolor{comment}{/* Check the set of keys created by the master with an expire set in order to}
+00265 \textcolor{comment}{ * check if they should be evicted. */}
+00266 \textcolor{keywordtype}{void} expireSlaveKeys(\textcolor{keywordtype}{void}) \{
+00267     \textcolor{keywordflow}{if} (slaveKeysWithExpire == NULL ||
+00268         \hyperlink{dict_8h_af193430dd3d5579a52b194512f72c1f0}{dictSize}(slaveKeysWithExpire) == 0) \textcolor{keywordflow}{return};
+00269 
+00270     \textcolor{keywordtype}{int} cycles = 0, noexpire = 0;
+00271     mstime\_t start = mstime();
+00272     \textcolor{keywordflow}{while}(1) \{
+00273         dictEntry *de = dictGetRandomKey(slaveKeysWithExpire);
+00274         sds keyname = \hyperlink{dict_8h_a3271c334309904a3086deca94f96e46e}{dictGetKey}(de);
+00275         uint64\_t dbids = \hyperlink{dict_8h_ad65abe818fa141e537800699668a7f09}{dictGetUnsignedIntegerVal}(de);
+00276         uint64\_t new\_dbids = 0;
+00277 
+00278         \textcolor{comment}{/* Check the key against every database corresponding to the}
+00279 \textcolor{comment}{         * bits set in the value bitmap. */}
+00280         \textcolor{keywordtype}{int} dbid = 0;
+00281         \textcolor{keywordflow}{while}(dbids && dbid < server.dbnum) \{
+00282             \textcolor{keywordflow}{if} ((dbids & 1) != 0) \{
+00283                 redisDb *db = server.db+dbid;
+00284                 dictEntry *expire = dictFind(db->expires,keyname);
+00285                 \textcolor{keywordtype}{int} expired = 0;
+00286 
+00287                 \textcolor{keywordflow}{if} (expire &&
+00288                     activeExpireCycleTryExpire(server.db+dbid,expire,start))
+00289                 \{
+00290                     expired = 1;
+00291                 \}
+00292 
+00293                 \textcolor{comment}{/* If the key was not expired in this DB, we need to set the}
+00294 \textcolor{comment}{                 * corresponding bit in the new bitmap we set as value.}
+00295 \textcolor{comment}{                 * At the end of the loop if the bitmap is zero, it means we}
+00296 \textcolor{comment}{                 * no longer need to keep track of this key. */}
+00297                 \textcolor{keywordflow}{if} (expire && !expired) \{
+00298                     noexpire++;
+00299                     new\_dbids |= (uint64\_t)1 << dbid;
+00300                 \}
+00301             \}
+00302             dbid++;
+00303             dbids >>= 1;
+00304         \}
+00305 
+00306         \textcolor{comment}{/* Set the new bitmap as value of the key, in the dictionary}
+00307 \textcolor{comment}{         * of keys with an expire set directly in the writable slave. Otherwise}
+00308 \textcolor{comment}{         * if the bitmap is zero, we no longer need to keep track of it. */}
+00309         \textcolor{keywordflow}{if} (new\_dbids)
+00310             \hyperlink{dict_8h_aa846a3c28ad69004259435fd44246e10}{dictSetUnsignedIntegerVal}(de,new\_dbids);
+00311         \textcolor{keywordflow}{else}
+00312             dictDelete(slaveKeysWithExpire,keyname);
+00313 
+00314         \textcolor{comment}{/* Stop conditions: found 3 keys we cna't expire in a row or}
+00315 \textcolor{comment}{         * time limit was reached. */}
+00316         cycles++;
+00317         \textcolor{keywordflow}{if} (noexpire > 3) \textcolor{keywordflow}{break};
+00318         \textcolor{keywordflow}{if} ((cycles % 64) == 0 && mstime()-start > 1) \textcolor{keywordflow}{break};
+00319         \textcolor{keywordflow}{if} (\hyperlink{dict_8h_af193430dd3d5579a52b194512f72c1f0}{dictSize}(slaveKeysWithExpire) == 0) \textcolor{keywordflow}{break};
+00320     \}
+00321 \}
+00322 
+00323 \textcolor{comment}{/* Track keys that received an EXPIRE or similar command in the context}
+00324 \textcolor{comment}{ * of a writable slave. */}
+00325 \textcolor{keywordtype}{void} rememberSlaveKeyWithExpire(redisDb *db, robj *key) \{
+00326     \textcolor{keywordflow}{if} (slaveKeysWithExpire == NULL) \{
+00327         \textcolor{keyword}{static} dictType dt = \{
+00328             dictSdsHash,                \textcolor{comment}{/* hash function */}
+00329             NULL,                       \textcolor{comment}{/* key dup */}
+00330             NULL,                       \textcolor{comment}{/* val dup */}
+00331             dictSdsKeyCompare,          \textcolor{comment}{/* key compare */}
+00332             dictSdsDestructor,          \textcolor{comment}{/* key destructor */}
+00333             NULL                        \textcolor{comment}{/* val destructor */}
+00334         \};
+00335         slaveKeysWithExpire = dictCreate(&dt,NULL);
+00336     \}
+00337     \textcolor{keywordflow}{if} (db->id > 63) \textcolor{keywordflow}{return};
+00338 
+00339     dictEntry *de = dictAddOrFind(slaveKeysWithExpire,key->ptr);
+00340     \textcolor{comment}{/* If the entry was just created, set it to a copy of the SDS string}
+00341 \textcolor{comment}{     * representing the key: we don't want to need to take those keys}
+00342 \textcolor{comment}{     * in sync with the main DB. The keys will be removed by expireSlaveKeys()}
+00343 \textcolor{comment}{     * as it scans to find keys to remove. */}
+00344     \textcolor{keywordflow}{if} (de->key == key->ptr) \{
+00345         de->key = sdsdup(key->ptr);
+00346         \hyperlink{dict_8h_aa846a3c28ad69004259435fd44246e10}{dictSetUnsignedIntegerVal}(de,0);
+00347     \}
+00348 
+00349     uint64\_t dbids = \hyperlink{dict_8h_ad65abe818fa141e537800699668a7f09}{dictGetUnsignedIntegerVal}(de);
+00350     dbids |= (uint64\_t)1 << db->id;
+00351     \hyperlink{dict_8h_aa846a3c28ad69004259435fd44246e10}{dictSetUnsignedIntegerVal}(de,dbids);
+00352 \}
+00353 
+00354 \textcolor{comment}{/* Return the number of keys we are tracking. */}
+00355 size\_t getSlaveKeyWithExpireCount(\textcolor{keywordtype}{void}) \{
+00356     \textcolor{keywordflow}{if} (slaveKeysWithExpire == NULL) \textcolor{keywordflow}{return} 0;
+00357     \textcolor{keywordflow}{return} \hyperlink{dict_8h_af193430dd3d5579a52b194512f72c1f0}{dictSize}(slaveKeysWithExpire);
+00358 \}
+00359 
+00360 \textcolor{comment}{/* Remove the keys in the hash table. We need to do that when data is}
+00361 \textcolor{comment}{ * flushed from the server. We may receive new keys from the master with}
+00362 \textcolor{comment}{ * the same name/db and it is no longer a good idea to expire them.}
+00363 \textcolor{comment}{ *}
+00364 \textcolor{comment}{ * Note: technically we should handle the case of a single DB being flushed}
+00365 \textcolor{comment}{ * but it is not worth it since anyway race conditions using the same set}
+00366 \textcolor{comment}{ * of key names in a wriatable slave and in its master will lead to}
+00367 \textcolor{comment}{ * inconsistencies. This is just a best-effort thing we do. */}
+00368 \textcolor{keywordtype}{void} flushSlaveKeysWithExpireList(\textcolor{keywordtype}{void}) \{
+00369     \textcolor{keywordflow}{if} (slaveKeysWithExpire) \{
+00370         dictRelease(slaveKeysWithExpire);
+00371         slaveKeysWithExpire = NULL;
+00372     \}
+00373 \}
+00374 
+00375 \textcolor{comment}{/*-----------------------------------------------------------------------------}
+00376 \textcolor{comment}{ * Expires Commands}
+00377 \textcolor{comment}{ *----------------------------------------------------------------------------*/}
+00378 
+00379 \textcolor{comment}{/* This is the generic command implementation for EXPIRE, PEXPIRE, EXPIREAT}
+00380 \textcolor{comment}{ * and PEXPIREAT. Because the commad second argument may be relative or absolute}
+00381 \textcolor{comment}{ * the "basetime" argument is used to signal what the base time is (either 0}
+00382 \textcolor{comment}{ * for *AT variants of the command, or the current time for relative expires).}
+00383 \textcolor{comment}{ *}
+00384 \textcolor{comment}{ * unit is either UNIT\_SECONDS or UNIT\_MILLISECONDS, and is only used for}
+00385 \textcolor{comment}{ * the argv[2] parameter. The basetime is always specified in milliseconds. */}
+00386 \textcolor{keywordtype}{void} expireGenericCommand(\hyperlink{structclient}{client} *c, \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} basetime, \textcolor{keywordtype}{int} unit) \{
+00387     robj *key = c->argv[1], *param = c->argv[2];
+00388     \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} when; \textcolor{comment}{/* unix time in milliseconds when the key will expire. */}
+00389 
+00390     \textcolor{keywordflow}{if} (getLongLongFromObjectOrReply(c, param, &when, NULL) != \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK})
+00391         \textcolor{keywordflow}{return};
+00392 
+00393     \textcolor{keywordflow}{if} (unit == \hyperlink{server_8h_a8553b0a6c729b15594731a0d37b4fb0d}{UNIT\_SECONDS}) when *= 1000;
+00394     when += basetime;
+00395 
+00396     \textcolor{comment}{/* No key, return zero. */}
+00397     \textcolor{keywordflow}{if} (lookupKeyWrite(c->db,key) == NULL) \{
+00398         addReply(c,shared.czero);
+00399         \textcolor{keywordflow}{return};
+00400     \}
+00401 
+00402     \textcolor{comment}{/* EXPIRE with negative TTL, or EXPIREAT with a timestamp into the past}
+00403 \textcolor{comment}{     * should never be executed as a DEL when load the AOF or in the context}
+00404 \textcolor{comment}{     * of a slave instance.}
+00405 \textcolor{comment}{     *}
+00406 \textcolor{comment}{     * Instead we take the other branch of the IF statement setting an expire}
+00407 \textcolor{comment}{     * (possibly in the past) and wait for an explicit DEL from the master. */}
+00408     \textcolor{keywordflow}{if} (when <= mstime() && !server.loading && !server.masterhost) \{
+00409         robj *aux;
+00410 
+00411         \textcolor{keywordtype}{int} deleted = server.lazyfree\_lazy\_expire ? dbAsyncDelete(c->db,key) :
+00412                                                     dbSyncDelete(c->db,key);
+00413         \hyperlink{server_8h_a7308f76cbff9a8d3797fe78190b91282}{serverAssertWithInfo}(c,key,deleted);
+00414         server.dirty++;
+00415 
+00416         \textcolor{comment}{/* Replicate/AOF this as an explicit DEL or UNLINK. */}
+00417         aux = server.lazyfree\_lazy\_expire ? shared.unlink : shared.del;
+00418         rewriteClientCommandVector(c,2,aux,key);
+00419         signalModifiedKey(c->db,key);
+00420         notifyKeyspaceEvent(\hyperlink{server_8h_a9fa53dd1068e62365f3964ad3479eec2}{NOTIFY\_GENERIC},\textcolor{stringliteral}{"del"},key,c->db->id);
+00421         addReply(c, shared.cone);
+00422         \textcolor{keywordflow}{return};
+00423     \} \textcolor{keywordflow}{else} \{
+00424         setExpire(c,c->db,key,when);
+00425         addReply(c,shared.cone);
+00426         signalModifiedKey(c->db,key);
+00427         notifyKeyspaceEvent(\hyperlink{server_8h_a9fa53dd1068e62365f3964ad3479eec2}{NOTIFY\_GENERIC},\textcolor{stringliteral}{"expire"},key,c->db->id);
+00428         server.dirty++;
+00429         \textcolor{keywordflow}{return};
+00430     \}
+00431 \}
+00432 
+00433 \textcolor{comment}{/* EXPIRE key seconds */}
+00434 \textcolor{keywordtype}{void} expireCommand(\hyperlink{structclient}{client} *c) \{
+00435     expireGenericCommand(c,mstime(),\hyperlink{server_8h_a8553b0a6c729b15594731a0d37b4fb0d}{UNIT\_SECONDS});
+00436 \}
+00437 
+00438 \textcolor{comment}{/* EXPIREAT key time */}
+00439 \textcolor{keywordtype}{void} expireatCommand(\hyperlink{structclient}{client} *c) \{
+00440     expireGenericCommand(c,0,\hyperlink{server_8h_a8553b0a6c729b15594731a0d37b4fb0d}{UNIT\_SECONDS});
+00441 \}
+00442 
+00443 \textcolor{comment}{/* PEXPIRE key milliseconds */}
+00444 \textcolor{keywordtype}{void} pexpireCommand(\hyperlink{structclient}{client} *c) \{
+00445     expireGenericCommand(c,mstime(),\hyperlink{server_8h_a259de972533409a75b736bfc799a8e2d}{UNIT\_MILLISECONDS});
+00446 \}
+00447 
+00448 \textcolor{comment}{/* PEXPIREAT key ms\_time */}
+00449 \textcolor{keywordtype}{void} pexpireatCommand(\hyperlink{structclient}{client} *c) \{
+00450     expireGenericCommand(c,0,\hyperlink{server_8h_a259de972533409a75b736bfc799a8e2d}{UNIT\_MILLISECONDS});
+00451 \}
+00452 
+00453 \textcolor{comment}{/* Implements TTL and PTTL */}
+00454 \textcolor{keywordtype}{void} ttlGenericCommand(\hyperlink{structclient}{client} *c, \textcolor{keywordtype}{int} output\_ms) \{
+00455     \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} expire, ttl = -1;
+00456 
+00457     \textcolor{comment}{/* If the key does not exist at all, return -2 */}
+00458     \textcolor{keywordflow}{if} (lookupKeyReadWithFlags(c->db,c->argv[1],\hyperlink{server_8h_aedc57e62fa05a1b438fa4ed16a803718}{LOOKUP\_NOTOUCH}) == NULL) \{
+00459         addReplyLongLong(c,-2);
+00460         \textcolor{keywordflow}{return};
+00461     \}
+00462     \textcolor{comment}{/* The key exists. Return -1 if it has no expire, or the actual}
+00463 \textcolor{comment}{     * TTL value otherwise. */}
+00464     expire = getExpire(c->db,c->argv[1]);
+00465     \textcolor{keywordflow}{if} (expire != -1) \{
+00466         ttl = expire-mstime();
+00467         \textcolor{keywordflow}{if} (ttl < 0) ttl = 0;
+00468     \}
+00469     \textcolor{keywordflow}{if} (ttl == -1) \{
+00470         addReplyLongLong(c,-1);
+00471     \} \textcolor{keywordflow}{else} \{
+00472         addReplyLongLong(c,output\_ms ? ttl : ((ttl+500)/1000));
+00473     \}
+00474 \}
+00475 
+00476 \textcolor{comment}{/* TTL key */}
+00477 \textcolor{keywordtype}{void} ttlCommand(\hyperlink{structclient}{client} *c) \{
+00478     ttlGenericCommand(c, 0);
+00479 \}
+00480 
+00481 \textcolor{comment}{/* PTTL key */}
+00482 \textcolor{keywordtype}{void} pttlCommand(\hyperlink{structclient}{client} *c) \{
+00483     ttlGenericCommand(c, 1);
+00484 \}
+00485 
+00486 \textcolor{comment}{/* PERSIST key */}
+00487 \textcolor{keywordtype}{void} persistCommand(\hyperlink{structclient}{client} *c) \{
+00488     \textcolor{keywordflow}{if} (lookupKeyWrite(c->db,c->argv[1])) \{
+00489         \textcolor{keywordflow}{if} (removeExpire(c->db,c->argv[1])) \{
+00490             addReply(c,shared.cone);
+00491             server.dirty++;
+00492         \} \textcolor{keywordflow}{else} \{
+00493             addReply(c,shared.czero);
+00494         \}
+00495     \} \textcolor{keywordflow}{else} \{
+00496         addReply(c,shared.czero);
+00497     \}
+00498 \}
+00499 
+00500 \textcolor{comment}{/* TOUCH key1 [key2 key3 ... keyN] */}
+00501 \textcolor{keywordtype}{void} touchCommand(\hyperlink{structclient}{client} *c) \{
+00502     \textcolor{keywordtype}{int} touched = 0;
+00503     \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} j = 1; j < c->argc; j++)
+00504         \textcolor{keywordflow}{if} (lookupKeyRead(c->db,c->argv[j]) != NULL) touched++;
+00505     addReplyLongLong(c,touched);
+00506 \}
+\end{DoxyCode}

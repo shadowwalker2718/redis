@@ -1,0 +1,54 @@
+\hypertarget{redisassert_8h_source}{}\section{redisassert.\+h}
+\label{redisassert_8h_source}\index{src/redisassert.\+h@{src/redisassert.\+h}}
+
+\begin{DoxyCode}
+00001 \textcolor{comment}{/* redisassert.h -- Drop in replacemnet assert.h that prints the stack trace}
+00002 \textcolor{comment}{ *                  in the Redis logs.}
+00003 \textcolor{comment}{ *}
+00004 \textcolor{comment}{ * This file should be included instead of "assert.h" inside libraries used by}
+00005 \textcolor{comment}{ * Redis that are using assertions, so instead of Redis disappearing with}
+00006 \textcolor{comment}{ * SIGABORT, we get the details and stack trace inside the log file.}
+00007 \textcolor{comment}{ *}
+00008 \textcolor{comment}{ * ----------------------------------------------------------------------------}
+00009 \textcolor{comment}{ *}
+00010 \textcolor{comment}{ * Copyright (c) 2006-2012, Salvatore Sanfilippo <antirez at gmail dot com>}
+00011 \textcolor{comment}{ * All rights reserved.}
+00012 \textcolor{comment}{ *}
+00013 \textcolor{comment}{ * Redistribution and use in source and binary forms, with or without}
+00014 \textcolor{comment}{ * modification, are permitted provided that the following conditions are met:}
+00015 \textcolor{comment}{ *}
+00016 \textcolor{comment}{ *   * Redistributions of source code must retain the above copyright notice,}
+00017 \textcolor{comment}{ *     this list of conditions and the following disclaimer.}
+00018 \textcolor{comment}{ *   * Redistributions in binary form must reproduce the above copyright}
+00019 \textcolor{comment}{ *     notice, this list of conditions and the following disclaimer in the}
+00020 \textcolor{comment}{ *     documentation and/or other materials provided with the distribution.}
+00021 \textcolor{comment}{ *   * Neither the name of Redis nor the names of its contributors may be used}
+00022 \textcolor{comment}{ *     to endorse or promote products derived from this software without}
+00023 \textcolor{comment}{ *     specific prior written permission.}
+00024 \textcolor{comment}{ *}
+00025 \textcolor{comment}{ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"}
+00026 \textcolor{comment}{ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE}
+00027 \textcolor{comment}{ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE}
+00028 \textcolor{comment}{ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE}
+00029 \textcolor{comment}{ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR}
+00030 \textcolor{comment}{ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF}
+00031 \textcolor{comment}{ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS}
+00032 \textcolor{comment}{ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN}
+00033 \textcolor{comment}{ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)}
+00034 \textcolor{comment}{ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE}
+00035 \textcolor{comment}{ * POSSIBILITY OF SUCH DAMAGE.}
+00036 \textcolor{comment}{ */}
+00037 
+00038 \textcolor{preprocessor}{#}\textcolor{preprocessor}{ifndef} \textcolor{preprocessor}{\_\_REDIS\_ASSERT\_H\_\_}
+00039 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{\_\_REDIS\_ASSERT\_H\_\_}
+00040 
+00041 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{unistd}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>} \textcolor{comment}{/* for \_exit() */}
+00042 
+00043 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{assert}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_e}\textcolor{preprocessor}{)} \textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_e}\textcolor{preprocessor}{)}\textcolor{preprocessor}{?}\textcolor{preprocessor}{(}\textcolor{keywordtype}{void}\textcolor{preprocessor}{)}0 \textcolor{preprocessor}{:} \textcolor{preprocessor}{(}\textcolor{preprocessor}{\_serverAssert}\textcolor{preprocessor}{(}\textcolor{preprocessor}{#}\textcolor{preprocessor}{\_e}\textcolor{preprocessor}{,}\textcolor{preprocessor}{\_\_FILE\_\_}\textcolor{preprocessor}{,}\textcolor{preprocessor}{\_\_LINE\_\_}\textcolor{preprocessor}{)}\textcolor{preprocessor}{,}\textcolor{preprocessor}{\_exit}\textcolor{preprocessor}{(}1\textcolor{preprocessor}{)}\textcolor{preprocessor}{)}\textcolor{preprocessor}{)}
+00044 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{panic}\textcolor{preprocessor}{(}\textcolor{preprocessor}{...}\textcolor{preprocessor}{)} \textcolor{preprocessor}{\_serverPanic}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_\_FILE\_\_}\textcolor{preprocessor}{,}\textcolor{preprocessor}{\_\_LINE\_\_}\textcolor{preprocessor}{,}\textcolor{preprocessor}{\_\_VA\_ARGS\_\_}\textcolor{preprocessor}{)}\textcolor{preprocessor}{,}\textcolor{preprocessor}{\_exit}\textcolor{preprocessor}{(}1\textcolor{preprocessor}{)}
+00045 
+00046 \textcolor{keywordtype}{void} \_serverAssert(\textcolor{keywordtype}{char} *estr, \textcolor{keywordtype}{char} *file, \textcolor{keywordtype}{int} line);
+00047 \textcolor{keywordtype}{void} \_serverPanic(\textcolor{keyword}{const} \textcolor{keywordtype}{char} *file, \textcolor{keywordtype}{int} line, \textcolor{keyword}{const} \textcolor{keywordtype}{char} *msg, ...);
+00048 
+00049 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+\end{DoxyCode}

@@ -1,0 +1,4 @@
+<map id="quicklistEntry" name="quicklistEntry">
+<area shape="rect" id="node2" href="$structquicklistNode.html" title="{quicklistNode\n|+ zl\l+ sz\l+ count\l+ encoding\l+ container\l+ recompress\l+ attempted_compress\l+ extra\l|}" alt="" coords="5,5,161,185"/>
+<area shape="rect" id="node3" href="$structquicklist.html" title="{quicklist\n|+ count\l+ len\l+ fill\l+ compress\l|}" alt="" coords="110,263,201,384"/>
+</map>

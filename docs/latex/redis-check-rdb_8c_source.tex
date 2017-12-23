@@ -1,0 +1,368 @@
+\hypertarget{redis-check-rdb_8c_source}{}\section{redis-\/check-\/rdb.c}
+\label{redis-check-rdb_8c_source}\index{src/redis-\/check-\/rdb.\+c@{src/redis-\/check-\/rdb.\+c}}
+
+\begin{DoxyCode}
+00001 \textcolor{comment}{/*}
+00002 \textcolor{comment}{ * Copyright (c) 2016, Salvatore Sanfilippo <antirez at gmail dot com>}
+00003 \textcolor{comment}{ * All rights reserved.}
+00004 \textcolor{comment}{ *}
+00005 \textcolor{comment}{ * Redistribution and use in source and binary forms, with or without}
+00006 \textcolor{comment}{ * modification, are permitted provided that the following conditions are met:}
+00007 \textcolor{comment}{ *}
+00008 \textcolor{comment}{ *   * Redistributions of source code must retain the above copyright notice,}
+00009 \textcolor{comment}{ *     this list of conditions and the following disclaimer.}
+00010 \textcolor{comment}{ *   * Redistributions in binary form must reproduce the above copyright}
+00011 \textcolor{comment}{ *     notice, this list of conditions and the following disclaimer in the}
+00012 \textcolor{comment}{ *     documentation and/or other materials provided with the distribution.}
+00013 \textcolor{comment}{ *   * Neither the name of Redis nor the names of its contributors may be used}
+00014 \textcolor{comment}{ *     to endorse or promote products derived from this software without}
+00015 \textcolor{comment}{ *     specific prior written permission.}
+00016 \textcolor{comment}{ *}
+00017 \textcolor{comment}{ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"}
+00018 \textcolor{comment}{ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE}
+00019 \textcolor{comment}{ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE}
+00020 \textcolor{comment}{ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE}
+00021 \textcolor{comment}{ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR}
+00022 \textcolor{comment}{ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF}
+00023 \textcolor{comment}{ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS}
+00024 \textcolor{comment}{ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN}
+00025 \textcolor{comment}{ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)}
+00026 \textcolor{comment}{ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE}
+00027 \textcolor{comment}{ * POSSIBILITY OF SUCH DAMAGE.}
+00028 \textcolor{comment}{ */}
+00029 
+00030 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \hyperlink{server_8h}{"server.h"}
+00031 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \hyperlink{rdb_8h}{"rdb.h"}
+00032 
+00033 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{stdarg}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00034 
+00035 \textcolor{keywordtype}{void} createSharedObjects(\textcolor{keywordtype}{void});
+00036 \textcolor{keywordtype}{void} rdbLoadProgressCallback(rio *r, \textcolor{keyword}{const} \textcolor{keywordtype}{void} *buf, size\_t len);
+00037 \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} rdbLoadMillisecondTime(rio *rdb);
+00038 \textcolor{keywordtype}{int} rdbCheckMode = 0;
+00039 
+00040 \textcolor{keyword}{struct} \{
+00041     rio *rio;
+00042     robj *key;                      \textcolor{comment}{/* Current key we are reading. */}
+00043     \textcolor{keywordtype}{int} key\_type;                   \textcolor{comment}{/* Current key type if != -1. */}
+00044     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} keys;             \textcolor{comment}{/* Number of keys processed. */}
+00045     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} expires;          \textcolor{comment}{/* Number of keys with an expire. */}
+00046     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} already\_expired;  \textcolor{comment}{/* Number of keys already expired. */}
+00047     \textcolor{keywordtype}{int} doing;                      \textcolor{comment}{/* The state while reading the RDB. */}
+00048     \textcolor{keywordtype}{int} error\_set;                  \textcolor{comment}{/* True if error is populated. */}
+00049     \textcolor{keywordtype}{char} error[1024];
+00050 \} rdbstate;
+00051 
+00052 \textcolor{comment}{/* At every loading step try to remember what we were about to do, so that}
+00053 \textcolor{comment}{ * we can log this information when an error is encountered. */}
+00054 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{RDB\_CHECK\_DOING\_START} 0
+00055 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{RDB\_CHECK\_DOING\_READ\_TYPE} 1
+00056 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{RDB\_CHECK\_DOING\_READ\_EXPIRE} 2
+00057 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{RDB\_CHECK\_DOING\_READ\_KEY} 3
+00058 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{RDB\_CHECK\_DOING\_READ\_OBJECT\_VALUE} 4
+00059 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{RDB\_CHECK\_DOING\_CHECK\_SUM} 5
+00060 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{RDB\_CHECK\_DOING\_READ\_LEN} 6
+00061 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{RDB\_CHECK\_DOING\_READ\_AUX} 7
+00062 
+00063 \textcolor{keywordtype}{char} *rdb\_check\_doing\_string[] = \{
+00064     \textcolor{stringliteral}{"start"},
+00065     \textcolor{stringliteral}{"read-type"},
+00066     \textcolor{stringliteral}{"read-expire"},
+00067     \textcolor{stringliteral}{"read-key"},
+00068     \textcolor{stringliteral}{"read-object-value"},
+00069     \textcolor{stringliteral}{"check-sum"},
+00070     \textcolor{stringliteral}{"read-len"},
+00071     \textcolor{stringliteral}{"read-aux"}
+00072 \};
+00073 
+00074 \textcolor{keywordtype}{char} *rdb\_type\_string[] = \{
+00075     \textcolor{stringliteral}{"string"},
+00076     \textcolor{stringliteral}{"list-linked"},
+00077     \textcolor{stringliteral}{"set-hashtable"},
+00078     \textcolor{stringliteral}{"zset-v1"},
+00079     \textcolor{stringliteral}{"hash-hashtable"},
+00080     \textcolor{stringliteral}{"zset-v2"},
+00081     \textcolor{stringliteral}{"module-value"},
+00082     \textcolor{stringliteral}{""},\textcolor{stringliteral}{""},
+00083     \textcolor{stringliteral}{"hash-zipmap"},
+00084     \textcolor{stringliteral}{"list-ziplist"},
+00085     \textcolor{stringliteral}{"set-intset"},
+00086     \textcolor{stringliteral}{"zset-ziplist"},
+00087     \textcolor{stringliteral}{"hash-ziplist"},
+00088     \textcolor{stringliteral}{"quicklist"}
+00089 \};
+00090 
+00091 \textcolor{comment}{/* Show a few stats collected into 'rdbstate' */}
+00092 \textcolor{keywordtype}{void} rdbShowGenericInfo(\textcolor{keywordtype}{void}) \{
+00093     printf(\textcolor{stringliteral}{"[info] %lu keys read\(\backslash\)n"}, rdbstate.keys);
+00094     printf(\textcolor{stringliteral}{"[info] %lu expires\(\backslash\)n"}, rdbstate.expires);
+00095     printf(\textcolor{stringliteral}{"[info] %lu already expired\(\backslash\)n"}, rdbstate.already\_expired);
+00096 \}
+00097 
+00098 \textcolor{comment}{/* Called on RDB errors. Provides details about the RDB and the offset}
+00099 \textcolor{comment}{ * we were when the error was detected. */}
+00100 \textcolor{keywordtype}{void} rdbCheckError(\textcolor{keyword}{const} \textcolor{keywordtype}{char} *fmt, ...) \{
+00101     \textcolor{keywordtype}{char} msg[1024];
+00102     va\_list ap;
+00103 
+00104     va\_start(ap, fmt);
+00105     vsnprintf(msg, \textcolor{keyword}{sizeof}(msg), fmt, ap);
+00106     va\_end(ap);
+00107 
+00108     printf(\textcolor{stringliteral}{"--- RDB ERROR DETECTED ---\(\backslash\)n"});
+00109     printf(\textcolor{stringliteral}{"[offset %llu] %s\(\backslash\)n"},
+00110         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} \textcolor{keywordtype}{long}) (rdbstate.rio ?
+00111             rdbstate.rio->processed\_bytes : 0), msg);
+00112     printf(\textcolor{stringliteral}{"[additional info] While doing: %s\(\backslash\)n"},
+00113         rdb\_check\_doing\_string[rdbstate.doing]);
+00114     \textcolor{keywordflow}{if} (rdbstate.key)
+00115         printf(\textcolor{stringliteral}{"[additional info] Reading key '%s'\(\backslash\)n"},
+00116             (\textcolor{keywordtype}{char}*)rdbstate.key->ptr);
+00117     \textcolor{keywordflow}{if} (rdbstate.key\_type != -1)
+00118         printf(\textcolor{stringliteral}{"[additional info] Reading type %d (%s)\(\backslash\)n"},
+00119             rdbstate.key\_type,
+00120             ((\textcolor{keywordtype}{unsigned})rdbstate.key\_type <
+00121              \textcolor{keyword}{sizeof}(rdb\_type\_string)/\textcolor{keyword}{sizeof}(\textcolor{keywordtype}{char}*)) ?
+00122                 rdb\_type\_string[rdbstate.key\_type] : \textcolor{stringliteral}{"unknown"});
+00123     rdbShowGenericInfo();
+00124 \}
+00125 
+00126 \textcolor{comment}{/* Print informations during RDB checking. */}
+00127 \textcolor{keywordtype}{void} rdbCheckInfo(\textcolor{keyword}{const} \textcolor{keywordtype}{char} *fmt, ...) \{
+00128     \textcolor{keywordtype}{char} msg[1024];
+00129     va\_list ap;
+00130 
+00131     va\_start(ap, fmt);
+00132     vsnprintf(msg, \textcolor{keyword}{sizeof}(msg), fmt, ap);
+00133     va\_end(ap);
+00134 
+00135     printf(\textcolor{stringliteral}{"[offset %llu] %s\(\backslash\)n"},
+00136         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} \textcolor{keywordtype}{long}) (rdbstate.rio ?
+00137             rdbstate.rio->processed\_bytes : 0), msg);
+00138 \}
+00139 
+00140 \textcolor{comment}{/* Used inside rdb.c in order to log specific errors happening inside}
+00141 \textcolor{comment}{ * the RDB loading internals. */}
+00142 \textcolor{keywordtype}{void} rdbCheckSetError(\textcolor{keyword}{const} \textcolor{keywordtype}{char} *fmt, ...) \{
+00143     va\_list ap;
+00144 
+00145     va\_start(ap, fmt);
+00146     vsnprintf(rdbstate.error, \textcolor{keyword}{sizeof}(rdbstate.error), fmt, ap);
+00147     va\_end(ap);
+00148     rdbstate.error\_set = 1;
+00149 \}
+00150 
+00151 \textcolor{comment}{/* During RDB check we setup a special signal handler for memory violations}
+00152 \textcolor{comment}{ * and similar conditions, so that we can log the offending part of the RDB}
+00153 \textcolor{comment}{ * if the crash is due to broken content. */}
+00154 \textcolor{keywordtype}{void} rdbCheckHandleCrash(\textcolor{keywordtype}{int} sig, siginfo\_t *info, \textcolor{keywordtype}{void} *secret) \{
+00155     \hyperlink{server_8h_ae7c9dc8f13568a9c856573751f1ee1ec}{UNUSED}(sig);
+00156     \hyperlink{server_8h_ae7c9dc8f13568a9c856573751f1ee1ec}{UNUSED}(info);
+00157     \hyperlink{server_8h_ae7c9dc8f13568a9c856573751f1ee1ec}{UNUSED}(secret);
+00158 
+00159     rdbCheckError(\textcolor{stringliteral}{"Server crash checking the specified RDB file!"});
+00160     exit(1);
+00161 \}
+00162 
+00163 \textcolor{keywordtype}{void} rdbCheckSetupSignals(\textcolor{keywordtype}{void}) \{
+00164     \textcolor{keyword}{struct} sigaction act;
+00165 
+00166     sigemptyset(&act.sa\_mask);
+00167     act.sa\_flags = SA\_NODEFER | SA\_RESETHAND | SA\_SIGINFO;
+00168     act.sa\_sigaction = rdbCheckHandleCrash;
+00169     sigaction(SIGSEGV, &act, NULL);
+00170     sigaction(SIGBUS, &act, NULL);
+00171     sigaction(SIGFPE, &act, NULL);
+00172     sigaction(SIGILL, &act, NULL);
+00173 \}
+00174 
+00175 \textcolor{comment}{/* Check the specified RDB file. Return 0 if the RDB looks sane, otherwise}
+00176 \textcolor{comment}{ * 1 is returned.}
+00177 \textcolor{comment}{ * The file is specified as a filename in 'rdbfilename' if 'fp' is not NULL,}
+00178 \textcolor{comment}{ * otherwise the already open file 'fp' is checked. */}
+00179 \textcolor{keywordtype}{int} redis\_check\_rdb(\textcolor{keywordtype}{char} *rdbfilename, FILE *fp) \{
+00180     uint64\_t dbid;
+00181     \textcolor{keywordtype}{int} type, rdbver;
+00182     \textcolor{keywordtype}{char} buf[1024];
+00183     \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} expiretime, now = mstime();
+00184     \textcolor{keyword}{static} rio rdb; \textcolor{comment}{/* Pointed by global struct riostate. */}
+00185 
+00186     \textcolor{keywordtype}{int} closefile = (fp == NULL);
+00187     \textcolor{keywordflow}{if} (fp == NULL && (fp = fopen(rdbfilename,\textcolor{stringliteral}{"r"})) == NULL) \textcolor{keywordflow}{return} 1;
+00188 
+00189     rioInitWithFile(&rdb,fp);
+00190     rdbstate.rio = &rdb;
+00191     rdb.update\_cksum = rdbLoadProgressCallback;
+00192     \textcolor{keywordflow}{if} (rioRead(&rdb,buf,9) == 0) \textcolor{keywordflow}{goto} eoferr;
+00193     buf[9] = \textcolor{stringliteral}{'\(\backslash\)0'};
+00194     \textcolor{keywordflow}{if} (memcmp(buf,\textcolor{stringliteral}{"REDIS"},5) != 0) \{
+00195         rdbCheckError(\textcolor{stringliteral}{"Wrong signature trying to load DB from file"});
+00196         \textcolor{keywordflow}{goto} err;
+00197     \}
+00198     rdbver = atoi(buf+5);
+00199     \textcolor{keywordflow}{if} (rdbver < 1 || rdbver > \hyperlink{rdb_8h_ae34418fdbb9794fb7558a4f58bdc1cad}{RDB\_VERSION}) \{
+00200         rdbCheckError(\textcolor{stringliteral}{"Can't handle RDB format version %d"},rdbver);
+00201         \textcolor{keywordflow}{goto} err;
+00202     \}
+00203 
+00204     startLoading(fp);
+00205     \textcolor{keywordflow}{while}(1) \{
+00206         robj *key, *val;
+00207         expiretime = -1;
+00208 
+00209         \textcolor{comment}{/* Read type. */}
+00210         rdbstate.doing = \hyperlink{redis-check-rdb_8c_aa0a7dfd3a3e0ac75d688d559a3704bc4}{RDB\_CHECK\_DOING\_READ\_TYPE};
+00211         \textcolor{keywordflow}{if} ((type = rdbLoadType(&rdb)) == -1) \textcolor{keywordflow}{goto} eoferr;
+00212 
+00213         \textcolor{comment}{/* Handle special types. */}
+00214         \textcolor{keywordflow}{if} (type == \hyperlink{rdb_8h_a32013d8fe12eeff5f8c1de859aae8a55}{RDB\_OPCODE\_EXPIRETIME}) \{
+00215             rdbstate.doing = \hyperlink{redis-check-rdb_8c_a1ea6b327825b203156f25d5690203cc9}{RDB\_CHECK\_DOING\_READ\_EXPIRE};
+00216             \textcolor{comment}{/* EXPIRETIME: load an expire associated with the next key}
+00217 \textcolor{comment}{             * to load. Note that after loading an expire we need to}
+00218 \textcolor{comment}{             * load the actual type, and continue. */}
+00219             \textcolor{keywordflow}{if} ((expiretime = rdbLoadTime(&rdb)) == -1) \textcolor{keywordflow}{goto} eoferr;
+00220             \textcolor{comment}{/* We read the time so we need to read the object type again. */}
+00221             rdbstate.doing = \hyperlink{redis-check-rdb_8c_aa0a7dfd3a3e0ac75d688d559a3704bc4}{RDB\_CHECK\_DOING\_READ\_TYPE};
+00222             \textcolor{keywordflow}{if} ((type = rdbLoadType(&rdb)) == -1) \textcolor{keywordflow}{goto} eoferr;
+00223             \textcolor{comment}{/* the EXPIRETIME opcode specifies time in seconds, so convert}
+00224 \textcolor{comment}{             * into milliseconds. */}
+00225             expiretime *= 1000;
+00226         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (type == \hyperlink{rdb_8h_a718021856b2b0cf1c9c907a3a91a39c4}{RDB\_OPCODE\_EXPIRETIME\_MS}) \{
+00227             \textcolor{comment}{/* EXPIRETIME\_MS: milliseconds precision expire times introduced}
+00228 \textcolor{comment}{             * with RDB v3. Like EXPIRETIME but no with more precision. */}
+00229             rdbstate.doing = \hyperlink{redis-check-rdb_8c_a1ea6b327825b203156f25d5690203cc9}{RDB\_CHECK\_DOING\_READ\_EXPIRE};
+00230             \textcolor{keywordflow}{if} ((expiretime = rdbLoadMillisecondTime(&rdb)) == -1) \textcolor{keywordflow}{goto} eoferr;
+00231             \textcolor{comment}{/* We read the time so we need to read the object type again. */}
+00232             rdbstate.doing = \hyperlink{redis-check-rdb_8c_aa0a7dfd3a3e0ac75d688d559a3704bc4}{RDB\_CHECK\_DOING\_READ\_TYPE};
+00233             \textcolor{keywordflow}{if} ((type = rdbLoadType(&rdb)) == -1) \textcolor{keywordflow}{goto} eoferr;
+00234         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (type == \hyperlink{rdb_8h_af4c616d96f3dc8d44911f7fff2a712da}{RDB\_OPCODE\_EOF}) \{
+00235             \textcolor{comment}{/* EOF: End of file, exit the main loop. */}
+00236             \textcolor{keywordflow}{break};
+00237         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (type == \hyperlink{rdb_8h_a08e0489a0baf79997ee8411e850d6c70}{RDB\_OPCODE\_SELECTDB}) \{
+00238             \textcolor{comment}{/* SELECTDB: Select the specified database. */}
+00239             rdbstate.doing = \hyperlink{redis-check-rdb_8c_ad444ed91923ac86310ebd17eb5525cae}{RDB\_CHECK\_DOING\_READ\_LEN};
+00240             \textcolor{keywordflow}{if} ((dbid = rdbLoadLen(&rdb,NULL)) == \hyperlink{rdb_8h_aa66b6ad7261656029e6a67cf78432b2d}{RDB\_LENERR})
+00241                 \textcolor{keywordflow}{goto} eoferr;
+00242             rdbCheckInfo(\textcolor{stringliteral}{"Selecting DB ID %d"}, dbid);
+00243             \textcolor{keywordflow}{continue}; \textcolor{comment}{/* Read type again. */}
+00244         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (type == \hyperlink{rdb_8h_ad1f63cee59a3066446beecae389a8758}{RDB\_OPCODE\_RESIZEDB}) \{
+00245             \textcolor{comment}{/* RESIZEDB: Hint about the size of the keys in the currently}
+00246 \textcolor{comment}{             * selected data base, in order to avoid useless rehashing. */}
+00247             uint64\_t db\_size, expires\_size;
+00248             rdbstate.doing = \hyperlink{redis-check-rdb_8c_ad444ed91923ac86310ebd17eb5525cae}{RDB\_CHECK\_DOING\_READ\_LEN};
+00249             \textcolor{keywordflow}{if} ((db\_size = rdbLoadLen(&rdb,NULL)) == \hyperlink{rdb_8h_aa66b6ad7261656029e6a67cf78432b2d}{RDB\_LENERR})
+00250                 \textcolor{keywordflow}{goto} eoferr;
+00251             \textcolor{keywordflow}{if} ((expires\_size = rdbLoadLen(&rdb,NULL)) == \hyperlink{rdb_8h_aa66b6ad7261656029e6a67cf78432b2d}{RDB\_LENERR})
+00252                 \textcolor{keywordflow}{goto} eoferr;
+00253             \textcolor{keywordflow}{continue}; \textcolor{comment}{/* Read type again. */}
+00254         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (type == \hyperlink{rdb_8h_ab0c62f54bb9377a6a75dbe331a2936bd}{RDB\_OPCODE\_AUX}) \{
+00255             \textcolor{comment}{/* AUX: generic string-string fields. Use to add state to RDB}
+00256 \textcolor{comment}{             * which is backward compatible. Implementations of RDB loading}
+00257 \textcolor{comment}{             * are requierd to skip AUX fields they don't understand.}
+00258 \textcolor{comment}{             *}
+00259 \textcolor{comment}{             * An AUX field is composed of two strings: key and value. */}
+00260             robj *auxkey, *auxval;
+00261             rdbstate.doing = \hyperlink{redis-check-rdb_8c_a14dfe6627d1d6293301b16939723a12e}{RDB\_CHECK\_DOING\_READ\_AUX};
+00262             \textcolor{keywordflow}{if} ((auxkey = rdbLoadStringObject(&rdb)) == NULL) \textcolor{keywordflow}{goto} eoferr;
+00263             \textcolor{keywordflow}{if} ((auxval = rdbLoadStringObject(&rdb)) == NULL) \textcolor{keywordflow}{goto} eoferr;
+00264 
+00265             rdbCheckInfo(\textcolor{stringliteral}{"AUX FIELD %s = '%s'"},
+00266                 (\textcolor{keywordtype}{char}*)auxkey->ptr, (\textcolor{keywordtype}{char}*)auxval->ptr);
+00267             decrRefCount(auxkey);
+00268             decrRefCount(auxval);
+00269             \textcolor{keywordflow}{continue}; \textcolor{comment}{/* Read type again. */}
+00270         \} \textcolor{keywordflow}{else} \{
+00271             \textcolor{keywordflow}{if} (!\hyperlink{rdb_8h_aab085218231452c8782bd5f7d8011ce2}{rdbIsObjectType}(type)) \{
+00272                 rdbCheckError(\textcolor{stringliteral}{"Invalid object type: %d"}, type);
+00273                 \textcolor{keywordflow}{goto} err;
+00274             \}
+00275             rdbstate.key\_type = type;
+00276         \}
+00277 
+00278         \textcolor{comment}{/* Read key */}
+00279         rdbstate.doing = \hyperlink{redis-check-rdb_8c_a502536e7d64001543187d790a8dc48af}{RDB\_CHECK\_DOING\_READ\_KEY};
+00280         \textcolor{keywordflow}{if} ((key = rdbLoadStringObject(&rdb)) == NULL) \textcolor{keywordflow}{goto} eoferr;
+00281         rdbstate.key = key;
+00282         rdbstate.keys++;
+00283         \textcolor{comment}{/* Read value */}
+00284         rdbstate.doing = \hyperlink{redis-check-rdb_8c_ac6a3f6afcf1b09f47ba08a73ae925fc8}{RDB\_CHECK\_DOING\_READ\_OBJECT\_VALUE};
+00285         \textcolor{keywordflow}{if} ((val = rdbLoadObject(type,&rdb)) == NULL) \textcolor{keywordflow}{goto} eoferr;
+00286         \textcolor{comment}{/* Check if the key already expired. This function is used when loading}
+00287 \textcolor{comment}{         * an RDB file from disk, either at startup, or when an RDB was}
+00288 \textcolor{comment}{         * received from the master. In the latter case, the master is}
+00289 \textcolor{comment}{         * responsible for key expiry. If we would expire keys here, the}
+00290 \textcolor{comment}{         * snapshot taken by the master may not be reflected on the slave. */}
+00291         \textcolor{keywordflow}{if} (server.masterhost == NULL && expiretime != -1 && expiretime < now)
+00292             rdbstate.already\_expired++;
+00293         \textcolor{keywordflow}{if} (expiretime != -1) rdbstate.expires++;
+00294         rdbstate.key = NULL;
+00295         decrRefCount(key);
+00296         decrRefCount(val);
+00297         rdbstate.key\_type = -1;
+00298     \}
+00299     \textcolor{comment}{/* Verify the checksum if RDB version is >= 5 */}
+00300     \textcolor{keywordflow}{if} (rdbver >= 5 && server.rdb\_checksum) \{
+00301         uint64\_t cksum, expected = rdb.cksum;
+00302 
+00303         rdbstate.doing = \hyperlink{redis-check-rdb_8c_aa43bb9440ce7c820f089f811cb19a790}{RDB\_CHECK\_DOING\_CHECK\_SUM};
+00304         \textcolor{keywordflow}{if} (rioRead(&rdb,&cksum,8) == 0) \textcolor{keywordflow}{goto} eoferr;
+00305         \hyperlink{endianconv_8h_aa311b9f944c3b988f3601698a95890c1}{memrev64ifbe}(&cksum);
+00306         \textcolor{keywordflow}{if} (cksum == 0) \{
+00307             rdbCheckInfo(\textcolor{stringliteral}{"RDB file was saved with checksum disabled: no check performed."});
+00308         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (cksum != expected) \{
+00309             rdbCheckError(\textcolor{stringliteral}{"RDB CRC error"});
+00310             \textcolor{keywordflow}{goto} err;
+00311         \} \textcolor{keywordflow}{else} \{
+00312             rdbCheckInfo(\textcolor{stringliteral}{"Checksum OK"});
+00313         \}
+00314     \}
+00315 
+00316     \textcolor{keywordflow}{if} (closefile) fclose(fp);
+00317     \textcolor{keywordflow}{return} 0;
+00318 
+00319 eoferr: \textcolor{comment}{/* unexpected end of file is handled here with a fatal exit */}
+00320     \textcolor{keywordflow}{if} (rdbstate.error\_set) \{
+00321         rdbCheckError(rdbstate.error);
+00322     \} \textcolor{keywordflow}{else} \{
+00323         rdbCheckError(\textcolor{stringliteral}{"Unexpected EOF reading RDB file"});
+00324     \}
+00325 err:
+00326     \textcolor{keywordflow}{if} (closefile) fclose(fp);
+00327     \textcolor{keywordflow}{return} 1;
+00328 \}
+00329 
+00330 \textcolor{comment}{/* RDB check main: called form redis.c when Redis is executed with the}
+00331 \textcolor{comment}{ * redis-check-rdb alias, on during RDB loading errors.}
+00332 \textcolor{comment}{ *}
+00333 \textcolor{comment}{ * The function works in two ways: can be called with argc/argv as a}
+00334 \textcolor{comment}{ * standalone executable, or called with a non NULL 'fp' argument if we}
+00335 \textcolor{comment}{ * already have an open file to check. This happens when the function}
+00336 \textcolor{comment}{ * is used to check an RDB preamble inside an AOF file.}
+00337 \textcolor{comment}{ *}
+00338 \textcolor{comment}{ * When called with fp = NULL, the function never returns, but exits with the}
+00339 \textcolor{comment}{ * status code according to success (RDB is sane) or error (RDB is corrupted).}
+00340 \textcolor{comment}{ * Otherwise if called with a non NULL fp, the function returns C\_OK or}
+00341 \textcolor{comment}{ * C\_ERR depending on the success or failure. */}
+00342 \textcolor{keywordtype}{int} redis\_check\_rdb\_main(\textcolor{keywordtype}{int} argc, \textcolor{keywordtype}{char} **argv, FILE *fp) \{
+00343     \textcolor{keywordflow}{if} (argc != 2 && fp == NULL) \{
+00344         fprintf(stderr, \textcolor{stringliteral}{"Usage: %s <rdb-file-name>\(\backslash\)n"}, argv[0]);
+00345         exit(1);
+00346     \}
+00347     \textcolor{comment}{/* In order to call the loading functions we need to create the shared}
+00348 \textcolor{comment}{     * integer objects, however since this function may be called from}
+00349 \textcolor{comment}{     * an already initialized Redis instance, check if we really need to. */}
+00350     \textcolor{keywordflow}{if} (shared.integers[0] == NULL)
+00351         createSharedObjects();
+00352     server.loading\_process\_events\_interval\_bytes = 0;
+00353     rdbCheckMode = 1;
+00354     rdbCheckInfo(\textcolor{stringliteral}{"Checking RDB file %s"}, argv[1]);
+00355     rdbCheckSetupSignals();
+00356     \textcolor{keywordtype}{int} retval = redis\_check\_rdb(argv[1],fp);
+00357     \textcolor{keywordflow}{if} (retval == 0) \{
+00358         rdbCheckInfo(\textcolor{stringliteral}{"\(\backslash\)\(\backslash\)o/ RDB looks OK! \(\backslash\)\(\backslash\)o/"});
+00359         rdbShowGenericInfo();
+00360     \}
+00361     \textcolor{keywordflow}{if} (fp) \textcolor{keywordflow}{return} (retval == 0) ? \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK} : \hyperlink{server_8h_af98ac28d5f4d23d7ed5985188e6fb7d1}{C\_ERR};
+00362     exit(retval);
+00363 \}
+\end{DoxyCode}

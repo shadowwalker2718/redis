@@ -1,0 +1,75 @@
+\hypertarget{geohash__helper_8h_source}{}\section{geohash\+\_\+helper.\+h}
+\label{geohash__helper_8h_source}\index{src/geohash\+\_\+helper.\+h@{src/geohash\+\_\+helper.\+h}}
+
+\begin{DoxyCode}
+00001 \textcolor{comment}{/*}
+00002 \textcolor{comment}{ * Copyright (c) 2013-2014, yinqiwen <yinqiwen@gmail.com>}
+00003 \textcolor{comment}{ * Copyright (c) 2014, Matt Stancliff <matt@genges.com>.}
+00004 \textcolor{comment}{ * Copyright (c) 2015, Salvatore Sanfilippo <antirez@gmail.com>.}
+00005 \textcolor{comment}{ * All rights reserved.}
+00006 \textcolor{comment}{ *}
+00007 \textcolor{comment}{ * Redistribution and use in source and binary forms, with or without}
+00008 \textcolor{comment}{ * modification, are permitted provided that the following conditions are met:}
+00009 \textcolor{comment}{ *}
+00010 \textcolor{comment}{ *  * Redistributions of source code must retain the above copyright notice,}
+00011 \textcolor{comment}{ *    this list of conditions and the following disclaimer.}
+00012 \textcolor{comment}{ *  * Redistributions in binary form must reproduce the above copyright}
+00013 \textcolor{comment}{ *    notice, this list of conditions and the following disclaimer in the}
+00014 \textcolor{comment}{ *    documentation and/or other materials provided with the distribution.}
+00015 \textcolor{comment}{ *  * Neither the name of Redis nor the names of its contributors may be used}
+00016 \textcolor{comment}{ *    to endorse or promote products derived from this software without}
+00017 \textcolor{comment}{ *    specific prior written permission.}
+00018 \textcolor{comment}{ *}
+00019 \textcolor{comment}{ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"}
+00020 \textcolor{comment}{ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE}
+00021 \textcolor{comment}{ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE}
+00022 \textcolor{comment}{ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS}
+00023 \textcolor{comment}{ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR}
+00024 \textcolor{comment}{ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF}
+00025 \textcolor{comment}{ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS}
+00026 \textcolor{comment}{ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN}
+00027 \textcolor{comment}{ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)}
+00028 \textcolor{comment}{ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF}
+00029 \textcolor{comment}{ * THE POSSIBILITY OF SUCH DAMAGE.}
+00030 \textcolor{comment}{ */}
+00031 
+00032 \textcolor{preprocessor}{#}\textcolor{preprocessor}{ifndef} \textcolor{preprocessor}{GEOHASH\_HELPER\_HPP\_}
+00033 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{GEOHASH\_HELPER\_HPP\_}
+00034 
+00035 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \hyperlink{geohash_8h}{"geohash.h"}
+00036 
+00037 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{GZERO}\textcolor{preprocessor}{(}\textcolor{preprocessor}{s}\textcolor{preprocessor}{)} \textcolor{preprocessor}{s}\textcolor{preprocessor}{.}\textcolor{preprocessor}{bits} \textcolor{preprocessor}{=} \textcolor{preprocessor}{s}\textcolor{preprocessor}{.}\textcolor{preprocessor}{step} \textcolor{preprocessor}{=} 0\textcolor{preprocessor}{;}
+00038 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{GISZERO}\textcolor{preprocessor}{(}\textcolor{preprocessor}{s}\textcolor{preprocessor}{)} \textcolor{preprocessor}{(}\textcolor{preprocessor}{!}\textcolor{preprocessor}{s}\textcolor{preprocessor}{.}\textcolor{preprocessor}{bits} \textcolor{preprocessor}{&&} \textcolor{preprocessor}{!}\textcolor{preprocessor}{s}\textcolor{preprocessor}{.}\textcolor{preprocessor}{step}\textcolor{preprocessor}{)}
+00039 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{GISNOTZERO}\textcolor{preprocessor}{(}\textcolor{preprocessor}{s}\textcolor{preprocessor}{)} \textcolor{preprocessor}{(}\textcolor{preprocessor}{s}\textcolor{preprocessor}{.}\textcolor{preprocessor}{bits} \textcolor{preprocessor}{||} \textcolor{preprocessor}{s}\textcolor{preprocessor}{.}\textcolor{preprocessor}{step}\textcolor{preprocessor}{)}
+00040 
+00041 \textcolor{keyword}{typedef} uint64\_t GeoHashFix52Bits;
+00042 \textcolor{keyword}{typedef} uint64\_t GeoHashVarBits;
+00043 
+\Hypertarget{geohash__helper_8h_source_l00044}\hyperlink{structGeoHashRadius}{00044} \textcolor{keyword}{typedef} \textcolor{keyword}{struct} \{
+00045     GeoHashBits hash;
+00046     GeoHashArea area;
+00047     GeoHashNeighbors neighbors;
+00048 \} GeoHashRadius;
+00049 
+00050 \textcolor{keywordtype}{int} GeoHashBitsComparator(\textcolor{keyword}{const} GeoHashBits *a, \textcolor{keyword}{const} GeoHashBits *b);
+00051 uint8\_t geohashEstimateStepsByRadius(\textcolor{keywordtype}{double} range\_meters, \textcolor{keywordtype}{double} lat);
+00052 \textcolor{keywordtype}{int} geohashBoundingBox(\textcolor{keywordtype}{double} longitude, \textcolor{keywordtype}{double} latitude, \textcolor{keywordtype}{double} radius\_meters,
+00053                         \textcolor{keywordtype}{double} *bounds);
+00054 GeoHashRadius geohashGetAreasByRadius(\textcolor{keywordtype}{double} longitude,
+00055                                       \textcolor{keywordtype}{double} latitude, \textcolor{keywordtype}{double} radius\_meters);
+00056 GeoHashRadius geohashGetAreasByRadiusWGS84(\textcolor{keywordtype}{double} longitude, \textcolor{keywordtype}{double} latitude,
+00057                                            \textcolor{keywordtype}{double} radius\_meters);
+00058 GeoHashRadius geohashGetAreasByRadiusMercator(\textcolor{keywordtype}{double} longitude, \textcolor{keywordtype}{double} latitude,
+00059                                               \textcolor{keywordtype}{double} radius\_meters);
+00060 GeoHashFix52Bits geohashAlign52Bits(\textcolor{keyword}{const} GeoHashBits hash);
+00061 \textcolor{keywordtype}{double} geohashGetDistance(\textcolor{keywordtype}{double} lon1d, \textcolor{keywordtype}{double} lat1d,
+00062                           \textcolor{keywordtype}{double} lon2d, \textcolor{keywordtype}{double} lat2d);
+00063 \textcolor{keywordtype}{int} geohashGetDistanceIfInRadius(\textcolor{keywordtype}{double} x1, \textcolor{keywordtype}{double} y1,
+00064                                  \textcolor{keywordtype}{double} x2, \textcolor{keywordtype}{double} y2, \textcolor{keywordtype}{double} radius,
+00065                                  \textcolor{keywordtype}{double} *distance);
+00066 \textcolor{keywordtype}{int} geohashGetDistanceIfInRadiusWGS84(\textcolor{keywordtype}{double} x1, \textcolor{keywordtype}{double} y1, \textcolor{keywordtype}{double} x2,
+00067                                       \textcolor{keywordtype}{double} y2, \textcolor{keywordtype}{double} radius,
+00068                                       \textcolor{keywordtype}{double} *distance);
+00069 
+00070 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif} \textcolor{comment}{/* GEOHASH\_HELPER\_HPP\_ */}
+\end{DoxyCode}

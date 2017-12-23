@@ -1,0 +1,1141 @@
+\hypertarget{bitops_8c_source}{}\section{bitops.\+c}
+\label{bitops_8c_source}\index{src/bitops.\+c@{src/bitops.\+c}}
+
+\begin{DoxyCode}
+00001 \textcolor{comment}{/* Bit operations.}
+00002 \textcolor{comment}{ *}
+00003 \textcolor{comment}{ * Copyright (c) 2009-2012, Salvatore Sanfilippo <antirez at gmail dot com>}
+00004 \textcolor{comment}{ * All rights reserved.}
+00005 \textcolor{comment}{ *}
+00006 \textcolor{comment}{ * Redistribution and use in source and binary forms, with or without}
+00007 \textcolor{comment}{ * modification, are permitted provided that the following conditions are met:}
+00008 \textcolor{comment}{ *}
+00009 \textcolor{comment}{ *   * Redistributions of source code must retain the above copyright notice,}
+00010 \textcolor{comment}{ *     this list of conditions and the following disclaimer.}
+00011 \textcolor{comment}{ *   * Redistributions in binary form must reproduce the above copyright}
+00012 \textcolor{comment}{ *     notice, this list of conditions and the following disclaimer in the}
+00013 \textcolor{comment}{ *     documentation and/or other materials provided with the distribution.}
+00014 \textcolor{comment}{ *   * Neither the name of Redis nor the names of its contributors may be used}
+00015 \textcolor{comment}{ *     to endorse or promote products derived from this software without}
+00016 \textcolor{comment}{ *     specific prior written permission.}
+00017 \textcolor{comment}{ *}
+00018 \textcolor{comment}{ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"}
+00019 \textcolor{comment}{ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE}
+00020 \textcolor{comment}{ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE}
+00021 \textcolor{comment}{ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE}
+00022 \textcolor{comment}{ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR}
+00023 \textcolor{comment}{ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF}
+00024 \textcolor{comment}{ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS}
+00025 \textcolor{comment}{ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN}
+00026 \textcolor{comment}{ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)}
+00027 \textcolor{comment}{ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE}
+00028 \textcolor{comment}{ * POSSIBILITY OF SUCH DAMAGE.}
+00029 \textcolor{comment}{ */}
+00030 
+00031 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \hyperlink{server_8h}{"server.h"}
+00032 
+00033 \textcolor{comment}{/* -----------------------------------------------------------------------------}
+00034 \textcolor{comment}{ * Helpers and low level bit functions.}
+00035 \textcolor{comment}{ * -------------------------------------------------------------------------- */}
+00036 
+00037 \textcolor{comment}{/* Count number of bits set in the binary array pointed by 's' and long}
+00038 \textcolor{comment}{ * 'count' bytes. The implementation of this function is required to}
+00039 \textcolor{comment}{ * work with a input string length up to 512 MB. */}
+00040 size\_t redisPopcount(\textcolor{keywordtype}{void} *s, \textcolor{keywordtype}{long} count) \{
+00041     size\_t bits = 0;
+00042     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *p = s;
+00043     uint32\_t *p4;
+00044     \textcolor{keyword}{static} \textcolor{keyword}{const} \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} bitsinbyte[256] = \{0,1,1,2,1,2,2,3,1,2,2,3,2,3,3,4,1,2,2,3,2,3,3,4,2,3,
+      3,4,3,4,4,5,1,2,2,3,2,3,3,4,2,3,3,4,3,4,4,5,2,3,3,4,3,4,4,5,3,4,4,5,4,5,5,6,1,2,2,3,2,3,3,4,2,3,3,4,3,4,4,5,
+      2,3,3,4,3,4,4,5,3,4,4,5,4,5,5,6,2,3,3,4,3,4,4,5,3,4,4,5,4,5,5,6,3,4,4,5,4,5,5,6,4,5,5,6,5,6,6,7,1,2,2,3,2,3,
+      3,4,2,3,3,4,3,4,4,5,2,3,3,4,3,4,4,5,3,4,4,5,4,5,5,6,2,3,3,4,3,4,4,5,3,4,4,5,4,5,5,6,3,4,4,5,4,5,5,6,4,5,5,6,
+      5,6,6,7,2,3,3,4,3,4,4,5,3,4,4,5,4,5,5,6,3,4,4,5,4,5,5,6,4,5,5,6,5,6,6,7,3,4,4,5,4,5,5,6,4,5,5,6,5,6,6,7,4,5,
+      5,6,5,6,6,7,5,6,6,7,6,7,7,8\};
+00045 
+00046     \textcolor{comment}{/* Count initial bytes not aligned to 32 bit. */}
+00047     \textcolor{keywordflow}{while}((\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long})p & 3 && count) \{
+00048         bits += bitsinbyte[*p++];
+00049         count--;
+00050     \}
+00051 
+00052     \textcolor{comment}{/* Count bits 28 bytes at a time */}
+00053     p4 = (uint32\_t*)p;
+00054     \textcolor{keywordflow}{while}(count>=28) \{
+00055         uint32\_t aux1, aux2, aux3, aux4, aux5, aux6, aux7;
+00056 
+00057         aux1 = *p4++;
+00058         aux2 = *p4++;
+00059         aux3 = *p4++;
+00060         aux4 = *p4++;
+00061         aux5 = *p4++;
+00062         aux6 = *p4++;
+00063         aux7 = *p4++;
+00064         count -= 28;
+00065 
+00066         aux1 = aux1 - ((aux1 >> 1) & 0x55555555);
+00067         aux1 = (aux1 & 0x33333333) + ((aux1 >> 2) & 0x33333333);
+00068         aux2 = aux2 - ((aux2 >> 1) & 0x55555555);
+00069         aux2 = (aux2 & 0x33333333) + ((aux2 >> 2) & 0x33333333);
+00070         aux3 = aux3 - ((aux3 >> 1) & 0x55555555);
+00071         aux3 = (aux3 & 0x33333333) + ((aux3 >> 2) & 0x33333333);
+00072         aux4 = aux4 - ((aux4 >> 1) & 0x55555555);
+00073         aux4 = (aux4 & 0x33333333) + ((aux4 >> 2) & 0x33333333);
+00074         aux5 = aux5 - ((aux5 >> 1) & 0x55555555);
+00075         aux5 = (aux5 & 0x33333333) + ((aux5 >> 2) & 0x33333333);
+00076         aux6 = aux6 - ((aux6 >> 1) & 0x55555555);
+00077         aux6 = (aux6 & 0x33333333) + ((aux6 >> 2) & 0x33333333);
+00078         aux7 = aux7 - ((aux7 >> 1) & 0x55555555);
+00079         aux7 = (aux7 & 0x33333333) + ((aux7 >> 2) & 0x33333333);
+00080         bits += ((((aux1 + (aux1 >> 4)) & 0x0F0F0F0F) +
+00081                     ((aux2 + (aux2 >> 4)) & 0x0F0F0F0F) +
+00082                     ((aux3 + (aux3 >> 4)) & 0x0F0F0F0F) +
+00083                     ((aux4 + (aux4 >> 4)) & 0x0F0F0F0F) +
+00084                     ((aux5 + (aux5 >> 4)) & 0x0F0F0F0F) +
+00085                     ((aux6 + (aux6 >> 4)) & 0x0F0F0F0F) +
+00086                     ((aux7 + (aux7 >> 4)) & 0x0F0F0F0F))* 0x01010101) >> 24;
+00087     \}
+00088     \textcolor{comment}{/* Count the remaining bytes. */}
+00089     p = (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char}*)p4;
+00090     \textcolor{keywordflow}{while}(count--) bits += bitsinbyte[*p++];
+00091     \textcolor{keywordflow}{return} bits;
+00092 \}
+00093 
+00094 \textcolor{comment}{/* Return the position of the first bit set to one (if 'bit' is 1) or}
+00095 \textcolor{comment}{ * zero (if 'bit' is 0) in the bitmap starting at 's' and long 'count' bytes.}
+00096 \textcolor{comment}{ *}
+00097 \textcolor{comment}{ * The function is guaranteed to return a value >= 0 if 'bit' is 0 since if}
+00098 \textcolor{comment}{ * no zero bit is found, it returns count*8 assuming the string is zero}
+00099 \textcolor{comment}{ * padded on the right. However if 'bit' is 1 it is possible that there is}
+00100 \textcolor{comment}{ * not a single set bit in the bitmap. In this special case -1 is returned. */}
+00101 \textcolor{keywordtype}{long} redisBitpos(\textcolor{keywordtype}{void} *s, \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} count, \textcolor{keywordtype}{int} bit) \{
+00102     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} *l;
+00103     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *c;
+00104     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} skipval, word = 0, one;
+00105     \textcolor{keywordtype}{long} pos = 0; \textcolor{comment}{/* Position of bit, to return to the caller. */}
+00106     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} j;
+00107     \textcolor{keywordtype}{int} found;
+00108 
+00109     \textcolor{comment}{/* Process whole words first, seeking for first word that is not}
+00110 \textcolor{comment}{     * all ones or all zeros respectively if we are lookig for zeros}
+00111 \textcolor{comment}{     * or ones. This is much faster with large strings having contiguous}
+00112 \textcolor{comment}{     * blocks of 1 or 0 bits compared to the vanilla bit per bit processing.}
+00113 \textcolor{comment}{     *}
+00114 \textcolor{comment}{     * Note that if we start from an address that is not aligned}
+00115 \textcolor{comment}{     * to sizeof(unsigned long) we consume it byte by byte until it is}
+00116 \textcolor{comment}{     * aligned. */}
+00117 
+00118     \textcolor{comment}{/* Skip initial bits not aligned to sizeof(unsigned long) byte by byte. */}
+00119     skipval = bit ? 0 : UCHAR\_MAX;
+00120     c = (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char}*) s;
+00121     found = 0;
+00122     \textcolor{keywordflow}{while}((\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long})c & (\textcolor{keyword}{sizeof}(*l)-1) && count) \{
+00123         \textcolor{keywordflow}{if} (*c != skipval) \{
+00124             found = 1;
+00125             \textcolor{keywordflow}{break};
+00126         \}
+00127         c++;
+00128         count--;
+00129         pos += 8;
+00130     \}
+00131 
+00132     \textcolor{comment}{/* Skip bits with full word step. */}
+00133     l = (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}*) c;
+00134     \textcolor{keywordflow}{if} (!found) \{
+00135         skipval = bit ? 0 : ULONG\_MAX;
+00136         \textcolor{keywordflow}{while} (count >= \textcolor{keyword}{sizeof}(*l)) \{
+00137             \textcolor{keywordflow}{if} (*l != skipval) \textcolor{keywordflow}{break};
+00138             l++;
+00139             count -= \textcolor{keyword}{sizeof}(*l);
+00140             pos += \textcolor{keyword}{sizeof}(*l)*8;
+00141         \}
+00142     \}
+00143 
+00144     \textcolor{comment}{/* Load bytes into "word" considering the first byte as the most significant}
+00145 \textcolor{comment}{     * (we basically consider it as written in big endian, since we consider the}
+00146 \textcolor{comment}{     * string as a set of bits from left to right, with the first bit at position}
+00147 \textcolor{comment}{     * zero.}
+00148 \textcolor{comment}{     *}
+00149 \textcolor{comment}{     * Note that the loading is designed to work even when the bytes left}
+00150 \textcolor{comment}{     * (count) are less than a full word. We pad it with zero on the right. */}
+00151     c = (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char}*)l;
+00152     \textcolor{keywordflow}{for} (j = 0; j < \textcolor{keyword}{sizeof}(*l); j++) \{
+00153         word <<= 8;
+00154         \textcolor{keywordflow}{if} (count) \{
+00155             word |= *c;
+00156             c++;
+00157             count--;
+00158         \}
+00159     \}
+00160 
+00161     \textcolor{comment}{/* Special case:}
+00162 \textcolor{comment}{     * If bits in the string are all zero and we are looking for one,}
+00163 \textcolor{comment}{     * return -1 to signal that there is not a single "1" in the whole}
+00164 \textcolor{comment}{     * string. This can't happen when we are looking for "0" as we assume}
+00165 \textcolor{comment}{     * that the right of the string is zero padded. */}
+00166     \textcolor{keywordflow}{if} (bit == 1 && word == 0) \textcolor{keywordflow}{return} -1;
+00167 
+00168     \textcolor{comment}{/* Last word left, scan bit by bit. The first thing we need is to}
+00169 \textcolor{comment}{     * have a single "1" set in the most significant position in an}
+00170 \textcolor{comment}{     * unsigned long. We don't know the size of the long so we use a}
+00171 \textcolor{comment}{     * simple trick. */}
+00172     one = ULONG\_MAX; \textcolor{comment}{/* All bits set to 1.*/}
+00173     one >>= 1;       \textcolor{comment}{/* All bits set to 1 but the MSB. */}
+00174     one = ~one;      \textcolor{comment}{/* All bits set to 0 but the MSB. */}
+00175 
+00176     \textcolor{keywordflow}{while}(one) \{
+00177         \textcolor{keywordflow}{if} (((one & word) != 0) == bit) \textcolor{keywordflow}{return} pos;
+00178         pos++;
+00179         one >>= 1;
+00180     \}
+00181 
+00182     \textcolor{comment}{/* If we reached this point, there is a bug in the algorithm, since}
+00183 \textcolor{comment}{     * the case of no match is handled as a special case before. */}
+00184     \hyperlink{server_8h_a11cc378e7778a830b41240578de3b204}{serverPanic}(\textcolor{stringliteral}{"End of redisBitpos() reached."});
+00185     \textcolor{keywordflow}{return} 0; \textcolor{comment}{/* Just to avoid warnings. */}
+00186 \}
+00187 
+00188 \textcolor{comment}{/* The following set.*Bitfield and get.*Bitfield functions implement setting}
+00189 \textcolor{comment}{ * and getting arbitrary size (up to 64 bits) signed and unsigned integers}
+00190 \textcolor{comment}{ * at arbitrary positions into a bitmap.}
+00191 \textcolor{comment}{ *}
+00192 \textcolor{comment}{ * The representation considers the bitmap as having the bit number 0 to be}
+00193 \textcolor{comment}{ * the most significant bit of the first byte, and so forth, so for example}
+00194 \textcolor{comment}{ * setting a 5 bits unsigned integer to value 23 at offset 7 into a bitmap}
+00195 \textcolor{comment}{ * previously set to all zeroes, will produce the following representation:}
+00196 \textcolor{comment}{ *}
+00197 \textcolor{comment}{ * +--------+--------+}
+00198 \textcolor{comment}{ * |00000001|01110000|}
+00199 \textcolor{comment}{ * +--------+--------+}
+00200 \textcolor{comment}{ *}
+00201 \textcolor{comment}{ * When offsets and integer sizes are aligned to bytes boundaries, this is the}
+00202 \textcolor{comment}{ * same as big endian, however when such alignment does not exist, its important}
+00203 \textcolor{comment}{ * to also understand how the bits inside a byte are ordered.}
+00204 \textcolor{comment}{ *}
+00205 \textcolor{comment}{ * Note that this format follows the same convention as SETBIT and related}
+00206 \textcolor{comment}{ * commands.}
+00207 \textcolor{comment}{ */}
+00208 
+00209 \textcolor{keywordtype}{void} setUnsignedBitfield(\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *p, uint64\_t offset, uint64\_t bits, uint64\_t value) \{
+00210     uint64\_t byte, bit, byteval, bitval, j;
+00211 
+00212     \textcolor{keywordflow}{for} (j = 0; j < bits; j++) \{
+00213         bitval = (value & ((uint64\_t)1<<(bits-1-j))) != 0;
+00214         byte = offset >> 3;
+00215         bit = 7 - (offset & 0x7);
+00216         byteval = p[byte];
+00217         byteval &= ~(1 << bit);
+00218         byteval |= bitval << bit;
+00219         p[byte] = byteval & 0xff;
+00220         offset++;
+00221     \}
+00222 \}
+00223 
+00224 \textcolor{keywordtype}{void} setSignedBitfield(\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *p, uint64\_t offset, uint64\_t bits, int64\_t value) \{
+00225     uint64\_t uv = value; \textcolor{comment}{/* Casting will add UINT64\_MAX + 1 if v is negative. */}
+00226     setUnsignedBitfield(p,offset,bits,uv);
+00227 \}
+00228 
+00229 uint64\_t getUnsignedBitfield(\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *p, uint64\_t offset, uint64\_t bits) \{
+00230     uint64\_t byte, bit, byteval, bitval, j, value = 0;
+00231 
+00232     \textcolor{keywordflow}{for} (j = 0; j < bits; j++) \{
+00233         byte = offset >> 3;
+00234         bit = 7 - (offset & 0x7);
+00235         byteval = p[byte];
+00236         bitval = (byteval >> bit) & 1;
+00237         value = (value<<1) | bitval;
+00238         offset++;
+00239     \}
+00240     \textcolor{keywordflow}{return} value;
+00241 \}
+00242 
+00243 int64\_t getSignedBitfield(\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *p, uint64\_t offset, uint64\_t bits) \{
+00244     int64\_t value;
+00245     \textcolor{keyword}{union} \{uint64\_t u; int64\_t i;\} conv;
+00246 
+00247     \textcolor{comment}{/* Converting from unsigned to signed is undefined when the value does}
+00248 \textcolor{comment}{     * not fit, however here we assume two's complement and the original value}
+00249 \textcolor{comment}{     * was obtained from signed -> unsigned conversion, so we'll find the}
+00250 \textcolor{comment}{     * most significant bit set if the original value was negative.}
+00251 \textcolor{comment}{     *}
+00252 \textcolor{comment}{     * Note that two's complement is mandatory for exact-width types}
+00253 \textcolor{comment}{     * according to the C99 standard. */}
+00254     conv.u = getUnsignedBitfield(p,offset,bits);
+00255     value = conv.i;
+00256 
+00257     \textcolor{comment}{/* If the top significant bit is 1, propagate it to all the}
+00258 \textcolor{comment}{     * higher bits for two's complement representation of signed}
+00259 \textcolor{comment}{     * integers. */}
+00260     \textcolor{keywordflow}{if} (value & ((uint64\_t)1 << (bits-1)))
+00261         value |= ((uint64\_t)-1) << bits;
+00262     \textcolor{keywordflow}{return} value;
+00263 \}
+00264 
+00265 \textcolor{comment}{/* The following two functions detect overflow of a value in the context}
+00266 \textcolor{comment}{ * of storing it as an unsigned or signed integer with the specified}
+00267 \textcolor{comment}{ * number of bits. The functions both take the value and a possible increment.}
+00268 \textcolor{comment}{ * If no overflow could happen and the value+increment fit inside the limits,}
+00269 \textcolor{comment}{ * then zero is returned, otherwise in case of overflow, 1 is returned,}
+00270 \textcolor{comment}{ * otherwise in case of underflow, -1 is returned.}
+00271 \textcolor{comment}{ *}
+00272 \textcolor{comment}{ * When non-zero is returned (oferflow or underflow), if not NULL, *limit is}
+00273 \textcolor{comment}{ * set to the value the operation should result when an overflow happens,}
+00274 \textcolor{comment}{ * depending on the specified overflow semantics:}
+00275 \textcolor{comment}{ *}
+00276 \textcolor{comment}{ * For BFOVERFLOW\_SAT if 1 is returned, *limit it is set maximum value that}
+00277 \textcolor{comment}{ * you can store in that integer. when -1 is returned, *limit is set to the}
+00278 \textcolor{comment}{ * minimum value that an integer of that size can represent.}
+00279 \textcolor{comment}{ *}
+00280 \textcolor{comment}{ * For BFOVERFLOW\_WRAP *limit is set by performing the operation in order to}
+00281 \textcolor{comment}{ * "wrap" around towards zero for unsigned integers, or towards the most}
+00282 \textcolor{comment}{ * negative number that is possible to represent for signed integers. */}
+00283 
+00284 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{BFOVERFLOW\_WRAP} 0
+00285 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{BFOVERFLOW\_SAT} 1
+00286 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{BFOVERFLOW\_FAIL} 2 \textcolor{comment}{/* Used by the BITFIELD command implementation. */}
+00287 
+00288 \textcolor{keywordtype}{int} checkUnsignedBitfieldOverflow(uint64\_t value, int64\_t incr, uint64\_t bits, \textcolor{keywordtype}{int} owtype, uint64\_t *
+      limit) \{
+00289     uint64\_t max = (bits == 64) ? UINT64\_MAX : (((uint64\_t)1<<bits)-1);
+00290     int64\_t maxincr = max-value;
+00291     int64\_t minincr = -value;
+00292 
+00293     \textcolor{keywordflow}{if} (value > max || (incr > 0 && incr > maxincr)) \{
+00294         \textcolor{keywordflow}{if} (limit) \{
+00295             \textcolor{keywordflow}{if} (owtype == \hyperlink{bitops_8c_a4ecdfa50fecb0c7c8f11f098d9b808e8}{BFOVERFLOW\_WRAP}) \{
+00296                 \textcolor{keywordflow}{goto} handle\_wrap;
+00297             \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (owtype == \hyperlink{bitops_8c_abe656810f7c24542b4451c96b960cae1}{BFOVERFLOW\_SAT}) \{
+00298                 *limit = max;
+00299             \}
+00300         \}
+00301         \textcolor{keywordflow}{return} 1;
+00302     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (incr < 0 && incr < minincr) \{
+00303         \textcolor{keywordflow}{if} (limit) \{
+00304             \textcolor{keywordflow}{if} (owtype == \hyperlink{bitops_8c_a4ecdfa50fecb0c7c8f11f098d9b808e8}{BFOVERFLOW\_WRAP}) \{
+00305                 \textcolor{keywordflow}{goto} handle\_wrap;
+00306             \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (owtype == \hyperlink{bitops_8c_abe656810f7c24542b4451c96b960cae1}{BFOVERFLOW\_SAT}) \{
+00307                 *limit = 0;
+00308             \}
+00309         \}
+00310         \textcolor{keywordflow}{return} -1;
+00311     \}
+00312     \textcolor{keywordflow}{return} 0;
+00313 
+00314 handle\_wrap:
+00315     \{
+00316         uint64\_t mask = ((uint64\_t)-1) << bits;
+00317         uint64\_t res = value+incr;
+00318 
+00319         res &= ~mask;
+00320         *limit = res;
+00321     \}
+00322     \textcolor{keywordflow}{return} 1;
+00323 \}
+00324 
+00325 \textcolor{keywordtype}{int} checkSignedBitfieldOverflow(int64\_t value, int64\_t incr, uint64\_t bits, \textcolor{keywordtype}{int} owtype, int64\_t *limit
+      ) \{
+00326     int64\_t max = (bits == 64) ? INT64\_MAX : (((int64\_t)1<<(bits-1))-1);
+00327     int64\_t min = (-max)-1;
+00328 
+00329     \textcolor{comment}{/* Note that maxincr and minincr could overflow, but we use the values}
+00330 \textcolor{comment}{     * only after checking 'value' range, so when we use it no overflow}
+00331 \textcolor{comment}{     * happens. */}
+00332     int64\_t maxincr = max-value;
+00333     int64\_t minincr = min-value;
+00334 
+00335     \textcolor{keywordflow}{if} (value > max || (bits != 64 && incr > maxincr) || (value >= 0 && incr > 0 && incr > maxincr))
+00336     \{
+00337         \textcolor{keywordflow}{if} (limit) \{
+00338             \textcolor{keywordflow}{if} (owtype == \hyperlink{bitops_8c_a4ecdfa50fecb0c7c8f11f098d9b808e8}{BFOVERFLOW\_WRAP}) \{
+00339                 \textcolor{keywordflow}{goto} handle\_wrap;
+00340             \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (owtype == \hyperlink{bitops_8c_abe656810f7c24542b4451c96b960cae1}{BFOVERFLOW\_SAT}) \{
+00341                 *limit = max;
+00342             \}
+00343         \}
+00344         \textcolor{keywordflow}{return} 1;
+00345     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (value < min || (bits != 64 && incr < minincr) || (value < 0 && incr < 0 && incr < 
+      minincr)) \{
+00346         \textcolor{keywordflow}{if} (limit) \{
+00347             \textcolor{keywordflow}{if} (owtype == \hyperlink{bitops_8c_a4ecdfa50fecb0c7c8f11f098d9b808e8}{BFOVERFLOW\_WRAP}) \{
+00348                 \textcolor{keywordflow}{goto} handle\_wrap;
+00349             \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (owtype == \hyperlink{bitops_8c_abe656810f7c24542b4451c96b960cae1}{BFOVERFLOW\_SAT}) \{
+00350                 *limit = min;
+00351             \}
+00352         \}
+00353         \textcolor{keywordflow}{return} -1;
+00354     \}
+00355     \textcolor{keywordflow}{return} 0;
+00356 
+00357 handle\_wrap:
+00358     \{
+00359         uint64\_t mask = ((uint64\_t)-1) << bits;
+00360         uint64\_t msb = (uint64\_t)1 << (bits-1);
+00361         uint64\_t a = value, b = incr, c;
+00362         c = a+b; \textcolor{comment}{/* Perform addition as unsigned so that's defined. */}
+00363 
+00364         \textcolor{comment}{/* If the sign bit is set, propagate to all the higher order}
+00365 \textcolor{comment}{         * bits, to cap the negative value. If it's clear, mask to}
+00366 \textcolor{comment}{         * the positive integer limit. */}
+00367         \textcolor{keywordflow}{if} (c & msb) \{
+00368             c |= mask;
+00369         \} \textcolor{keywordflow}{else} \{
+00370             c &= ~mask;
+00371         \}
+00372         *limit = c;
+00373     \}
+00374     \textcolor{keywordflow}{return} 1;
+00375 \}
+00376 
+00377 \textcolor{comment}{/* Debugging function. Just show bits in the specified bitmap. Not used}
+00378 \textcolor{comment}{ * but here for not having to rewrite it when debugging is needed. */}
+00379 \textcolor{keywordtype}{void} printBits(\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *p, \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} count) \{
+00380     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} j, i, byte;
+00381 
+00382     \textcolor{keywordflow}{for} (j = 0; j < count; j++) \{
+00383         byte = p[j];
+00384         \textcolor{keywordflow}{for} (i = 0x80; i > 0; i /= 2)
+00385             printf(\textcolor{stringliteral}{"%c"}, (byte & i) ? \textcolor{stringliteral}{'1'} : \textcolor{stringliteral}{'0'});
+00386         printf(\textcolor{stringliteral}{"|"});
+00387     \}
+00388     printf(\textcolor{stringliteral}{"\(\backslash\)n"});
+00389 \}
+00390 
+00391 \textcolor{comment}{/* -----------------------------------------------------------------------------}
+00392 \textcolor{comment}{ * Bits related string commands: GETBIT, SETBIT, BITCOUNT, BITOP.}
+00393 \textcolor{comment}{ * -------------------------------------------------------------------------- */}
+00394 
+00395 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{BITOP\_AND}   0
+00396 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{BITOP\_OR}    1
+00397 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{BITOP\_XOR}   2
+00398 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{BITOP\_NOT}   3
+00399 
+00400 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{BITFIELDOP\_GET} 0
+00401 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{BITFIELDOP\_SET} 1
+00402 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{BITFIELDOP\_INCRBY} 2
+00403 
+00404 \textcolor{comment}{/* This helper function used by GETBIT / SETBIT parses the bit offset argument}
+00405 \textcolor{comment}{ * making sure an error is returned if it is negative or if it overflows}
+00406 \textcolor{comment}{ * Redis 512 MB limit for the string value.}
+00407 \textcolor{comment}{ *}
+00408 \textcolor{comment}{ * If the 'hash' argument is true, and 'bits is positive, then the command}
+00409 \textcolor{comment}{ * will also parse bit offsets prefixed by "#". In such a case the offset}
+00410 \textcolor{comment}{ * is multiplied by 'bits'. This is useful for the BITFIELD command. */}
+00411 \textcolor{keywordtype}{int} getBitOffsetFromArgument(\hyperlink{structclient}{client} *c, robj *o, size\_t *offset, \textcolor{keywordtype}{int} hash, \textcolor{keywordtype}{int} bits) \{
+00412     \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} loffset;
+00413     \textcolor{keywordtype}{char} *err = \textcolor{stringliteral}{"bit offset is not an integer or out of range"};
+00414     \textcolor{keywordtype}{char} *p = o->ptr;
+00415     size\_t plen = sdslen(p);
+00416     \textcolor{keywordtype}{int} usehash = 0;
+00417 
+00418     \textcolor{comment}{/* Handle #<offset> form. */}
+00419     \textcolor{keywordflow}{if} (p[0] == \textcolor{stringliteral}{'#'} && hash && bits > 0) usehash = 1;
+00420 
+00421     \textcolor{keywordflow}{if} (string2ll(p+usehash,plen-usehash,&loffset) == 0) \{
+00422         addReplyError(c,err);
+00423         \textcolor{keywordflow}{return} \hyperlink{server_8h_af98ac28d5f4d23d7ed5985188e6fb7d1}{C\_ERR};
+00424     \}
+00425 
+00426     \textcolor{comment}{/* Adjust the offset by 'bits' for #<offset> form. */}
+00427     \textcolor{keywordflow}{if} (usehash) loffset *= bits;
+00428 
+00429     \textcolor{comment}{/* Limit offset to 512MB in bytes */}
+00430     \textcolor{keywordflow}{if} ((loffset < 0) || ((\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} \textcolor{keywordtype}{long})loffset >> 3) >= (512*1024*1024))
+00431     \{
+00432         addReplyError(c,err);
+00433         \textcolor{keywordflow}{return} \hyperlink{server_8h_af98ac28d5f4d23d7ed5985188e6fb7d1}{C\_ERR};
+00434     \}
+00435 
+00436     *offset = (size\_t)loffset;
+00437     \textcolor{keywordflow}{return} \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK};
+00438 \}
+00439 
+00440 \textcolor{comment}{/* This helper function for BITFIELD parses a bitfield type in the form}
+00441 \textcolor{comment}{ * <sign><bits> where sign is 'u' or 'i' for unsigned and signed, and}
+00442 \textcolor{comment}{ * the bits is a value between 1 and 64. However 64 bits unsigned integers}
+00443 \textcolor{comment}{ * are reported as an error because of current limitations of Redis protocol}
+00444 \textcolor{comment}{ * to return unsigned integer values greater than INT64\_MAX.}
+00445 \textcolor{comment}{ *}
+00446 \textcolor{comment}{ * On error C\_ERR is returned and an error is sent to the client. */}
+00447 \textcolor{keywordtype}{int} getBitfieldTypeFromArgument(\hyperlink{structclient}{client} *c, robj *o, \textcolor{keywordtype}{int} *sign, \textcolor{keywordtype}{int} *bits) \{
+00448     \textcolor{keywordtype}{char} *p = o->ptr;
+00449     \textcolor{keywordtype}{char} *err = \textcolor{stringliteral}{"Invalid bitfield type. Use something like i16 u8. Note that u64 is not supported but
+       i64 is."};
+00450     \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} llbits;
+00451 
+00452     \textcolor{keywordflow}{if} (p[0] == \textcolor{stringliteral}{'i'}) \{
+00453         *sign = 1;
+00454     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (p[0] == \textcolor{stringliteral}{'u'}) \{
+00455         *sign = 0;
+00456     \} \textcolor{keywordflow}{else} \{
+00457         addReplyError(c,err);
+00458         \textcolor{keywordflow}{return} \hyperlink{server_8h_af98ac28d5f4d23d7ed5985188e6fb7d1}{C\_ERR};
+00459     \}
+00460 
+00461     \textcolor{keywordflow}{if} ((string2ll(p+1,strlen(p+1),&llbits)) == 0 ||
+00462         llbits < 1 ||
+00463         (*sign == 1 && llbits > 64) ||
+00464         (*sign == 0 && llbits > 63))
+00465     \{
+00466         addReplyError(c,err);
+00467         \textcolor{keywordflow}{return} \hyperlink{server_8h_af98ac28d5f4d23d7ed5985188e6fb7d1}{C\_ERR};
+00468     \}
+00469     *bits = llbits;
+00470     \textcolor{keywordflow}{return} \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK};
+00471 \}
+00472 
+00473 \textcolor{comment}{/* This is an helper function for commands implementations that need to write}
+00474 \textcolor{comment}{ * bits to a string object. The command creates or pad with zeroes the string}
+00475 \textcolor{comment}{ * so that the 'maxbit' bit can be addressed. The object is finally}
+00476 \textcolor{comment}{ * returned. Otherwise if the key holds a wrong type NULL is returned and}
+00477 \textcolor{comment}{ * an error is sent to the client. */}
+00478 robj *lookupStringForBitCommand(\hyperlink{structclient}{client} *c, size\_t maxbit) \{
+00479     size\_t byte = maxbit >> 3;
+00480     robj *o = lookupKeyWrite(c->db,c->argv[1]);
+00481 
+00482     \textcolor{keywordflow}{if} (o == NULL) \{
+00483         o = createObject(\hyperlink{server_8h_a65236ea160f69cdef33ec942092af88f}{OBJ\_STRING},sdsnewlen(NULL, byte+1));
+00484         dbAdd(c->db,c->argv[1],o);
+00485     \} \textcolor{keywordflow}{else} \{
+00486         \textcolor{keywordflow}{if} (checkType(c,o,\hyperlink{server_8h_a65236ea160f69cdef33ec942092af88f}{OBJ\_STRING})) \textcolor{keywordflow}{return} NULL;
+00487         o = dbUnshareStringValue(c->db,c->argv[1],o);
+00488         o->ptr = sdsgrowzero(o->ptr,byte+1);
+00489     \}
+00490     \textcolor{keywordflow}{return} o;
+00491 \}
+00492 
+00493 \textcolor{comment}{/* Return a pointer to the string object content, and stores its length}
+00494 \textcolor{comment}{ * in 'len'. The user is required to pass (likely stack allocated) buffer}
+00495 \textcolor{comment}{ * 'llbuf' of at least LONG\_STR\_SIZE bytes. Such a buffer is used in the case}
+00496 \textcolor{comment}{ * the object is integer encoded in order to provide the representation}
+00497 \textcolor{comment}{ * without usign heap allocation.}
+00498 \textcolor{comment}{ *}
+00499 \textcolor{comment}{ * The function returns the pointer to the object array of bytes representing}
+00500 \textcolor{comment}{ * the string it contains, that may be a pointer to 'llbuf' or to the}
+00501 \textcolor{comment}{ * internal object representation. As a side effect 'len' is filled with}
+00502 \textcolor{comment}{ * the length of such buffer.}
+00503 \textcolor{comment}{ *}
+00504 \textcolor{comment}{ * If the source object is NULL the function is guaranteed to return NULL}
+00505 \textcolor{comment}{ * and set 'len' to 0. */}
+00506 \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *getObjectReadOnlyString(robj *o, \textcolor{keywordtype}{long} *len, \textcolor{keywordtype}{char} *llbuf) \{
+00507     \hyperlink{server_8h_a88114b5169b4c382df6b56506285e56a}{serverAssert}(o->type == \hyperlink{server_8h_a65236ea160f69cdef33ec942092af88f}{OBJ\_STRING});
+00508     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *p = NULL;
+00509 
+00510     \textcolor{comment}{/* Set the 'p' pointer to the string, that can be just a stack allocated}
+00511 \textcolor{comment}{     * array if our string was integer encoded. */}
+00512     \textcolor{keywordflow}{if} (o && o->encoding == \hyperlink{server_8h_ae934cf008a0be0ef009c92c2d006a816}{OBJ\_ENCODING\_INT}) \{
+00513         p = (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char}*) llbuf;
+00514         \textcolor{keywordflow}{if} (len) *len = ll2string(llbuf,\hyperlink{server_8h_a39ec35278876f65fc1ef70b049856ca3}{LONG\_STR\_SIZE},(\textcolor{keywordtype}{long})o->ptr);
+00515     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (o) \{
+00516         p = (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char}*) o->ptr;
+00517         \textcolor{keywordflow}{if} (len) *len = sdslen(o->ptr);
+00518     \} \textcolor{keywordflow}{else} \{
+00519         \textcolor{keywordflow}{if} (len) *len = 0;
+00520     \}
+00521     \textcolor{keywordflow}{return} p;
+00522 \}
+00523 
+00524 \textcolor{comment}{/* SETBIT key offset bitvalue */}
+00525 \textcolor{keywordtype}{void} setbitCommand(\hyperlink{structclient}{client} *c) \{
+00526     robj *o;
+00527     \textcolor{keywordtype}{char} *err = \textcolor{stringliteral}{"bit is not an integer or out of range"};
+00528     size\_t bitoffset;
+00529     ssize\_t byte, bit;
+00530     \textcolor{keywordtype}{int} byteval, bitval;
+00531     \textcolor{keywordtype}{long} on;
+00532 
+00533     \textcolor{keywordflow}{if} (getBitOffsetFromArgument(c,c->argv[2],&bitoffset,0,0) != \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK})
+00534         \textcolor{keywordflow}{return};
+00535 
+00536     \textcolor{keywordflow}{if} (getLongFromObjectOrReply(c,c->argv[3],&on,err) != \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK})
+00537         \textcolor{keywordflow}{return};
+00538 
+00539     \textcolor{comment}{/* Bits can only be set or cleared... */}
+00540     \textcolor{keywordflow}{if} (on & ~1) \{
+00541         addReplyError(c,err);
+00542         \textcolor{keywordflow}{return};
+00543     \}
+00544 
+00545     \textcolor{keywordflow}{if} ((o = lookupStringForBitCommand(c,bitoffset)) == NULL) \textcolor{keywordflow}{return};
+00546 
+00547     \textcolor{comment}{/* Get current values */}
+00548     byte = bitoffset >> 3;
+00549     byteval = ((uint8\_t*)o->ptr)[byte];
+00550     bit = 7 - (bitoffset & 0x7);
+00551     bitval = byteval & (1 << bit);
+00552 
+00553     \textcolor{comment}{/* Update byte with new bit value and return original value */}
+00554     byteval &= ~(1 << bit);
+00555     byteval |= ((on & 0x1) << bit);
+00556     ((uint8\_t*)o->ptr)[byte] = byteval;
+00557     signalModifiedKey(c->db,c->argv[1]);
+00558     notifyKeyspaceEvent(\hyperlink{server_8h_a1902292b73b71baa65d86db2d61b47ce}{NOTIFY\_STRING},\textcolor{stringliteral}{"setbit"},c->argv[1],c->db->id);
+00559     server.dirty++;
+00560     addReply(c, bitval ? shared.cone : shared.czero);
+00561 \}
+00562 
+00563 \textcolor{comment}{/* GETBIT key offset */}
+00564 \textcolor{keywordtype}{void} getbitCommand(\hyperlink{structclient}{client} *c) \{
+00565     robj *o;
+00566     \textcolor{keywordtype}{char} llbuf[32];
+00567     size\_t bitoffset;
+00568     size\_t byte, bit;
+00569     size\_t bitval = 0;
+00570 
+00571     \textcolor{keywordflow}{if} (getBitOffsetFromArgument(c,c->argv[2],&bitoffset,0,0) != \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK})
+00572         \textcolor{keywordflow}{return};
+00573 
+00574     \textcolor{keywordflow}{if} ((o = lookupKeyReadOrReply(c,c->argv[1],shared.czero)) == NULL ||
+00575         checkType(c,o,\hyperlink{server_8h_a65236ea160f69cdef33ec942092af88f}{OBJ\_STRING})) \textcolor{keywordflow}{return};
+00576 
+00577     byte = bitoffset >> 3;
+00578     bit = 7 - (bitoffset & 0x7);
+00579     \textcolor{keywordflow}{if} (\hyperlink{server_8h_afcfb5bd97af52d1dbce331745cae030c}{sdsEncodedObject}(o)) \{
+00580         \textcolor{keywordflow}{if} (byte < sdslen(o->ptr))
+00581             bitval = ((uint8\_t*)o->ptr)[byte] & (1 << bit);
+00582     \} \textcolor{keywordflow}{else} \{
+00583         \textcolor{keywordflow}{if} (byte < (size\_t)ll2string(llbuf,\textcolor{keyword}{sizeof}(llbuf),(\textcolor{keywordtype}{long})o->ptr))
+00584             bitval = llbuf[byte] & (1 << bit);
+00585     \}
+00586 
+00587     addReply(c, bitval ? shared.cone : shared.czero);
+00588 \}
+00589 
+00590 \textcolor{comment}{/* BITOP op\_name target\_key src\_key1 src\_key2 src\_key3 ... src\_keyN */}
+00591 \textcolor{keywordtype}{void} bitopCommand(\hyperlink{structclient}{client} *c) \{
+00592     \textcolor{keywordtype}{char} *opname = c->argv[1]->ptr;
+00593     robj *o, *targetkey = c->argv[2];
+00594     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} op, j, numkeys;
+00595     robj **objects;      \textcolor{comment}{/* Array of source objects. */}
+00596     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} **src; \textcolor{comment}{/* Array of source strings pointers. */}
+00597     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} *len, maxlen = 0; \textcolor{comment}{/* Array of length of src strings,}
+00598 \textcolor{comment}{                                       and max len. */}
+00599     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} minlen = 0;    \textcolor{comment}{/* Min len among the input keys. */}
+00600     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *res = NULL; \textcolor{comment}{/* Resulting string. */}
+00601 
+00602     \textcolor{comment}{/* Parse the operation name. */}
+00603     \textcolor{keywordflow}{if} ((opname[0] == \textcolor{stringliteral}{'a'} || opname[0] == \textcolor{stringliteral}{'A'}) && !strcasecmp(opname,\textcolor{stringliteral}{"and"}))
+00604         op = \hyperlink{bitops_8c_adb2b31ac9285af6d27408c81c4a1a637}{BITOP\_AND};
+00605     \textcolor{keywordflow}{else} \textcolor{keywordflow}{if}((opname[0] == \textcolor{stringliteral}{'o'} || opname[0] == \textcolor{stringliteral}{'O'}) && !strcasecmp(opname,\textcolor{stringliteral}{"or"}))
+00606         op = \hyperlink{bitops_8c_a3877788c36f67d63804710ce8a80d100}{BITOP\_OR};
+00607     \textcolor{keywordflow}{else} \textcolor{keywordflow}{if}((opname[0] == \textcolor{stringliteral}{'x'} || opname[0] == \textcolor{stringliteral}{'X'}) && !strcasecmp(opname,\textcolor{stringliteral}{"xor"}))
+00608         op = \hyperlink{bitops_8c_a29fde80dd21281f9ada69d9e65109d14}{BITOP\_XOR};
+00609     \textcolor{keywordflow}{else} \textcolor{keywordflow}{if}((opname[0] == \textcolor{stringliteral}{'n'} || opname[0] == \textcolor{stringliteral}{'N'}) && !strcasecmp(opname,\textcolor{stringliteral}{"not"}))
+00610         op = \hyperlink{bitops_8c_a4fa18b2ac29f1722d9db66461bed3288}{BITOP\_NOT};
+00611     \textcolor{keywordflow}{else} \{
+00612         addReply(c,shared.syntaxerr);
+00613         \textcolor{keywordflow}{return};
+00614     \}
+00615 
+00616     \textcolor{comment}{/* Sanity check: NOT accepts only a single key argument. */}
+00617     \textcolor{keywordflow}{if} (op == \hyperlink{bitops_8c_a4fa18b2ac29f1722d9db66461bed3288}{BITOP\_NOT} && c->argc != 4) \{
+00618         addReplyError(c,\textcolor{stringliteral}{"BITOP NOT must be called with a single source key."});
+00619         \textcolor{keywordflow}{return};
+00620     \}
+00621 
+00622     \textcolor{comment}{/* Lookup keys, and store pointers to the string objects into an array. */}
+00623     numkeys = c->argc - 3;
+00624     src = zmalloc(\textcolor{keyword}{sizeof}(\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char}*) * numkeys);
+00625     len = zmalloc(\textcolor{keyword}{sizeof}(\textcolor{keywordtype}{long}) * numkeys);
+00626     objects = zmalloc(\textcolor{keyword}{sizeof}(robj*) * numkeys);
+00627     \textcolor{keywordflow}{for} (j = 0; j < numkeys; j++) \{
+00628         o = lookupKeyRead(c->db,c->argv[j+3]);
+00629         \textcolor{comment}{/* Handle non-existing keys as empty strings. */}
+00630         \textcolor{keywordflow}{if} (o == NULL) \{
+00631             objects[j] = NULL;
+00632             src[j] = NULL;
+00633             len[j] = 0;
+00634             minlen = 0;
+00635             \textcolor{keywordflow}{continue};
+00636         \}
+00637         \textcolor{comment}{/* Return an error if one of the keys is not a string. */}
+00638         \textcolor{keywordflow}{if} (checkType(c,o,\hyperlink{server_8h_a65236ea160f69cdef33ec942092af88f}{OBJ\_STRING})) \{
+00639             \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} i;
+00640             \textcolor{keywordflow}{for} (i = 0; i < j; i++) \{
+00641                 \textcolor{keywordflow}{if} (objects[i])
+00642                     decrRefCount(objects[i]);
+00643             \}
+00644             zfree(src);
+00645             zfree(len);
+00646             zfree(objects);
+00647             \textcolor{keywordflow}{return};
+00648         \}
+00649         objects[j] = getDecodedObject(o);
+00650         src[j] = objects[j]->ptr;
+00651         len[j] = sdslen(objects[j]->ptr);
+00652         \textcolor{keywordflow}{if} (len[j] > maxlen) maxlen = len[j];
+00653         \textcolor{keywordflow}{if} (j == 0 || len[j] < minlen) minlen = len[j];
+00654     \}
+00655 
+00656     \textcolor{comment}{/* Compute the bit operation, if at least one string is not empty. */}
+00657     \textcolor{keywordflow}{if} (maxlen) \{
+00658         res = (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char}*) sdsnewlen(NULL,maxlen);
+00659         \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} output, byte;
+00660         \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} i;
+00661 
+00662         \textcolor{comment}{/* Fast path: as far as we have data for all the input bitmaps we}
+00663 \textcolor{comment}{         * can take a fast path that performs much better than the}
+00664 \textcolor{comment}{         * vanilla algorithm. On ARM we skip the fast path since it will}
+00665 \textcolor{comment}{         * result in GCC compiling the code using multiple-words load/store}
+00666 \textcolor{comment}{         * operations that are not supported even in ARM >= v6. */}
+00667         j = 0;
+00668         \textcolor{preprocessor}{#}\textcolor{preprocessor}{ifndef} \textcolor{preprocessor}{USE\_ALIGNED\_ACCESS}
+00669         \textcolor{keywordflow}{if} (minlen >= \textcolor{keyword}{sizeof}(\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long})*4 && numkeys <= 16) \{
+00670             \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} *lp[16];
+00671             \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} *lres = (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}*) res;
+00672 
+00673             \textcolor{comment}{/* Note: sds pointer is always aligned to 8 byte boundary. */}
+00674             memcpy(lp,src,\textcolor{keyword}{sizeof}(\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}*)*numkeys);
+00675             memcpy(res,src[0],minlen);
+00676 
+00677             \textcolor{comment}{/* Different branches per different operations for speed (sorry). */}
+00678             \textcolor{keywordflow}{if} (op == \hyperlink{bitops_8c_adb2b31ac9285af6d27408c81c4a1a637}{BITOP\_AND}) \{
+00679                 \textcolor{keywordflow}{while}(minlen >= \textcolor{keyword}{sizeof}(\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long})*4) \{
+00680                     \textcolor{keywordflow}{for} (i = 1; i < numkeys; i++) \{
+00681                         lres[0] &= lp[i][0];
+00682                         lres[1] &= lp[i][1];
+00683                         lres[2] &= lp[i][2];
+00684                         lres[3] &= lp[i][3];
+00685                         lp[i]+=4;
+00686                     \}
+00687                     lres+=4;
+00688                     j += \textcolor{keyword}{sizeof}(\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long})*4;
+00689                     minlen -= \textcolor{keyword}{sizeof}(\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long})*4;
+00690                 \}
+00691             \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (op == \hyperlink{bitops_8c_a3877788c36f67d63804710ce8a80d100}{BITOP\_OR}) \{
+00692                 \textcolor{keywordflow}{while}(minlen >= \textcolor{keyword}{sizeof}(\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long})*4) \{
+00693                     \textcolor{keywordflow}{for} (i = 1; i < numkeys; i++) \{
+00694                         lres[0] |= lp[i][0];
+00695                         lres[1] |= lp[i][1];
+00696                         lres[2] |= lp[i][2];
+00697                         lres[3] |= lp[i][3];
+00698                         lp[i]+=4;
+00699                     \}
+00700                     lres+=4;
+00701                     j += \textcolor{keyword}{sizeof}(\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long})*4;
+00702                     minlen -= \textcolor{keyword}{sizeof}(\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long})*4;
+00703                 \}
+00704             \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (op == \hyperlink{bitops_8c_a29fde80dd21281f9ada69d9e65109d14}{BITOP\_XOR}) \{
+00705                 \textcolor{keywordflow}{while}(minlen >= \textcolor{keyword}{sizeof}(\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long})*4) \{
+00706                     \textcolor{keywordflow}{for} (i = 1; i < numkeys; i++) \{
+00707                         lres[0] ^= lp[i][0];
+00708                         lres[1] ^= lp[i][1];
+00709                         lres[2] ^= lp[i][2];
+00710                         lres[3] ^= lp[i][3];
+00711                         lp[i]+=4;
+00712                     \}
+00713                     lres+=4;
+00714                     j += \textcolor{keyword}{sizeof}(\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long})*4;
+00715                     minlen -= \textcolor{keyword}{sizeof}(\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long})*4;
+00716                 \}
+00717             \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (op == \hyperlink{bitops_8c_a4fa18b2ac29f1722d9db66461bed3288}{BITOP\_NOT}) \{
+00718                 \textcolor{keywordflow}{while}(minlen >= \textcolor{keyword}{sizeof}(\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long})*4) \{
+00719                     lres[0] = ~lres[0];
+00720                     lres[1] = ~lres[1];
+00721                     lres[2] = ~lres[2];
+00722                     lres[3] = ~lres[3];
+00723                     lres+=4;
+00724                     j += \textcolor{keyword}{sizeof}(\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long})*4;
+00725                     minlen -= \textcolor{keyword}{sizeof}(\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long})*4;
+00726                 \}
+00727             \}
+00728         \}
+00729         \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00730 
+00731         \textcolor{comment}{/* j is set to the next byte to process by the previous loop. */}
+00732         \textcolor{keywordflow}{for} (; j < maxlen; j++) \{
+00733             output = (len[0] <= j) ? 0 : src[0][j];
+00734             \textcolor{keywordflow}{if} (op == \hyperlink{bitops_8c_a4fa18b2ac29f1722d9db66461bed3288}{BITOP\_NOT}) output = ~output;
+00735             \textcolor{keywordflow}{for} (i = 1; i < numkeys; i++) \{
+00736                 byte = (len[i] <= j) ? 0 : src[i][j];
+00737                 \textcolor{keywordflow}{switch}(op) \{
+00738                 \textcolor{keywordflow}{case} \hyperlink{bitops_8c_adb2b31ac9285af6d27408c81c4a1a637}{BITOP\_AND}: output &= byte; \textcolor{keywordflow}{break};
+00739                 \textcolor{keywordflow}{case} \hyperlink{bitops_8c_a3877788c36f67d63804710ce8a80d100}{BITOP\_OR}:  output |= byte; \textcolor{keywordflow}{break};
+00740                 \textcolor{keywordflow}{case} \hyperlink{bitops_8c_a29fde80dd21281f9ada69d9e65109d14}{BITOP\_XOR}: output ^= byte; \textcolor{keywordflow}{break};
+00741                 \}
+00742             \}
+00743             res[j] = output;
+00744         \}
+00745     \}
+00746     \textcolor{keywordflow}{for} (j = 0; j < numkeys; j++) \{
+00747         \textcolor{keywordflow}{if} (objects[j])
+00748             decrRefCount(objects[j]);
+00749     \}
+00750     zfree(src);
+00751     zfree(len);
+00752     zfree(objects);
+00753 
+00754     \textcolor{comment}{/* Store the computed value into the target key */}
+00755     \textcolor{keywordflow}{if} (maxlen) \{
+00756         o = createObject(\hyperlink{server_8h_a65236ea160f69cdef33ec942092af88f}{OBJ\_STRING},res);
+00757         setKey(c->db,targetkey,o);
+00758         notifyKeyspaceEvent(\hyperlink{server_8h_a1902292b73b71baa65d86db2d61b47ce}{NOTIFY\_STRING},\textcolor{stringliteral}{"set"},targetkey,c->db->id);
+00759         decrRefCount(o);
+00760     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (dbDelete(c->db,targetkey)) \{
+00761         signalModifiedKey(c->db,targetkey);
+00762         notifyKeyspaceEvent(\hyperlink{server_8h_a9fa53dd1068e62365f3964ad3479eec2}{NOTIFY\_GENERIC},\textcolor{stringliteral}{"del"},targetkey,c->db->id);
+00763     \}
+00764     server.dirty++;
+00765     addReplyLongLong(c,maxlen); \textcolor{comment}{/* Return the output string length in bytes. */}
+00766 \}
+00767 
+00768 \textcolor{comment}{/* BITCOUNT key [start end] */}
+00769 \textcolor{keywordtype}{void} bitcountCommand(\hyperlink{structclient}{client} *c) \{
+00770     robj *o;
+00771     \textcolor{keywordtype}{long} start, end, strlen;
+00772     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *p;
+00773     \textcolor{keywordtype}{char} llbuf[\hyperlink{server_8h_a39ec35278876f65fc1ef70b049856ca3}{LONG\_STR\_SIZE}];
+00774 
+00775     \textcolor{comment}{/* Lookup, check for type, and return 0 for non existing keys. */}
+00776     \textcolor{keywordflow}{if} ((o = lookupKeyReadOrReply(c,c->argv[1],shared.czero)) == NULL ||
+00777         checkType(c,o,\hyperlink{server_8h_a65236ea160f69cdef33ec942092af88f}{OBJ\_STRING})) \textcolor{keywordflow}{return};
+00778     p = getObjectReadOnlyString(o,&strlen,llbuf);
+00779 
+00780     \textcolor{comment}{/* Parse start/end range if any. */}
+00781     \textcolor{keywordflow}{if} (c->argc == 4) \{
+00782         \textcolor{keywordflow}{if} (getLongFromObjectOrReply(c,c->argv[2],&start,NULL) != \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK})
+00783             \textcolor{keywordflow}{return};
+00784         \textcolor{keywordflow}{if} (getLongFromObjectOrReply(c,c->argv[3],&end,NULL) != \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK})
+00785             \textcolor{keywordflow}{return};
+00786         \textcolor{comment}{/* Convert negative indexes */}
+00787         \textcolor{keywordflow}{if} (start < 0 && end < 0 && start > end) \{
+00788             addReply(c,shared.czero);
+00789             \textcolor{keywordflow}{return};
+00790         \}
+00791         \textcolor{keywordflow}{if} (start < 0) start = strlen+start;
+00792         \textcolor{keywordflow}{if} (end < 0) end = strlen+end;
+00793         \textcolor{keywordflow}{if} (start < 0) start = 0;
+00794         \textcolor{keywordflow}{if} (end < 0) end = 0;
+00795         \textcolor{keywordflow}{if} (end >= strlen) end = strlen-1;
+00796     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (c->argc == 2) \{
+00797         \textcolor{comment}{/* The whole string. */}
+00798         start = 0;
+00799         end = strlen-1;
+00800     \} \textcolor{keywordflow}{else} \{
+00801         \textcolor{comment}{/* Syntax error. */}
+00802         addReply(c,shared.syntaxerr);
+00803         \textcolor{keywordflow}{return};
+00804     \}
+00805 
+00806     \textcolor{comment}{/* Precondition: end >= 0 && end < strlen, so the only condition where}
+00807 \textcolor{comment}{     * zero can be returned is: start > end. */}
+00808     \textcolor{keywordflow}{if} (start > end) \{
+00809         addReply(c,shared.czero);
+00810     \} \textcolor{keywordflow}{else} \{
+00811         \textcolor{keywordtype}{long} bytes = end-start+1;
+00812 
+00813         addReplyLongLong(c,redisPopcount(p+start,bytes));
+00814     \}
+00815 \}
+00816 
+00817 \textcolor{comment}{/* BITPOS key bit [start [end]] */}
+00818 \textcolor{keywordtype}{void} bitposCommand(\hyperlink{structclient}{client} *c) \{
+00819     robj *o;
+00820     \textcolor{keywordtype}{long} bit, start, end, strlen;
+00821     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *p;
+00822     \textcolor{keywordtype}{char} llbuf[\hyperlink{server_8h_a39ec35278876f65fc1ef70b049856ca3}{LONG\_STR\_SIZE}];
+00823     \textcolor{keywordtype}{int} end\_given = 0;
+00824 
+00825     \textcolor{comment}{/* Parse the bit argument to understand what we are looking for, set}
+00826 \textcolor{comment}{     * or clear bits. */}
+00827     \textcolor{keywordflow}{if} (getLongFromObjectOrReply(c,c->argv[2],&bit,NULL) != \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK})
+00828         \textcolor{keywordflow}{return};
+00829     \textcolor{keywordflow}{if} (bit != 0 && bit != 1) \{
+00830         addReplyError(c, \textcolor{stringliteral}{"The bit argument must be 1 or 0."});
+00831         \textcolor{keywordflow}{return};
+00832     \}
+00833 
+00834     \textcolor{comment}{/* If the key does not exist, from our point of view it is an infinite}
+00835 \textcolor{comment}{     * array of 0 bits. If the user is looking for the fist clear bit return 0,}
+00836 \textcolor{comment}{     * If the user is looking for the first set bit, return -1. */}
+00837     \textcolor{keywordflow}{if} ((o = lookupKeyRead(c->db,c->argv[1])) == NULL) \{
+00838         addReplyLongLong(c, bit ? -1 : 0);
+00839         \textcolor{keywordflow}{return};
+00840     \}
+00841     \textcolor{keywordflow}{if} (checkType(c,o,\hyperlink{server_8h_a65236ea160f69cdef33ec942092af88f}{OBJ\_STRING})) \textcolor{keywordflow}{return};
+00842     p = getObjectReadOnlyString(o,&strlen,llbuf);
+00843 
+00844     \textcolor{comment}{/* Parse start/end range if any. */}
+00845     \textcolor{keywordflow}{if} (c->argc == 4 || c->argc == 5) \{
+00846         \textcolor{keywordflow}{if} (getLongFromObjectOrReply(c,c->argv[3],&start,NULL) != \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK})
+00847             \textcolor{keywordflow}{return};
+00848         \textcolor{keywordflow}{if} (c->argc == 5) \{
+00849             \textcolor{keywordflow}{if} (getLongFromObjectOrReply(c,c->argv[4],&end,NULL) != \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK})
+00850                 \textcolor{keywordflow}{return};
+00851             end\_given = 1;
+00852         \} \textcolor{keywordflow}{else} \{
+00853             end = strlen-1;
+00854         \}
+00855         \textcolor{comment}{/* Convert negative indexes */}
+00856         \textcolor{keywordflow}{if} (start < 0) start = strlen+start;
+00857         \textcolor{keywordflow}{if} (end < 0) end = strlen+end;
+00858         \textcolor{keywordflow}{if} (start < 0) start = 0;
+00859         \textcolor{keywordflow}{if} (end < 0) end = 0;
+00860         \textcolor{keywordflow}{if} (end >= strlen) end = strlen-1;
+00861     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (c->argc == 3) \{
+00862         \textcolor{comment}{/* The whole string. */}
+00863         start = 0;
+00864         end = strlen-1;
+00865     \} \textcolor{keywordflow}{else} \{
+00866         \textcolor{comment}{/* Syntax error. */}
+00867         addReply(c,shared.syntaxerr);
+00868         \textcolor{keywordflow}{return};
+00869     \}
+00870 
+00871     \textcolor{comment}{/* For empty ranges (start > end) we return -1 as an empty range does}
+00872 \textcolor{comment}{     * not contain a 0 nor a 1. */}
+00873     \textcolor{keywordflow}{if} (start > end) \{
+00874         addReplyLongLong(c, -1);
+00875     \} \textcolor{keywordflow}{else} \{
+00876         \textcolor{keywordtype}{long} bytes = end-start+1;
+00877         \textcolor{keywordtype}{long} pos = redisBitpos(p+start,bytes,bit);
+00878 
+00879         \textcolor{comment}{/* If we are looking for clear bits, and the user specified an exact}
+00880 \textcolor{comment}{         * range with start-end, we can't consider the right of the range as}
+00881 \textcolor{comment}{         * zero padded (as we do when no explicit end is given).}
+00882 \textcolor{comment}{         *}
+00883 \textcolor{comment}{         * So if redisBitpos() returns the first bit outside the range,}
+00884 \textcolor{comment}{         * we return -1 to the caller, to mean, in the specified range there}
+00885 \textcolor{comment}{         * is not a single "0" bit. */}
+00886         \textcolor{keywordflow}{if} (end\_given && bit == 0 && pos == bytes*8) \{
+00887             addReplyLongLong(c,-1);
+00888             \textcolor{keywordflow}{return};
+00889         \}
+00890         \textcolor{keywordflow}{if} (pos != -1) pos += start*8; \textcolor{comment}{/* Adjust for the bytes we skipped. */}
+00891         addReplyLongLong(c,pos);
+00892     \}
+00893 \}
+00894 
+00895 \textcolor{comment}{/* BITFIELD key subcommmand-1 arg ... subcommand-2 arg ... subcommand-N ...}
+00896 \textcolor{comment}{ *}
+00897 \textcolor{comment}{ * Supported subcommands:}
+00898 \textcolor{comment}{ *}
+00899 \textcolor{comment}{ * GET <type> <offset>}
+00900 \textcolor{comment}{ * SET <type> <offset> <value>}
+00901 \textcolor{comment}{ * INCRBY <type> <offset> <increment>}
+00902 \textcolor{comment}{ * OVERFLOW [WRAP|SAT|FAIL]}
+00903 \textcolor{comment}{ */}
+00904 
+\Hypertarget{bitops_8c_source_l00905}\hyperlink{structbitfieldOp}{00905} \textcolor{keyword}{struct} \hyperlink{structbitfieldOp}{bitfieldOp} \{
+00906     uint64\_t offset;    \textcolor{comment}{/* Bitfield offset. */}
+00907     int64\_t i64;        \textcolor{comment}{/* Increment amount (INCRBY) or SET value */}
+00908     \textcolor{keywordtype}{int} opcode;         \textcolor{comment}{/* Operation id. */}
+00909     \textcolor{keywordtype}{int} owtype;         \textcolor{comment}{/* Overflow type to use. */}
+00910     \textcolor{keywordtype}{int} bits;           \textcolor{comment}{/* Integer bitfield bits width. */}
+00911     \textcolor{keywordtype}{int} sign;           \textcolor{comment}{/* True if signed, otherwise unsigned op. */}
+00912 \};
+00913 
+00914 \textcolor{keywordtype}{void} bitfieldCommand(\hyperlink{structclient}{client} *c) \{
+00915     robj *o;
+00916     size\_t bitoffset;
+00917     \textcolor{keywordtype}{int} j, numops = 0, changes = 0;
+00918     \textcolor{keyword}{struct} \hyperlink{structbitfieldOp}{bitfieldOp} *ops = NULL; \textcolor{comment}{/* Array of ops to execute at end. */}
+00919     \textcolor{keywordtype}{int} owtype = \hyperlink{bitops_8c_a4ecdfa50fecb0c7c8f11f098d9b808e8}{BFOVERFLOW\_WRAP}; \textcolor{comment}{/* Overflow type. */}
+00920     \textcolor{keywordtype}{int} readonly = 1;
+00921     size\_t higest\_write\_offset = 0;
+00922 
+00923     \textcolor{keywordflow}{for} (j = 2; j < c->argc; j++) \{
+00924         \textcolor{keywordtype}{int} remargs = c->argc-j-1; \textcolor{comment}{/* Remaining args other than current. */}
+00925         \textcolor{keywordtype}{char} *subcmd = c->argv[j]->ptr; \textcolor{comment}{/* Current command name. */}
+00926         \textcolor{keywordtype}{int} opcode; \textcolor{comment}{/* Current operation code. */}
+00927         \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} i64 = 0;  \textcolor{comment}{/* Signed SET value. */}
+00928         \textcolor{keywordtype}{int} sign = 0; \textcolor{comment}{/* Signed or unsigned type? */}
+00929         \textcolor{keywordtype}{int} bits = 0; \textcolor{comment}{/* Bitfield width in bits. */}
+00930 
+00931         \textcolor{keywordflow}{if} (!strcasecmp(subcmd,\textcolor{stringliteral}{"get"}) && remargs >= 2)
+00932             opcode = \hyperlink{bitops_8c_abb0e64d988f71e146be3778564d90e5f}{BITFIELDOP\_GET};
+00933         \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcasecmp(subcmd,\textcolor{stringliteral}{"set"}) && remargs >= 3)
+00934             opcode = \hyperlink{bitops_8c_a00d14d842300bc8ec501a5e1996c515f}{BITFIELDOP\_SET};
+00935         \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcasecmp(subcmd,\textcolor{stringliteral}{"incrby"}) && remargs >= 3)
+00936             opcode = \hyperlink{bitops_8c_aa91cdbb6feffa6f3ef145e62f0fb7706}{BITFIELDOP\_INCRBY};
+00937         \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcasecmp(subcmd,\textcolor{stringliteral}{"overflow"}) && remargs >= 1) \{
+00938             \textcolor{keywordtype}{char} *owtypename = c->argv[j+1]->ptr;
+00939             j++;
+00940             \textcolor{keywordflow}{if} (!strcasecmp(owtypename,\textcolor{stringliteral}{"wrap"}))
+00941                 owtype = \hyperlink{bitops_8c_a4ecdfa50fecb0c7c8f11f098d9b808e8}{BFOVERFLOW\_WRAP};
+00942             \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcasecmp(owtypename,\textcolor{stringliteral}{"sat"}))
+00943                 owtype = \hyperlink{bitops_8c_abe656810f7c24542b4451c96b960cae1}{BFOVERFLOW\_SAT};
+00944             \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcasecmp(owtypename,\textcolor{stringliteral}{"fail"}))
+00945                 owtype = \hyperlink{bitops_8c_a43973854211e7721d528708f55214302}{BFOVERFLOW\_FAIL};
+00946             \textcolor{keywordflow}{else} \{
+00947                 addReplyError(c,\textcolor{stringliteral}{"Invalid OVERFLOW type specified"});
+00948                 zfree(ops);
+00949                 \textcolor{keywordflow}{return};
+00950             \}
+00951             \textcolor{keywordflow}{continue};
+00952         \} \textcolor{keywordflow}{else} \{
+00953             addReply(c,shared.syntaxerr);
+00954             zfree(ops);
+00955             \textcolor{keywordflow}{return};
+00956         \}
+00957 
+00958         \textcolor{comment}{/* Get the type and offset arguments, common to all the ops. */}
+00959         \textcolor{keywordflow}{if} (getBitfieldTypeFromArgument(c,c->argv[j+1],&sign,&bits) != \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK}) \{
+00960             zfree(ops);
+00961             \textcolor{keywordflow}{return};
+00962         \}
+00963 
+00964         \textcolor{keywordflow}{if} (getBitOffsetFromArgument(c,c->argv[j+2],&bitoffset,1,bits) != 
+      \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK})\{
+00965             zfree(ops);
+00966             \textcolor{keywordflow}{return};
+00967         \}
+00968 
+00969         \textcolor{keywordflow}{if} (opcode != \hyperlink{bitops_8c_abb0e64d988f71e146be3778564d90e5f}{BITFIELDOP\_GET}) \{
+00970             readonly = 0;
+00971             \textcolor{keywordflow}{if} (higest\_write\_offset < bitoffset + bits - 1)
+00972                 higest\_write\_offset = bitoffset + bits - 1;
+00973             \textcolor{comment}{/* INCRBY and SET require another argument. */}
+00974             \textcolor{keywordflow}{if} (getLongLongFromObjectOrReply(c,c->argv[j+3],&i64,NULL) != 
+      \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK})\{
+00975                 zfree(ops);
+00976                 \textcolor{keywordflow}{return};
+00977             \}
+00978         \}
+00979 
+00980         \textcolor{comment}{/* Populate the array of operations we'll process. */}
+00981         ops = zrealloc(ops,\textcolor{keyword}{sizeof}(*ops)*(numops+1));
+00982         ops[numops].offset = bitoffset;
+00983         ops[numops].i64 = i64;
+00984         ops[numops].opcode = opcode;
+00985         ops[numops].owtype = owtype;
+00986         ops[numops].bits = bits;
+00987         ops[numops].sign = sign;
+00988         numops++;
+00989 
+00990         j += 3 - (opcode == \hyperlink{bitops_8c_abb0e64d988f71e146be3778564d90e5f}{BITFIELDOP\_GET});
+00991     \}
+00992 
+00993     \textcolor{keywordflow}{if} (readonly) \{
+00994         \textcolor{comment}{/* Lookup for read is ok if key doesn't exit, but errors}
+00995 \textcolor{comment}{         * if it's not a string. */}
+00996         o = lookupKeyRead(c->db,c->argv[1]);
+00997         \textcolor{keywordflow}{if} (o != NULL && checkType(c,o,\hyperlink{server_8h_a65236ea160f69cdef33ec942092af88f}{OBJ\_STRING})) \textcolor{keywordflow}{return};
+00998     \} \textcolor{keywordflow}{else} \{
+00999         \textcolor{comment}{/* Lookup by making room up to the farest bit reached by}
+01000 \textcolor{comment}{         * this operation. */}
+01001         \textcolor{keywordflow}{if} ((o = lookupStringForBitCommand(c,
+01002             higest\_write\_offset)) == NULL) \textcolor{keywordflow}{return};
+01003     \}
+01004 
+01005     addReplyMultiBulkLen(c,numops);
+01006 
+01007     \textcolor{comment}{/* Actually process the operations. */}
+01008     \textcolor{keywordflow}{for} (j = 0; j < numops; j++) \{
+01009         \textcolor{keyword}{struct} \hyperlink{structbitfieldOp}{bitfieldOp} *thisop = ops+j;
+01010 
+01011         \textcolor{comment}{/* Execute the operation. */}
+01012         \textcolor{keywordflow}{if} (thisop->opcode == \hyperlink{bitops_8c_a00d14d842300bc8ec501a5e1996c515f}{BITFIELDOP\_SET} ||
+01013             thisop->opcode == \hyperlink{bitops_8c_aa91cdbb6feffa6f3ef145e62f0fb7706}{BITFIELDOP\_INCRBY})
+01014         \{
+01015             \textcolor{comment}{/* SET and INCRBY: We handle both with the same code path}
+01016 \textcolor{comment}{             * for simplicity. SET return value is the previous value so}
+01017 \textcolor{comment}{             * we need fetch & store as well. */}
+01018 
+01019             \textcolor{comment}{/* We need two different but very similar code paths for signed}
+01020 \textcolor{comment}{             * and unsigned operations, since the set of functions to get/set}
+01021 \textcolor{comment}{             * the integers and the used variables types are different. */}
+01022             \textcolor{keywordflow}{if} (thisop->sign) \{
+01023                 int64\_t oldval, newval, wrapped, retval;
+01024                 \textcolor{keywordtype}{int} overflow;
+01025 
+01026                 oldval = getSignedBitfield(o->ptr,thisop->offset,
+01027                         thisop->bits);
+01028 
+01029                 \textcolor{keywordflow}{if} (thisop->opcode == \hyperlink{bitops_8c_aa91cdbb6feffa6f3ef145e62f0fb7706}{BITFIELDOP\_INCRBY}) \{
+01030                     newval = oldval + thisop->i64;
+01031                     overflow = checkSignedBitfieldOverflow(oldval,
+01032                             thisop->i64,thisop->bits,thisop->owtype,&wrapped);
+01033                     \textcolor{keywordflow}{if} (overflow) newval = wrapped;
+01034                     retval = newval;
+01035                 \} \textcolor{keywordflow}{else} \{
+01036                     newval = thisop->i64;
+01037                     overflow = checkSignedBitfieldOverflow(newval,
+01038                             0,thisop->bits,thisop->owtype,&wrapped);
+01039                     \textcolor{keywordflow}{if} (overflow) newval = wrapped;
+01040                     retval = oldval;
+01041                 \}
+01042 
+01043                 \textcolor{comment}{/* On overflow of type is "FAIL", don't write and return}
+01044 \textcolor{comment}{                 * NULL to signal the condition. */}
+01045                 \textcolor{keywordflow}{if} (!(overflow && thisop->owtype == \hyperlink{bitops_8c_a43973854211e7721d528708f55214302}{BFOVERFLOW\_FAIL})) \{
+01046                     addReplyLongLong(c,retval);
+01047                     setSignedBitfield(o->ptr,thisop->offset,
+01048                                       thisop->bits,newval);
+01049                 \} \textcolor{keywordflow}{else} \{
+01050                     addReply(c,shared.nullbulk);
+01051                 \}
+01052             \} \textcolor{keywordflow}{else} \{
+01053                 uint64\_t oldval, newval, wrapped, retval;
+01054                 \textcolor{keywordtype}{int} overflow;
+01055 
+01056                 oldval = getUnsignedBitfield(o->ptr,thisop->offset,
+01057                         thisop->bits);
+01058 
+01059                 \textcolor{keywordflow}{if} (thisop->opcode == \hyperlink{bitops_8c_aa91cdbb6feffa6f3ef145e62f0fb7706}{BITFIELDOP\_INCRBY}) \{
+01060                     newval = oldval + thisop->i64;
+01061                     overflow = checkUnsignedBitfieldOverflow(oldval,
+01062                             thisop->i64,thisop->bits,thisop->owtype,&wrapped);
+01063                     \textcolor{keywordflow}{if} (overflow) newval = wrapped;
+01064                     retval = newval;
+01065                 \} \textcolor{keywordflow}{else} \{
+01066                     newval = thisop->i64;
+01067                     overflow = checkUnsignedBitfieldOverflow(newval,
+01068                             0,thisop->bits,thisop->owtype,&wrapped);
+01069                     \textcolor{keywordflow}{if} (overflow) newval = wrapped;
+01070                     retval = oldval;
+01071                 \}
+01072                 \textcolor{comment}{/* On overflow of type is "FAIL", don't write and return}
+01073 \textcolor{comment}{                 * NULL to signal the condition. */}
+01074                 \textcolor{keywordflow}{if} (!(overflow && thisop->owtype == \hyperlink{bitops_8c_a43973854211e7721d528708f55214302}{BFOVERFLOW\_FAIL})) \{
+01075                     addReplyLongLong(c,retval);
+01076                     setUnsignedBitfield(o->ptr,thisop->offset,
+01077                                         thisop->bits,newval);
+01078                 \} \textcolor{keywordflow}{else} \{
+01079                     addReply(c,shared.nullbulk);
+01080                 \}
+01081             \}
+01082             changes++;
+01083         \} \textcolor{keywordflow}{else} \{
+01084             \textcolor{comment}{/* GET */}
+01085             \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} buf[9];
+01086             \textcolor{keywordtype}{long} strlen = 0;
+01087             \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *src = NULL;
+01088             \textcolor{keywordtype}{char} llbuf[\hyperlink{server_8h_a39ec35278876f65fc1ef70b049856ca3}{LONG\_STR\_SIZE}];
+01089 
+01090             \textcolor{keywordflow}{if} (o != NULL)
+01091                 src = getObjectReadOnlyString(o,&strlen,llbuf);
+01092 
+01093             \textcolor{comment}{/* For GET we use a trick: before executing the operation}
+01094 \textcolor{comment}{             * copy up to 9 bytes to a local buffer, so that we can easily}
+01095 \textcolor{comment}{             * execute up to 64 bit operations that are at actual string}
+01096 \textcolor{comment}{             * object boundaries. */}
+01097             memset(buf,0,9);
+01098             \textcolor{keywordtype}{int} i;
+01099             size\_t byte = thisop->offset >> 3;
+01100             \textcolor{keywordflow}{for} (i = 0; i < 9; i++) \{
+01101                 \textcolor{keywordflow}{if} (src == NULL || i+byte >= (size\_t)strlen) \textcolor{keywordflow}{break};
+01102                 buf[i] = src[i+byte];
+01103             \}
+01104 
+01105             \textcolor{comment}{/* Now operate on the copied buffer which is guaranteed}
+01106 \textcolor{comment}{             * to be zero-padded. */}
+01107             \textcolor{keywordflow}{if} (thisop->sign) \{
+01108                 int64\_t val = getSignedBitfield(buf,thisop->offset-(byte*8),
+01109                                             thisop->bits);
+01110                 addReplyLongLong(c,val);
+01111             \} \textcolor{keywordflow}{else} \{
+01112                 uint64\_t val = getUnsignedBitfield(buf,thisop->offset-(byte*8),
+01113                                             thisop->bits);
+01114                 addReplyLongLong(c,val);
+01115             \}
+01116         \}
+01117     \}
+01118 
+01119     \textcolor{keywordflow}{if} (changes) \{
+01120         signalModifiedKey(c->db,c->argv[1]);
+01121         notifyKeyspaceEvent(\hyperlink{server_8h_a1902292b73b71baa65d86db2d61b47ce}{NOTIFY\_STRING},\textcolor{stringliteral}{"setbit"},c->argv[1],c->db->id);
+01122         server.dirty += changes;
+01123     \}
+01124     zfree(ops);
+01125 \}
+\end{DoxyCode}

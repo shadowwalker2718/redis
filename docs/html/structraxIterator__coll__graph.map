@@ -1,0 +1,5 @@
+<map id="raxIterator" name="raxIterator">
+<area shape="rect" id="node2" href="$structrax.html" title="{rax\n|+ numele\l+ numnodes\l|}" alt="" coords="73,226,167,318"/>
+<area shape="rect" id="node3" href="$structraxNode.html" title="{raxNode\n|+ iskey\l+ isnull\l+ iscompr\l+ size\l+ data\l|}" alt="" coords="5,5,85,141"/>
+<area shape="rect" id="node4" href="$structraxStack.html" title="{raxStack\n|+ stack\l+ items\l+ maxitems\l+ static_items\l+ oom\l|}" alt="" coords="191,204,297,340"/>
+</map>

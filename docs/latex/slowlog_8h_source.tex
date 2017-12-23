@@ -1,0 +1,54 @@
+\hypertarget{slowlog_8h_source}{}\section{slowlog.\+h}
+\label{slowlog_8h_source}\index{src/slowlog.\+h@{src/slowlog.\+h}}
+
+\begin{DoxyCode}
+00001 \textcolor{comment}{/*}
+00002 \textcolor{comment}{ * Copyright (c) 2009-2012, Salvatore Sanfilippo <antirez at gmail dot com>}
+00003 \textcolor{comment}{ * All rights reserved.}
+00004 \textcolor{comment}{ *}
+00005 \textcolor{comment}{ * Redistribution and use in source and binary forms, with or without}
+00006 \textcolor{comment}{ * modification, are permitted provided that the following conditions are met:}
+00007 \textcolor{comment}{ *}
+00008 \textcolor{comment}{ *   * Redistributions of source code must retain the above copyright notice,}
+00009 \textcolor{comment}{ *     this list of conditions and the following disclaimer.}
+00010 \textcolor{comment}{ *   * Redistributions in binary form must reproduce the above copyright}
+00011 \textcolor{comment}{ *     notice, this list of conditions and the following disclaimer in the}
+00012 \textcolor{comment}{ *     documentation and/or other materials provided with the distribution.}
+00013 \textcolor{comment}{ *   * Neither the name of Redis nor the names of its contributors may be used}
+00014 \textcolor{comment}{ *     to endorse or promote products derived from this software without}
+00015 \textcolor{comment}{ *     specific prior written permission.}
+00016 \textcolor{comment}{ *}
+00017 \textcolor{comment}{ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"}
+00018 \textcolor{comment}{ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE}
+00019 \textcolor{comment}{ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE}
+00020 \textcolor{comment}{ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE}
+00021 \textcolor{comment}{ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR}
+00022 \textcolor{comment}{ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF}
+00023 \textcolor{comment}{ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS}
+00024 \textcolor{comment}{ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN}
+00025 \textcolor{comment}{ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)}
+00026 \textcolor{comment}{ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE}
+00027 \textcolor{comment}{ * POSSIBILITY OF SUCH DAMAGE.}
+00028 \textcolor{comment}{ */}
+00029 
+00030 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{SLOWLOG\_ENTRY\_MAX\_ARGC} 32
+00031 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{SLOWLOG\_ENTRY\_MAX\_STRING} 128
+00032 
+00033 \textcolor{comment}{/* This structure defines an entry inside the slow log list */}
+\Hypertarget{slowlog_8h_source_l00034}\hyperlink{structslowlogEntry}{00034} \textcolor{keyword}{typedef} \textcolor{keyword}{struct} \hyperlink{structslowlogEntry}{slowlogEntry} \{
+00035     robj **argv;
+00036     \textcolor{keywordtype}{int} argc;
+00037     \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} id;       \textcolor{comment}{/* Unique entry identifier. */}
+00038     \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} duration; \textcolor{comment}{/* Time spent by the query, in microseconds. */}
+00039     time\_t time;        \textcolor{comment}{/* Unix time at which the query was executed. */}
+00040     sds cname;          \textcolor{comment}{/* Client name. */}
+00041     sds peerid;         \textcolor{comment}{/* Client network address. */}
+00042 \} slowlogEntry;
+00043 
+00044 \textcolor{comment}{/* Exported API */}
+00045 \textcolor{keywordtype}{void} slowlogInit(\textcolor{keywordtype}{void});
+00046 \textcolor{keywordtype}{void} slowlogPushEntryIfNeeded(\hyperlink{structclient}{client} *c, robj **argv, \textcolor{keywordtype}{int} argc, \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} duration);
+00047 
+00048 \textcolor{comment}{/* Exported commands */}
+00049 \textcolor{keywordtype}{void} slowlogCommand(\hyperlink{structclient}{client} *c);
+\end{DoxyCode}

@@ -1,0 +1,1294 @@
+\hypertarget{object_8c_source}{}\section{object.\+c}
+\label{object_8c_source}\index{src/object.\+c@{src/object.\+c}}
+
+\begin{DoxyCode}
+00001 \textcolor{comment}{/* Redis Object implementation.}
+00002 \textcolor{comment}{ *}
+00003 \textcolor{comment}{ * Copyright (c) 2009-2012, Salvatore Sanfilippo <antirez at gmail dot com>}
+00004 \textcolor{comment}{ * All rights reserved.}
+00005 \textcolor{comment}{ *}
+00006 \textcolor{comment}{ * Redistribution and use in source and binary forms, with or without}
+00007 \textcolor{comment}{ * modification, are permitted provided that the following conditions are met:}
+00008 \textcolor{comment}{ *}
+00009 \textcolor{comment}{ *   * Redistributions of source code must retain the above copyright notice,}
+00010 \textcolor{comment}{ *     this list of conditions and the following disclaimer.}
+00011 \textcolor{comment}{ *   * Redistributions in binary form must reproduce the above copyright}
+00012 \textcolor{comment}{ *     notice, this list of conditions and the following disclaimer in the}
+00013 \textcolor{comment}{ *     documentation and/or other materials provided with the distribution.}
+00014 \textcolor{comment}{ *   * Neither the name of Redis nor the names of its contributors may be used}
+00015 \textcolor{comment}{ *     to endorse or promote products derived from this software without}
+00016 \textcolor{comment}{ *     specific prior written permission.}
+00017 \textcolor{comment}{ *}
+00018 \textcolor{comment}{ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"}
+00019 \textcolor{comment}{ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE}
+00020 \textcolor{comment}{ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE}
+00021 \textcolor{comment}{ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE}
+00022 \textcolor{comment}{ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR}
+00023 \textcolor{comment}{ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF}
+00024 \textcolor{comment}{ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS}
+00025 \textcolor{comment}{ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN}
+00026 \textcolor{comment}{ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)}
+00027 \textcolor{comment}{ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE}
+00028 \textcolor{comment}{ * POSSIBILITY OF SUCH DAMAGE.}
+00029 \textcolor{comment}{ */}
+00030 
+00031 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \hyperlink{server_8h}{"server.h"}
+00032 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{math}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00033 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{ctype}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00034 
+00035 \textcolor{preprocessor}{#}\textcolor{preprocessor}{ifdef} \textcolor{preprocessor}{\_\_CYGWIN\_\_}
+00036 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{strtold}\textcolor{preprocessor}{(}\textcolor{preprocessor}{a}\textcolor{preprocessor}{,}\textcolor{preprocessor}{b}\textcolor{preprocessor}{)} \textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{long} \textcolor{preprocessor}{double}\textcolor{preprocessor}{)}\textcolor{preprocessor}{strtod}\textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{a}\textcolor{preprocessor}{)}\textcolor{preprocessor}{,}\textcolor{preprocessor}{(}\textcolor{preprocessor}{b}\textcolor{preprocessor}{)}\textcolor{preprocessor}{)}\textcolor{preprocessor}{)}
+00037 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00038 
+00039 \textcolor{comment}{/* ===================== Creation and parsing of objects ==================== */}
+00040 
+00041 robj *createObject(\textcolor{keywordtype}{int} type, \textcolor{keywordtype}{void} *ptr) \{
+00042     robj *o = zmalloc(\textcolor{keyword}{sizeof}(*o));
+00043     o->type = type;
+00044     o->encoding = \hyperlink{server_8h_a148bc85e3074e324a6dc5eebcad1bcd5}{OBJ\_ENCODING\_RAW};
+00045     o->ptr = ptr;
+00046     o->refcount = 1;
+00047 
+00048     \textcolor{comment}{/* Set the LRU to the current lruclock (minutes resolution), or}
+00049 \textcolor{comment}{     * alternatively the LFU counter. */}
+00050     \textcolor{keywordflow}{if} (server.maxmemory\_policy & \hyperlink{server_8h_aac2d3ad7a604f87e06e25233dbd01c9b}{MAXMEMORY\_FLAG\_LFU}) \{
+00051         o->lru = (LFUGetTimeInMinutes()<<8) | \hyperlink{server_8h_a8cec44bf7da67aac58839ab5033bdc0a}{LFU\_INIT\_VAL};
+00052     \} \textcolor{keywordflow}{else} \{
+00053         o->lru = LRU\_CLOCK();
+00054     \}
+00055     \textcolor{keywordflow}{return} o;
+00056 \}
+00057 
+00058 \textcolor{comment}{/* Set a special refcount in the object to make it "shared":}
+00059 \textcolor{comment}{ * incrRefCount and decrRefCount() will test for this special refcount}
+00060 \textcolor{comment}{ * and will not touch the object. This way it is free to access shared}
+00061 \textcolor{comment}{ * objects such as small integers from different threads without any}
+00062 \textcolor{comment}{ * mutex.}
+00063 \textcolor{comment}{ *}
+00064 \textcolor{comment}{ * A common patter to create shared objects:}
+00065 \textcolor{comment}{ *}
+00066 \textcolor{comment}{ * robj *myobject = makeObjectShared(createObject(...));}
+00067 \textcolor{comment}{ *}
+00068 \textcolor{comment}{ */}
+00069 robj *makeObjectShared(robj *o) \{
+00070     \hyperlink{server_8h_a88114b5169b4c382df6b56506285e56a}{serverAssert}(o->refcount == 1);
+00071     o->refcount = \hyperlink{server_8h_a1dc2a137875b0c8ee0fa1df43684a7b8}{OBJ\_SHARED\_REFCOUNT};
+00072     \textcolor{keywordflow}{return} o;
+00073 \}
+00074 
+00075 \textcolor{comment}{/* Create a string object with encoding OBJ\_ENCODING\_RAW, that is a plain}
+00076 \textcolor{comment}{ * string object where o->ptr points to a proper sds string. */}
+00077 robj *createRawStringObject(\textcolor{keyword}{const} \textcolor{keywordtype}{char} *ptr, size\_t len) \{
+00078     \textcolor{keywordflow}{return} createObject(\hyperlink{server_8h_a65236ea160f69cdef33ec942092af88f}{OBJ\_STRING}, sdsnewlen(ptr,len));
+00079 \}
+00080 
+00081 \textcolor{comment}{/* Create a string object with encoding OBJ\_ENCODING\_EMBSTR, that is}
+00082 \textcolor{comment}{ * an object where the sds string is actually an unmodifiable string}
+00083 \textcolor{comment}{ * allocated in the same chunk as the object itself. */}
+00084 robj *createEmbeddedStringObject(\textcolor{keyword}{const} \textcolor{keywordtype}{char} *ptr, size\_t len) \{
+00085     robj *o = zmalloc(\textcolor{keyword}{sizeof}(robj)+\textcolor{keyword}{sizeof}(\textcolor{keyword}{struct} sdshdr8)+len+1);
+00086     \textcolor{keyword}{struct} sdshdr8 *sh = (\textcolor{keywordtype}{void}*)(o+1);
+00087 
+00088     o->type = \hyperlink{server_8h_a65236ea160f69cdef33ec942092af88f}{OBJ\_STRING};
+00089     o->encoding = \hyperlink{server_8h_ac5bb76b546161fd0da4b0ff89b3142ee}{OBJ\_ENCODING\_EMBSTR};
+00090     o->ptr = sh+1;
+00091     o->refcount = 1;
+00092     \textcolor{keywordflow}{if} (server.maxmemory\_policy & \hyperlink{server_8h_aac2d3ad7a604f87e06e25233dbd01c9b}{MAXMEMORY\_FLAG\_LFU}) \{
+00093         o->lru = (LFUGetTimeInMinutes()<<8) | \hyperlink{server_8h_a8cec44bf7da67aac58839ab5033bdc0a}{LFU\_INIT\_VAL};
+00094     \} \textcolor{keywordflow}{else} \{
+00095         o->lru = LRU\_CLOCK();
+00096     \}
+00097 
+00098     sh->len = len;
+00099     sh->alloc = len;
+00100     sh->flags = \hyperlink{sds_8h_a504136356f04bfa2fd616dd4c8fdd71c}{SDS\_TYPE\_8};
+00101     \textcolor{keywordflow}{if} (ptr) \{
+00102         memcpy(sh->buf,ptr,len);
+00103         sh->buf[len] = \textcolor{stringliteral}{'\(\backslash\)0'};
+00104     \} \textcolor{keywordflow}{else} \{
+00105         memset(sh->buf,0,len+1);
+00106     \}
+00107     \textcolor{keywordflow}{return} o;
+00108 \}
+00109 
+00110 \textcolor{comment}{/* Create a string object with EMBSTR encoding if it is smaller than}
+00111 \textcolor{comment}{ * OBJ\_ENCODING\_EMBSTR\_SIZE\_LIMIT, otherwise the RAW encoding is}
+00112 \textcolor{comment}{ * used.}
+00113 \textcolor{comment}{ *}
+00114 \textcolor{comment}{ * The current limit of 39 is chosen so that the biggest string object}
+00115 \textcolor{comment}{ * we allocate as EMBSTR will still fit into the 64 byte arena of jemalloc. */}
+00116 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{OBJ\_ENCODING\_EMBSTR\_SIZE\_LIMIT} 44
+00117 robj *createStringObject(\textcolor{keyword}{const} \textcolor{keywordtype}{char} *ptr, size\_t len) \{
+00118     \textcolor{keywordflow}{if} (len <= \hyperlink{object_8c_a3e762d5fac271c94b01875920ff57fb2}{OBJ\_ENCODING\_EMBSTR\_SIZE\_LIMIT})
+00119         \textcolor{keywordflow}{return} createEmbeddedStringObject(ptr,len);
+00120     \textcolor{keywordflow}{else}
+00121         \textcolor{keywordflow}{return} createRawStringObject(ptr,len);
+00122 \}
+00123 
+00124 robj *createStringObjectFromLongLong(\textcolor{keywordtype}{long} \textcolor{keywordtype}{long} value) \{
+00125     robj *o;
+00126     \textcolor{keywordflow}{if} (value >= 0 && value < \hyperlink{server_8h_a311fc8b18b93af94e1ad418f1386b519}{OBJ\_SHARED\_INTEGERS}) \{
+00127         incrRefCount(shared.integers[value]);
+00128         o = shared.integers[value];
+00129     \} \textcolor{keywordflow}{else} \{
+00130         \textcolor{keywordflow}{if} (value >= LONG\_MIN && value <= LONG\_MAX) \{
+00131             o = createObject(\hyperlink{server_8h_a65236ea160f69cdef33ec942092af88f}{OBJ\_STRING}, NULL);
+00132             o->encoding = \hyperlink{server_8h_ae934cf008a0be0ef009c92c2d006a816}{OBJ\_ENCODING\_INT};
+00133             o->ptr = (\textcolor{keywordtype}{void}*)((\textcolor{keywordtype}{long})value);
+00134         \} \textcolor{keywordflow}{else} \{
+00135             o = createObject(\hyperlink{server_8h_a65236ea160f69cdef33ec942092af88f}{OBJ\_STRING},sdsfromlonglong(value));
+00136         \}
+00137     \}
+00138     \textcolor{keywordflow}{return} o;
+00139 \}
+00140 
+00141 \textcolor{comment}{/* Create a string object from a long double. If humanfriendly is non-zero}
+00142 \textcolor{comment}{ * it does not use exponential format and trims trailing zeroes at the end,}
+00143 \textcolor{comment}{ * however this results in loss of precision. Otherwise exp format is used}
+00144 \textcolor{comment}{ * and the output of snprintf() is not modified.}
+00145 \textcolor{comment}{ *}
+00146 \textcolor{comment}{ * The 'humanfriendly' option is used for INCRBYFLOAT and HINCRBYFLOAT. */}
+00147 robj *createStringObjectFromLongDouble(\textcolor{keywordtype}{long} \textcolor{keywordtype}{double} value, \textcolor{keywordtype}{int} humanfriendly) \{
+00148     \textcolor{keywordtype}{char} buf[256];
+00149     \textcolor{keywordtype}{int} len = ld2string(buf,\textcolor{keyword}{sizeof}(buf),value,humanfriendly);
+00150     \textcolor{keywordflow}{return} createStringObject(buf,len);
+00151 \}
+00152 
+00153 \textcolor{comment}{/* Duplicate a string object, with the guarantee that the returned object}
+00154 \textcolor{comment}{ * has the same encoding as the original one.}
+00155 \textcolor{comment}{ *}
+00156 \textcolor{comment}{ * This function also guarantees that duplicating a small integere object}
+00157 \textcolor{comment}{ * (or a string object that contains a representation of a small integer)}
+00158 \textcolor{comment}{ * will always result in a fresh object that is unshared (refcount == 1).}
+00159 \textcolor{comment}{ *}
+00160 \textcolor{comment}{ * The resulting object always has refcount set to 1. */}
+00161 robj *dupStringObject(\textcolor{keyword}{const} robj *o) \{
+00162     robj *d;
+00163 
+00164     \hyperlink{server_8h_a88114b5169b4c382df6b56506285e56a}{serverAssert}(o->type == \hyperlink{server_8h_a65236ea160f69cdef33ec942092af88f}{OBJ\_STRING});
+00165 
+00166     \textcolor{keywordflow}{switch}(o->encoding) \{
+00167     \textcolor{keywordflow}{case} \hyperlink{server_8h_a148bc85e3074e324a6dc5eebcad1bcd5}{OBJ\_ENCODING\_RAW}:
+00168         \textcolor{keywordflow}{return} createRawStringObject(o->ptr,sdslen(o->ptr));
+00169     \textcolor{keywordflow}{case} \hyperlink{server_8h_ac5bb76b546161fd0da4b0ff89b3142ee}{OBJ\_ENCODING\_EMBSTR}:
+00170         \textcolor{keywordflow}{return} createEmbeddedStringObject(o->ptr,sdslen(o->ptr));
+00171     \textcolor{keywordflow}{case} \hyperlink{server_8h_ae934cf008a0be0ef009c92c2d006a816}{OBJ\_ENCODING\_INT}:
+00172         d = createObject(\hyperlink{server_8h_a65236ea160f69cdef33ec942092af88f}{OBJ\_STRING}, NULL);
+00173         d->encoding = \hyperlink{server_8h_ae934cf008a0be0ef009c92c2d006a816}{OBJ\_ENCODING\_INT};
+00174         d->ptr = o->ptr;
+00175         \textcolor{keywordflow}{return} d;
+00176     \textcolor{keywordflow}{default}:
+00177         \hyperlink{server_8h_a11cc378e7778a830b41240578de3b204}{serverPanic}(\textcolor{stringliteral}{"Wrong encoding."});
+00178         \textcolor{keywordflow}{break};
+00179     \}
+00180 \}
+00181 
+00182 robj *createQuicklistObject(\textcolor{keywordtype}{void}) \{
+00183     quicklist *l = quicklistCreate();
+00184     robj *o = createObject(\hyperlink{server_8h_a4a5f22a280949c97a0cb0d4213275126}{OBJ\_LIST},l);
+00185     o->encoding = \hyperlink{server_8h_aec792aeed6d4bf83966672e6a23043b8}{OBJ\_ENCODING\_QUICKLIST};
+00186     \textcolor{keywordflow}{return} o;
+00187 \}
+00188 
+00189 robj *createZiplistObject(\textcolor{keywordtype}{void}) \{
+00190     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *zl = ziplistNew();
+00191     robj *o = createObject(\hyperlink{server_8h_a4a5f22a280949c97a0cb0d4213275126}{OBJ\_LIST},zl);
+00192     o->encoding = \hyperlink{server_8h_aabf064ede983103f1fd0df2086e84eee}{OBJ\_ENCODING\_ZIPLIST};
+00193     \textcolor{keywordflow}{return} o;
+00194 \}
+00195 
+00196 robj *createSetObject(\textcolor{keywordtype}{void}) \{
+00197     dict *d = dictCreate(&setDictType,NULL);
+00198     robj *o = createObject(\hyperlink{server_8h_a8d179375a4aac33d3fa7aa80c8ccc75f}{OBJ\_SET},d);
+00199     o->encoding = \hyperlink{server_8h_a9c10219f68afc557d510d108257d238b}{OBJ\_ENCODING\_HT};
+00200     \textcolor{keywordflow}{return} o;
+00201 \}
+00202 
+00203 robj *createIntsetObject(\textcolor{keywordtype}{void}) \{
+00204     intset *is = intsetNew();
+00205     robj *o = createObject(\hyperlink{server_8h_a8d179375a4aac33d3fa7aa80c8ccc75f}{OBJ\_SET},is);
+00206     o->encoding = \hyperlink{server_8h_a214173987de21c3b7661fddd42b05873}{OBJ\_ENCODING\_INTSET};
+00207     \textcolor{keywordflow}{return} o;
+00208 \}
+00209 
+00210 robj *createHashObject(\textcolor{keywordtype}{void}) \{
+00211     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *zl = ziplistNew();
+00212     robj *o = createObject(\hyperlink{server_8h_a87c05ba4f7f36741864277f02a4423fb}{OBJ\_HASH}, zl);
+00213     o->encoding = \hyperlink{server_8h_aabf064ede983103f1fd0df2086e84eee}{OBJ\_ENCODING\_ZIPLIST};
+00214     \textcolor{keywordflow}{return} o;
+00215 \}
+00216 
+00217 robj *createZsetObject(\textcolor{keywordtype}{void}) \{
+00218     zset *zs = zmalloc(\textcolor{keyword}{sizeof}(*zs));
+00219     robj *o;
+00220 
+00221     zs->dict = dictCreate(&zsetDictType,NULL);
+00222     zs->zsl = zslCreate();
+00223     o = createObject(\hyperlink{server_8h_a8c356422ddbc03bd77694880a30a1953}{OBJ\_ZSET},zs);
+00224     o->encoding = \hyperlink{server_8h_acfb35db5cb30ed113ed23aeb1a224c4c}{OBJ\_ENCODING\_SKIPLIST};
+00225     \textcolor{keywordflow}{return} o;
+00226 \}
+00227 
+00228 robj *createZsetZiplistObject(\textcolor{keywordtype}{void}) \{
+00229     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *zl = ziplistNew();
+00230     robj *o = createObject(\hyperlink{server_8h_a8c356422ddbc03bd77694880a30a1953}{OBJ\_ZSET},zl);
+00231     o->encoding = \hyperlink{server_8h_aabf064ede983103f1fd0df2086e84eee}{OBJ\_ENCODING\_ZIPLIST};
+00232     \textcolor{keywordflow}{return} o;
+00233 \}
+00234 
+00235 robj *createStreamObject(\textcolor{keywordtype}{void}) \{
+00236     stream *s = streamNew();
+00237     robj *o = createObject(\hyperlink{server_8h_a2c2cc41300ca6b9daca7ea8a6d66edc6}{OBJ\_STREAM},s);
+00238     o->encoding = \hyperlink{server_8h_a8ed2d5ecb3c5343c4286f9c3a2346045}{OBJ\_ENCODING\_STREAM};
+00239     \textcolor{keywordflow}{return} o;
+00240 \}
+00241 
+00242 robj *createModuleObject(moduleType *mt, \textcolor{keywordtype}{void} *value) \{
+00243     moduleValue *mv = zmalloc(\textcolor{keyword}{sizeof}(*mv));
+00244     mv->type = mt;
+00245     mv->value = value;
+00246     \textcolor{keywordflow}{return} createObject(\hyperlink{server_8h_a92c1fed85f709180fda0ff10d37d649b}{OBJ\_MODULE},mv);
+00247 \}
+00248 
+00249 \textcolor{keywordtype}{void} freeStringObject(robj *o) \{
+00250     \textcolor{keywordflow}{if} (o->encoding == \hyperlink{server_8h_a148bc85e3074e324a6dc5eebcad1bcd5}{OBJ\_ENCODING\_RAW}) \{
+00251         sdsfree(o->ptr);
+00252     \}
+00253 \}
+00254 
+00255 \textcolor{keywordtype}{void} freeListObject(robj *o) \{
+00256     \textcolor{keywordflow}{if} (o->encoding == \hyperlink{server_8h_aec792aeed6d4bf83966672e6a23043b8}{OBJ\_ENCODING\_QUICKLIST}) \{
+00257         quicklistRelease(o->ptr);
+00258     \} \textcolor{keywordflow}{else} \{
+00259         \hyperlink{server_8h_a11cc378e7778a830b41240578de3b204}{serverPanic}(\textcolor{stringliteral}{"Unknown list encoding type"});
+00260     \}
+00261 \}
+00262 
+00263 \textcolor{keywordtype}{void} freeSetObject(robj *o) \{
+00264     \textcolor{keywordflow}{switch} (o->encoding) \{
+00265     \textcolor{keywordflow}{case} \hyperlink{server_8h_a9c10219f68afc557d510d108257d238b}{OBJ\_ENCODING\_HT}:
+00266         dictRelease((dict*) o->ptr);
+00267         \textcolor{keywordflow}{break};
+00268     \textcolor{keywordflow}{case} \hyperlink{server_8h_a214173987de21c3b7661fddd42b05873}{OBJ\_ENCODING\_INTSET}:
+00269         zfree(o->ptr);
+00270         \textcolor{keywordflow}{break};
+00271     \textcolor{keywordflow}{default}:
+00272         \hyperlink{server_8h_a11cc378e7778a830b41240578de3b204}{serverPanic}(\textcolor{stringliteral}{"Unknown set encoding type"});
+00273     \}
+00274 \}
+00275 
+00276 \textcolor{keywordtype}{void} freeZsetObject(robj *o) \{
+00277     zset *zs;
+00278     \textcolor{keywordflow}{switch} (o->encoding) \{
+00279     \textcolor{keywordflow}{case} \hyperlink{server_8h_acfb35db5cb30ed113ed23aeb1a224c4c}{OBJ\_ENCODING\_SKIPLIST}:
+00280         zs = o->ptr;
+00281         dictRelease(zs->dict);
+00282         zslFree(zs->zsl);
+00283         zfree(zs);
+00284         \textcolor{keywordflow}{break};
+00285     \textcolor{keywordflow}{case} \hyperlink{server_8h_aabf064ede983103f1fd0df2086e84eee}{OBJ\_ENCODING\_ZIPLIST}:
+00286         zfree(o->ptr);
+00287         \textcolor{keywordflow}{break};
+00288     \textcolor{keywordflow}{default}:
+00289         \hyperlink{server_8h_a11cc378e7778a830b41240578de3b204}{serverPanic}(\textcolor{stringliteral}{"Unknown sorted set encoding"});
+00290     \}
+00291 \}
+00292 
+00293 \textcolor{keywordtype}{void} freeHashObject(robj *o) \{
+00294     \textcolor{keywordflow}{switch} (o->encoding) \{
+00295     \textcolor{keywordflow}{case} \hyperlink{server_8h_a9c10219f68afc557d510d108257d238b}{OBJ\_ENCODING\_HT}:
+00296         dictRelease((dict*) o->ptr);
+00297         \textcolor{keywordflow}{break};
+00298     \textcolor{keywordflow}{case} \hyperlink{server_8h_aabf064ede983103f1fd0df2086e84eee}{OBJ\_ENCODING\_ZIPLIST}:
+00299         zfree(o->ptr);
+00300         \textcolor{keywordflow}{break};
+00301     \textcolor{keywordflow}{default}:
+00302         \hyperlink{server_8h_a11cc378e7778a830b41240578de3b204}{serverPanic}(\textcolor{stringliteral}{"Unknown hash encoding type"});
+00303         \textcolor{keywordflow}{break};
+00304     \}
+00305 \}
+00306 
+00307 \textcolor{keywordtype}{void} freeModuleObject(robj *o) \{
+00308     moduleValue *mv = o->ptr;
+00309     mv->type->free(mv->value);
+00310     zfree(mv);
+00311 \}
+00312 
+00313 \textcolor{keywordtype}{void} freeStreamObject(robj *o) \{
+00314     freeStream(o->ptr);
+00315 \}
+00316 
+00317 \textcolor{keywordtype}{void} incrRefCount(robj *o) \{
+00318     \textcolor{keywordflow}{if} (o->refcount != \hyperlink{server_8h_a1dc2a137875b0c8ee0fa1df43684a7b8}{OBJ\_SHARED\_REFCOUNT}) o->refcount++;
+00319 \}
+00320 
+00321 \textcolor{keywordtype}{void} decrRefCount(robj *o) \{
+00322     \textcolor{keywordflow}{if} (o->refcount == 1) \{
+00323         \textcolor{keywordflow}{switch}(o->type) \{
+00324         \textcolor{keywordflow}{case} \hyperlink{server_8h_a65236ea160f69cdef33ec942092af88f}{OBJ\_STRING}: freeStringObject(o); \textcolor{keywordflow}{break};
+00325         \textcolor{keywordflow}{case} \hyperlink{server_8h_a4a5f22a280949c97a0cb0d4213275126}{OBJ\_LIST}: freeListObject(o); \textcolor{keywordflow}{break};
+00326         \textcolor{keywordflow}{case} \hyperlink{server_8h_a8d179375a4aac33d3fa7aa80c8ccc75f}{OBJ\_SET}: freeSetObject(o); \textcolor{keywordflow}{break};
+00327         \textcolor{keywordflow}{case} \hyperlink{server_8h_a8c356422ddbc03bd77694880a30a1953}{OBJ\_ZSET}: freeZsetObject(o); \textcolor{keywordflow}{break};
+00328         \textcolor{keywordflow}{case} \hyperlink{server_8h_a87c05ba4f7f36741864277f02a4423fb}{OBJ\_HASH}: freeHashObject(o); \textcolor{keywordflow}{break};
+00329         \textcolor{keywordflow}{case} \hyperlink{server_8h_a92c1fed85f709180fda0ff10d37d649b}{OBJ\_MODULE}: freeModuleObject(o); \textcolor{keywordflow}{break};
+00330         \textcolor{keywordflow}{case} \hyperlink{server_8h_a2c2cc41300ca6b9daca7ea8a6d66edc6}{OBJ\_STREAM}: freeStreamObject(o); \textcolor{keywordflow}{break};
+00331         \textcolor{keywordflow}{default}: \hyperlink{server_8h_a11cc378e7778a830b41240578de3b204}{serverPanic}(\textcolor{stringliteral}{"Unknown object type"}); \textcolor{keywordflow}{break};
+00332         \}
+00333         zfree(o);
+00334     \} \textcolor{keywordflow}{else} \{
+00335         \textcolor{keywordflow}{if} (o->refcount <= 0) \hyperlink{server_8h_a11cc378e7778a830b41240578de3b204}{serverPanic}(\textcolor{stringliteral}{"decrRefCount against refcount <= 0"});
+00336         \textcolor{keywordflow}{if} (o->refcount != \hyperlink{server_8h_a1dc2a137875b0c8ee0fa1df43684a7b8}{OBJ\_SHARED\_REFCOUNT}) o->refcount--;
+00337     \}
+00338 \}
+00339 
+00340 \textcolor{comment}{/* This variant of decrRefCount() gets its argument as void, and is useful}
+00341 \textcolor{comment}{ * as free method in data structures that expect a 'void free\_object(void*)'}
+00342 \textcolor{comment}{ * prototype for the free method. */}
+00343 \textcolor{keywordtype}{void} decrRefCountVoid(\textcolor{keywordtype}{void} *o) \{
+00344     decrRefCount(o);
+00345 \}
+00346 
+00347 \textcolor{comment}{/* This function set the ref count to zero without freeing the object.}
+00348 \textcolor{comment}{ * It is useful in order to pass a new object to functions incrementing}
+00349 \textcolor{comment}{ * the ref count of the received object. Example:}
+00350 \textcolor{comment}{ *}
+00351 \textcolor{comment}{ *    functionThatWillIncrementRefCount(resetRefCount(CreateObject(...)));}
+00352 \textcolor{comment}{ *}
+00353 \textcolor{comment}{ * Otherwise you need to resort to the less elegant pattern:}
+00354 \textcolor{comment}{ *}
+00355 \textcolor{comment}{ *    *obj = createObject(...);}
+00356 \textcolor{comment}{ *    functionThatWillIncrementRefCount(obj);}
+00357 \textcolor{comment}{ *    decrRefCount(obj);}
+00358 \textcolor{comment}{ */}
+00359 robj *resetRefCount(robj *obj) \{
+00360     obj->refcount = 0;
+00361     \textcolor{keywordflow}{return} obj;
+00362 \}
+00363 
+00364 \textcolor{keywordtype}{int} checkType(\hyperlink{structclient}{client} *c, robj *o, \textcolor{keywordtype}{int} type) \{
+00365     \textcolor{keywordflow}{if} (o->type != type) \{
+00366         addReply(c,shared.wrongtypeerr);
+00367         \textcolor{keywordflow}{return} 1;
+00368     \}
+00369     \textcolor{keywordflow}{return} 0;
+00370 \}
+00371 
+00372 \textcolor{keywordtype}{int} isSdsRepresentableAsLongLong(sds s, \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} *llval) \{
+00373     \textcolor{keywordflow}{return} string2ll(s,sdslen(s),llval) ? \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK} : \hyperlink{server_8h_af98ac28d5f4d23d7ed5985188e6fb7d1}{C\_ERR};
+00374 \}
+00375 
+00376 \textcolor{keywordtype}{int} isObjectRepresentableAsLongLong(robj *o, \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} *llval) \{
+00377     \hyperlink{server_8h_a7308f76cbff9a8d3797fe78190b91282}{serverAssertWithInfo}(NULL,o,o->type == \hyperlink{server_8h_a65236ea160f69cdef33ec942092af88f}{OBJ\_STRING});
+00378     \textcolor{keywordflow}{if} (o->encoding == \hyperlink{server_8h_ae934cf008a0be0ef009c92c2d006a816}{OBJ\_ENCODING\_INT}) \{
+00379         \textcolor{keywordflow}{if} (llval) *llval = (\textcolor{keywordtype}{long}) o->ptr;
+00380         \textcolor{keywordflow}{return} \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK};
+00381     \} \textcolor{keywordflow}{else} \{
+00382         \textcolor{keywordflow}{return} isSdsRepresentableAsLongLong(o->ptr,llval);
+00383     \}
+00384 \}
+00385 
+00386 \textcolor{comment}{/* Try to encode a string object in order to save space */}
+00387 robj *tryObjectEncoding(robj *o) \{
+00388     \textcolor{keywordtype}{long} value;
+00389     sds s = o->ptr;
+00390     size\_t len;
+00391 
+00392     \textcolor{comment}{/* Make sure this is a string object, the only type we encode}
+00393 \textcolor{comment}{     * in this function. Other types use encoded memory efficient}
+00394 \textcolor{comment}{     * representations but are handled by the commands implementing}
+00395 \textcolor{comment}{     * the type. */}
+00396     \hyperlink{server_8h_a7308f76cbff9a8d3797fe78190b91282}{serverAssertWithInfo}(NULL,o,o->type == \hyperlink{server_8h_a65236ea160f69cdef33ec942092af88f}{OBJ\_STRING});
+00397 
+00398     \textcolor{comment}{/* We try some specialized encoding only for objects that are}
+00399 \textcolor{comment}{     * RAW or EMBSTR encoded, in other words objects that are still}
+00400 \textcolor{comment}{     * in represented by an actually array of chars. */}
+00401     \textcolor{keywordflow}{if} (!\hyperlink{server_8h_afcfb5bd97af52d1dbce331745cae030c}{sdsEncodedObject}(o)) \textcolor{keywordflow}{return} o;
+00402 
+00403     \textcolor{comment}{/* It's not safe to encode shared objects: shared objects can be shared}
+00404 \textcolor{comment}{     * everywhere in the "object space" of Redis and may end in places where}
+00405 \textcolor{comment}{     * they are not handled. We handle them only as values in the keyspace. */}
+00406      \textcolor{keywordflow}{if} (o->refcount > 1) \textcolor{keywordflow}{return} o;
+00407 
+00408     \textcolor{comment}{/* Check if we can represent this string as a long integer.}
+00409 \textcolor{comment}{     * Note that we are sure that a string larger than 20 chars is not}
+00410 \textcolor{comment}{     * representable as a 32 nor 64 bit integer. */}
+00411     len = sdslen(s);
+00412     \textcolor{keywordflow}{if} (len <= 20 && string2l(s,len,&value)) \{
+00413         \textcolor{comment}{/* This object is encodable as a long. Try to use a shared object.}
+00414 \textcolor{comment}{         * Note that we avoid using shared integers when maxmemory is used}
+00415 \textcolor{comment}{         * because every object needs to have a private LRU field for the LRU}
+00416 \textcolor{comment}{         * algorithm to work well. */}
+00417         \textcolor{keywordflow}{if} ((server.maxmemory == 0 ||
+00418             !(server.maxmemory\_policy & \hyperlink{server_8h_a15f4654e0f62585fa6ea50ede84598d5}{MAXMEMORY\_FLAG\_NO\_SHARED\_INTEGERS}
+      )) &&
+00419             value >= 0 &&
+00420             value < \hyperlink{server_8h_a311fc8b18b93af94e1ad418f1386b519}{OBJ\_SHARED\_INTEGERS})
+00421         \{
+00422             decrRefCount(o);
+00423             incrRefCount(shared.integers[value]);
+00424             \textcolor{keywordflow}{return} shared.integers[value];
+00425         \} \textcolor{keywordflow}{else} \{
+00426             \textcolor{keywordflow}{if} (o->encoding == \hyperlink{server_8h_a148bc85e3074e324a6dc5eebcad1bcd5}{OBJ\_ENCODING\_RAW}) sdsfree(o->ptr);
+00427             o->encoding = \hyperlink{server_8h_ae934cf008a0be0ef009c92c2d006a816}{OBJ\_ENCODING\_INT};
+00428             o->ptr = (\textcolor{keywordtype}{void}*) value;
+00429             \textcolor{keywordflow}{return} o;
+00430         \}
+00431     \}
+00432 
+00433     \textcolor{comment}{/* If the string is small and is still RAW encoded,}
+00434 \textcolor{comment}{     * try the EMBSTR encoding which is more efficient.}
+00435 \textcolor{comment}{     * In this representation the object and the SDS string are allocated}
+00436 \textcolor{comment}{     * in the same chunk of memory to save space and cache misses. */}
+00437     \textcolor{keywordflow}{if} (len <= \hyperlink{object_8c_a3e762d5fac271c94b01875920ff57fb2}{OBJ\_ENCODING\_EMBSTR\_SIZE\_LIMIT}) \{
+00438         robj *emb;
+00439 
+00440         \textcolor{keywordflow}{if} (o->encoding == \hyperlink{server_8h_ac5bb76b546161fd0da4b0ff89b3142ee}{OBJ\_ENCODING\_EMBSTR}) \textcolor{keywordflow}{return} o;
+00441         emb = createEmbeddedStringObject(s,sdslen(s));
+00442         decrRefCount(o);
+00443         \textcolor{keywordflow}{return} emb;
+00444     \}
+00445 
+00446     \textcolor{comment}{/* We can't encode the object...}
+00447 \textcolor{comment}{     *}
+00448 \textcolor{comment}{     * Do the last try, and at least optimize the SDS string inside}
+00449 \textcolor{comment}{     * the string object to require little space, in case there}
+00450 \textcolor{comment}{     * is more than 10% of free space at the end of the SDS string.}
+00451 \textcolor{comment}{     *}
+00452 \textcolor{comment}{     * We do that only for relatively large strings as this branch}
+00453 \textcolor{comment}{     * is only entered if the length of the string is greater than}
+00454 \textcolor{comment}{     * OBJ\_ENCODING\_EMBSTR\_SIZE\_LIMIT. */}
+00455     \textcolor{keywordflow}{if} (o->encoding == \hyperlink{server_8h_a148bc85e3074e324a6dc5eebcad1bcd5}{OBJ\_ENCODING\_RAW} &&
+00456         sdsavail(s) > len/10)
+00457     \{
+00458         o->ptr = sdsRemoveFreeSpace(o->ptr);
+00459     \}
+00460 
+00461     \textcolor{comment}{/* Return the original object. */}
+00462     \textcolor{keywordflow}{return} o;
+00463 \}
+00464 
+00465 \textcolor{comment}{/* Get a decoded version of an encoded object (returned as a new object).}
+00466 \textcolor{comment}{ * If the object is already raw-encoded just increment the ref count. */}
+00467 robj *getDecodedObject(robj *o) \{
+00468     robj *dec;
+00469 
+00470     \textcolor{keywordflow}{if} (\hyperlink{server_8h_afcfb5bd97af52d1dbce331745cae030c}{sdsEncodedObject}(o)) \{
+00471         incrRefCount(o);
+00472         \textcolor{keywordflow}{return} o;
+00473     \}
+00474     \textcolor{keywordflow}{if} (o->type == \hyperlink{server_8h_a65236ea160f69cdef33ec942092af88f}{OBJ\_STRING} && o->encoding == \hyperlink{server_8h_ae934cf008a0be0ef009c92c2d006a816}{OBJ\_ENCODING\_INT}) \{
+00475         \textcolor{keywordtype}{char} buf[32];
+00476 
+00477         ll2string(buf,32,(\textcolor{keywordtype}{long})o->ptr);
+00478         dec = createStringObject(buf,strlen(buf));
+00479         \textcolor{keywordflow}{return} dec;
+00480     \} \textcolor{keywordflow}{else} \{
+00481         \hyperlink{server_8h_a11cc378e7778a830b41240578de3b204}{serverPanic}(\textcolor{stringliteral}{"Unknown encoding type"});
+00482     \}
+00483 \}
+00484 
+00485 \textcolor{comment}{/* Compare two string objects via strcmp() or strcoll() depending on flags.}
+00486 \textcolor{comment}{ * Note that the objects may be integer-encoded. In such a case we}
+00487 \textcolor{comment}{ * use ll2string() to get a string representation of the numbers on the stack}
+00488 \textcolor{comment}{ * and compare the strings, it's much faster than calling getDecodedObject().}
+00489 \textcolor{comment}{ *}
+00490 \textcolor{comment}{ * Important note: when REDIS\_COMPARE\_BINARY is used a binary-safe comparison}
+00491 \textcolor{comment}{ * is used. */}
+00492 
+00493 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{REDIS\_COMPARE\_BINARY} \textcolor{preprocessor}{(}1\textcolor{preprocessor}{<<}0\textcolor{preprocessor}{)}
+00494 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{REDIS\_COMPARE\_COLL} \textcolor{preprocessor}{(}1\textcolor{preprocessor}{<<}1\textcolor{preprocessor}{)}
+00495 
+00496 \textcolor{keywordtype}{int} compareStringObjectsWithFlags(robj *a, robj *b, \textcolor{keywordtype}{int} flags) \{
+00497     \hyperlink{server_8h_a7308f76cbff9a8d3797fe78190b91282}{serverAssertWithInfo}(NULL,a,a->type == \hyperlink{server_8h_a65236ea160f69cdef33ec942092af88f}{OBJ\_STRING} && b->type == 
+      \hyperlink{server_8h_a65236ea160f69cdef33ec942092af88f}{OBJ\_STRING});
+00498     \textcolor{keywordtype}{char} bufa[128], bufb[128], *astr, *bstr;
+00499     size\_t alen, blen, minlen;
+00500 
+00501     \textcolor{keywordflow}{if} (a == b) \textcolor{keywordflow}{return} 0;
+00502     \textcolor{keywordflow}{if} (\hyperlink{server_8h_afcfb5bd97af52d1dbce331745cae030c}{sdsEncodedObject}(a)) \{
+00503         astr = a->ptr;
+00504         alen = sdslen(astr);
+00505     \} \textcolor{keywordflow}{else} \{
+00506         alen = ll2string(bufa,\textcolor{keyword}{sizeof}(bufa),(\textcolor{keywordtype}{long}) a->ptr);
+00507         astr = bufa;
+00508     \}
+00509     \textcolor{keywordflow}{if} (\hyperlink{server_8h_afcfb5bd97af52d1dbce331745cae030c}{sdsEncodedObject}(b)) \{
+00510         bstr = b->ptr;
+00511         blen = sdslen(bstr);
+00512     \} \textcolor{keywordflow}{else} \{
+00513         blen = ll2string(bufb,\textcolor{keyword}{sizeof}(bufb),(\textcolor{keywordtype}{long}) b->ptr);
+00514         bstr = bufb;
+00515     \}
+00516     \textcolor{keywordflow}{if} (flags & \hyperlink{object_8c_aa471c38fc2e9e96a23693e7ff5e73209}{REDIS\_COMPARE\_COLL}) \{
+00517         \textcolor{keywordflow}{return} strcoll(astr,bstr);
+00518     \} \textcolor{keywordflow}{else} \{
+00519         \textcolor{keywordtype}{int} cmp;
+00520 
+00521         minlen = (alen < blen) ? alen : blen;
+00522         cmp = memcmp(astr,bstr,minlen);
+00523         \textcolor{keywordflow}{if} (cmp == 0) \textcolor{keywordflow}{return} alen-blen;
+00524         \textcolor{keywordflow}{return} cmp;
+00525     \}
+00526 \}
+00527 
+00528 \textcolor{comment}{/* Wrapper for compareStringObjectsWithFlags() using binary comparison. */}
+00529 \textcolor{keywordtype}{int} compareStringObjects(robj *a, robj *b) \{
+00530     \textcolor{keywordflow}{return} compareStringObjectsWithFlags(a,b,\hyperlink{object_8c_ac672f1c478e4a045035444729510d946}{REDIS\_COMPARE\_BINARY});
+00531 \}
+00532 
+00533 \textcolor{comment}{/* Wrapper for compareStringObjectsWithFlags() using collation. */}
+00534 \textcolor{keywordtype}{int} collateStringObjects(robj *a, robj *b) \{
+00535     \textcolor{keywordflow}{return} compareStringObjectsWithFlags(a,b,\hyperlink{object_8c_aa471c38fc2e9e96a23693e7ff5e73209}{REDIS\_COMPARE\_COLL});
+00536 \}
+00537 
+00538 \textcolor{comment}{/* Equal string objects return 1 if the two objects are the same from the}
+00539 \textcolor{comment}{ * point of view of a string comparison, otherwise 0 is returned. Note that}
+00540 \textcolor{comment}{ * this function is faster then checking for (compareStringObject(a,b) == 0)}
+00541 \textcolor{comment}{ * because it can perform some more optimization. */}
+00542 \textcolor{keywordtype}{int} equalStringObjects(robj *a, robj *b) \{
+00543     \textcolor{keywordflow}{if} (a->encoding == \hyperlink{server_8h_ae934cf008a0be0ef009c92c2d006a816}{OBJ\_ENCODING\_INT} &&
+00544         b->encoding == \hyperlink{server_8h_ae934cf008a0be0ef009c92c2d006a816}{OBJ\_ENCODING\_INT})\{
+00545         \textcolor{comment}{/* If both strings are integer encoded just check if the stored}
+00546 \textcolor{comment}{         * long is the same. */}
+00547         \textcolor{keywordflow}{return} a->ptr == b->ptr;
+00548     \} \textcolor{keywordflow}{else} \{
+00549         \textcolor{keywordflow}{return} compareStringObjects(a,b) == 0;
+00550     \}
+00551 \}
+00552 
+00553 size\_t stringObjectLen(robj *o) \{
+00554     \hyperlink{server_8h_a7308f76cbff9a8d3797fe78190b91282}{serverAssertWithInfo}(NULL,o,o->type == \hyperlink{server_8h_a65236ea160f69cdef33ec942092af88f}{OBJ\_STRING});
+00555     \textcolor{keywordflow}{if} (\hyperlink{server_8h_afcfb5bd97af52d1dbce331745cae030c}{sdsEncodedObject}(o)) \{
+00556         \textcolor{keywordflow}{return} sdslen(o->ptr);
+00557     \} \textcolor{keywordflow}{else} \{
+00558         \textcolor{keywordflow}{return} sdigits10((\textcolor{keywordtype}{long})o->ptr);
+00559     \}
+00560 \}
+00561 
+00562 \textcolor{keywordtype}{int} getDoubleFromObject(\textcolor{keyword}{const} robj *o, \textcolor{keywordtype}{double} *target) \{
+00563     \textcolor{keywordtype}{double} value;
+00564     \textcolor{keywordtype}{char} *eptr;
+00565 
+00566     \textcolor{keywordflow}{if} (o == NULL) \{
+00567         value = 0;
+00568     \} \textcolor{keywordflow}{else} \{
+00569         \hyperlink{server_8h_a7308f76cbff9a8d3797fe78190b91282}{serverAssertWithInfo}(NULL,o,o->type == 
+      \hyperlink{server_8h_a65236ea160f69cdef33ec942092af88f}{OBJ\_STRING});
+00570         \textcolor{keywordflow}{if} (\hyperlink{server_8h_afcfb5bd97af52d1dbce331745cae030c}{sdsEncodedObject}(o)) \{
+00571             errno = 0;
+00572             value = strtod(o->ptr, &eptr);
+00573             \textcolor{keywordflow}{if} (sdslen(o->ptr) == 0 ||
+00574                 isspace(((\textcolor{keyword}{const} \textcolor{keywordtype}{char}*)o->ptr)[0]) ||
+00575                 (size\_t)(eptr-(\textcolor{keywordtype}{char}*)o->ptr) != sdslen(o->ptr) ||
+00576                 (errno == ERANGE &&
+00577                     (value == HUGE\_VAL || value == -HUGE\_VAL || value == 0)) ||
+00578                 isnan(value))
+00579                 \textcolor{keywordflow}{return} \hyperlink{server_8h_af98ac28d5f4d23d7ed5985188e6fb7d1}{C\_ERR};
+00580         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (o->encoding == \hyperlink{server_8h_ae934cf008a0be0ef009c92c2d006a816}{OBJ\_ENCODING\_INT}) \{
+00581             value = (\textcolor{keywordtype}{long})o->ptr;
+00582         \} \textcolor{keywordflow}{else} \{
+00583             \hyperlink{server_8h_a11cc378e7778a830b41240578de3b204}{serverPanic}(\textcolor{stringliteral}{"Unknown string encoding"});
+00584         \}
+00585     \}
+00586     *target = value;
+00587     \textcolor{keywordflow}{return} \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK};
+00588 \}
+00589 
+00590 \textcolor{keywordtype}{int} getDoubleFromObjectOrReply(\hyperlink{structclient}{client} *c, robj *o, \textcolor{keywordtype}{double} *target, \textcolor{keyword}{const} \textcolor{keywordtype}{char} *msg) \{
+00591     \textcolor{keywordtype}{double} value;
+00592     \textcolor{keywordflow}{if} (getDoubleFromObject(o, &value) != \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK}) \{
+00593         \textcolor{keywordflow}{if} (msg != NULL) \{
+00594             addReplyError(c,(\textcolor{keywordtype}{char}*)msg);
+00595         \} \textcolor{keywordflow}{else} \{
+00596             addReplyError(c,\textcolor{stringliteral}{"value is not a valid float"});
+00597         \}
+00598         \textcolor{keywordflow}{return} \hyperlink{server_8h_af98ac28d5f4d23d7ed5985188e6fb7d1}{C\_ERR};
+00599     \}
+00600     *target = value;
+00601     \textcolor{keywordflow}{return} \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK};
+00602 \}
+00603 
+00604 \textcolor{keywordtype}{int} getLongDoubleFromObject(robj *o, \textcolor{keywordtype}{long} \textcolor{keywordtype}{double} *target) \{
+00605     \textcolor{keywordtype}{long} \textcolor{keywordtype}{double} value;
+00606     \textcolor{keywordtype}{char} *eptr;
+00607 
+00608     \textcolor{keywordflow}{if} (o == NULL) \{
+00609         value = 0;
+00610     \} \textcolor{keywordflow}{else} \{
+00611         \hyperlink{server_8h_a7308f76cbff9a8d3797fe78190b91282}{serverAssertWithInfo}(NULL,o,o->type == 
+      \hyperlink{server_8h_a65236ea160f69cdef33ec942092af88f}{OBJ\_STRING});
+00612         \textcolor{keywordflow}{if} (\hyperlink{server_8h_afcfb5bd97af52d1dbce331745cae030c}{sdsEncodedObject}(o)) \{
+00613             errno = 0;
+00614             value = strtold(o->ptr, &eptr);
+00615             \textcolor{keywordflow}{if} (sdslen(o->ptr) == 0 ||
+00616                 isspace(((\textcolor{keyword}{const} \textcolor{keywordtype}{char}*)o->ptr)[0]) ||
+00617                 (size\_t)(eptr-(\textcolor{keywordtype}{char}*)o->ptr) != sdslen(o->ptr) ||
+00618                 (errno == ERANGE &&
+00619                     (value == HUGE\_VAL || value == -HUGE\_VAL || value == 0)) ||
+00620                 isnan(value))
+00621                 \textcolor{keywordflow}{return} \hyperlink{server_8h_af98ac28d5f4d23d7ed5985188e6fb7d1}{C\_ERR};
+00622         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (o->encoding == \hyperlink{server_8h_ae934cf008a0be0ef009c92c2d006a816}{OBJ\_ENCODING\_INT}) \{
+00623             value = (\textcolor{keywordtype}{long})o->ptr;
+00624         \} \textcolor{keywordflow}{else} \{
+00625             \hyperlink{server_8h_a11cc378e7778a830b41240578de3b204}{serverPanic}(\textcolor{stringliteral}{"Unknown string encoding"});
+00626         \}
+00627     \}
+00628     *target = value;
+00629     \textcolor{keywordflow}{return} \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK};
+00630 \}
+00631 
+00632 \textcolor{keywordtype}{int} getLongDoubleFromObjectOrReply(\hyperlink{structclient}{client} *c, robj *o, \textcolor{keywordtype}{long} \textcolor{keywordtype}{double} *target, \textcolor{keyword}{const} \textcolor{keywordtype}{char} *msg) \{
+00633     \textcolor{keywordtype}{long} \textcolor{keywordtype}{double} value;
+00634     \textcolor{keywordflow}{if} (getLongDoubleFromObject(o, &value) != \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK}) \{
+00635         \textcolor{keywordflow}{if} (msg != NULL) \{
+00636             addReplyError(c,(\textcolor{keywordtype}{char}*)msg);
+00637         \} \textcolor{keywordflow}{else} \{
+00638             addReplyError(c,\textcolor{stringliteral}{"value is not a valid float"});
+00639         \}
+00640         \textcolor{keywordflow}{return} \hyperlink{server_8h_af98ac28d5f4d23d7ed5985188e6fb7d1}{C\_ERR};
+00641     \}
+00642     *target = value;
+00643     \textcolor{keywordflow}{return} \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK};
+00644 \}
+00645 
+00646 \textcolor{keywordtype}{int} getLongLongFromObject(robj *o, \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} *target) \{
+00647     \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} value;
+00648 
+00649     \textcolor{keywordflow}{if} (o == NULL) \{
+00650         value = 0;
+00651     \} \textcolor{keywordflow}{else} \{
+00652         \hyperlink{server_8h_a7308f76cbff9a8d3797fe78190b91282}{serverAssertWithInfo}(NULL,o,o->type == 
+      \hyperlink{server_8h_a65236ea160f69cdef33ec942092af88f}{OBJ\_STRING});
+00653         \textcolor{keywordflow}{if} (\hyperlink{server_8h_afcfb5bd97af52d1dbce331745cae030c}{sdsEncodedObject}(o)) \{
+00654             \textcolor{keywordflow}{if} (string2ll(o->ptr,sdslen(o->ptr),&value) == 0) \textcolor{keywordflow}{return} \hyperlink{server_8h_af98ac28d5f4d23d7ed5985188e6fb7d1}{C\_ERR};
+00655         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (o->encoding == \hyperlink{server_8h_ae934cf008a0be0ef009c92c2d006a816}{OBJ\_ENCODING\_INT}) \{
+00656             value = (\textcolor{keywordtype}{long})o->ptr;
+00657         \} \textcolor{keywordflow}{else} \{
+00658             \hyperlink{server_8h_a11cc378e7778a830b41240578de3b204}{serverPanic}(\textcolor{stringliteral}{"Unknown string encoding"});
+00659         \}
+00660     \}
+00661     \textcolor{keywordflow}{if} (target) *target = value;
+00662     \textcolor{keywordflow}{return} \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK};
+00663 \}
+00664 
+00665 \textcolor{keywordtype}{int} getLongLongFromObjectOrReply(\hyperlink{structclient}{client} *c, robj *o, \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} *target, \textcolor{keyword}{const} \textcolor{keywordtype}{char} *msg) \{
+00666     \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} value;
+00667     \textcolor{keywordflow}{if} (getLongLongFromObject(o, &value) != \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK}) \{
+00668         \textcolor{keywordflow}{if} (msg != NULL) \{
+00669             addReplyError(c,(\textcolor{keywordtype}{char}*)msg);
+00670         \} \textcolor{keywordflow}{else} \{
+00671             addReplyError(c,\textcolor{stringliteral}{"value is not an integer or out of range"});
+00672         \}
+00673         \textcolor{keywordflow}{return} \hyperlink{server_8h_af98ac28d5f4d23d7ed5985188e6fb7d1}{C\_ERR};
+00674     \}
+00675     *target = value;
+00676     \textcolor{keywordflow}{return} \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK};
+00677 \}
+00678 
+00679 \textcolor{keywordtype}{int} getLongFromObjectOrReply(\hyperlink{structclient}{client} *c, robj *o, \textcolor{keywordtype}{long} *target, \textcolor{keyword}{const} \textcolor{keywordtype}{char} *msg) \{
+00680     \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} value;
+00681 
+00682     \textcolor{keywordflow}{if} (getLongLongFromObjectOrReply(c, o, &value, msg) != \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK}) \textcolor{keywordflow}{return} 
+      \hyperlink{server_8h_af98ac28d5f4d23d7ed5985188e6fb7d1}{C\_ERR};
+00683     \textcolor{keywordflow}{if} (value < LONG\_MIN || value > LONG\_MAX) \{
+00684         \textcolor{keywordflow}{if} (msg != NULL) \{
+00685             addReplyError(c,(\textcolor{keywordtype}{char}*)msg);
+00686         \} \textcolor{keywordflow}{else} \{
+00687             addReplyError(c,\textcolor{stringliteral}{"value is out of range"});
+00688         \}
+00689         \textcolor{keywordflow}{return} \hyperlink{server_8h_af98ac28d5f4d23d7ed5985188e6fb7d1}{C\_ERR};
+00690     \}
+00691     *target = value;
+00692     \textcolor{keywordflow}{return} \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK};
+00693 \}
+00694 
+00695 \textcolor{keywordtype}{char} *strEncoding(\textcolor{keywordtype}{int} encoding) \{
+00696     \textcolor{keywordflow}{switch}(encoding) \{
+00697     \textcolor{keywordflow}{case} \hyperlink{server_8h_a148bc85e3074e324a6dc5eebcad1bcd5}{OBJ\_ENCODING\_RAW}: \textcolor{keywordflow}{return} \textcolor{stringliteral}{"raw"};
+00698     \textcolor{keywordflow}{case} \hyperlink{server_8h_ae934cf008a0be0ef009c92c2d006a816}{OBJ\_ENCODING\_INT}: \textcolor{keywordflow}{return} \textcolor{stringliteral}{"int"};
+00699     \textcolor{keywordflow}{case} \hyperlink{server_8h_a9c10219f68afc557d510d108257d238b}{OBJ\_ENCODING\_HT}: \textcolor{keywordflow}{return} \textcolor{stringliteral}{"hashtable"};
+00700     \textcolor{keywordflow}{case} \hyperlink{server_8h_aec792aeed6d4bf83966672e6a23043b8}{OBJ\_ENCODING\_QUICKLIST}: \textcolor{keywordflow}{return} \textcolor{stringliteral}{"quicklist"};
+00701     \textcolor{keywordflow}{case} \hyperlink{server_8h_aabf064ede983103f1fd0df2086e84eee}{OBJ\_ENCODING\_ZIPLIST}: \textcolor{keywordflow}{return} \textcolor{stringliteral}{"ziplist"};
+00702     \textcolor{keywordflow}{case} \hyperlink{server_8h_a214173987de21c3b7661fddd42b05873}{OBJ\_ENCODING\_INTSET}: \textcolor{keywordflow}{return} \textcolor{stringliteral}{"intset"};
+00703     \textcolor{keywordflow}{case} \hyperlink{server_8h_acfb35db5cb30ed113ed23aeb1a224c4c}{OBJ\_ENCODING\_SKIPLIST}: \textcolor{keywordflow}{return} \textcolor{stringliteral}{"skiplist"};
+00704     \textcolor{keywordflow}{case} \hyperlink{server_8h_ac5bb76b546161fd0da4b0ff89b3142ee}{OBJ\_ENCODING\_EMBSTR}: \textcolor{keywordflow}{return} \textcolor{stringliteral}{"embstr"};
+00705     \textcolor{keywordflow}{default}: \textcolor{keywordflow}{return} \textcolor{stringliteral}{"unknown"};
+00706     \}
+00707 \}
+00708 
+00709 \textcolor{comment}{/* =========================== Memory introspection ========================== */}
+00710 
+00711 \textcolor{comment}{/* Returns the size in bytes consumed by the key's value in RAM.}
+00712 \textcolor{comment}{ * Note that the returned value is just an approximation, especially in the}
+00713 \textcolor{comment}{ * case of aggregated data types where only "sample\_size" elements}
+00714 \textcolor{comment}{ * are checked and averaged to estimate the total size. */}
+00715 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{OBJ\_COMPUTE\_SIZE\_DEF\_SAMPLES} 5 \textcolor{comment}{/* Default sample size. */}
+00716 size\_t objectComputeSize(robj *o, size\_t sample\_size) \{
+00717     sds ele, ele2;
+00718     dict *d;
+00719     dictIterator *di;
+00720     \textcolor{keyword}{struct} \hyperlink{structdictEntry}{dictEntry} *de;
+00721     size\_t asize = 0, elesize = 0, samples = 0;
+00722 
+00723     \textcolor{keywordflow}{if} (o->type == \hyperlink{server_8h_a65236ea160f69cdef33ec942092af88f}{OBJ\_STRING}) \{
+00724         \textcolor{keywordflow}{if}(o->encoding == \hyperlink{server_8h_ae934cf008a0be0ef009c92c2d006a816}{OBJ\_ENCODING\_INT}) \{
+00725             asize = \textcolor{keyword}{sizeof}(*o);
+00726         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if}(o->encoding == \hyperlink{server_8h_a148bc85e3074e324a6dc5eebcad1bcd5}{OBJ\_ENCODING\_RAW}) \{
+00727             asize = sdsAllocSize(o->ptr)+\textcolor{keyword}{sizeof}(*o);
+00728         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if}(o->encoding == \hyperlink{server_8h_ac5bb76b546161fd0da4b0ff89b3142ee}{OBJ\_ENCODING\_EMBSTR}) \{
+00729             asize = sdslen(o->ptr)+2+\textcolor{keyword}{sizeof}(*o);
+00730         \} \textcolor{keywordflow}{else} \{
+00731             \hyperlink{server_8h_a11cc378e7778a830b41240578de3b204}{serverPanic}(\textcolor{stringliteral}{"Unknown string encoding"});
+00732         \}
+00733     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (o->type == \hyperlink{server_8h_a4a5f22a280949c97a0cb0d4213275126}{OBJ\_LIST}) \{
+00734         \textcolor{keywordflow}{if} (o->encoding == \hyperlink{server_8h_aec792aeed6d4bf83966672e6a23043b8}{OBJ\_ENCODING\_QUICKLIST}) \{
+00735             quicklist *ql = o->ptr;
+00736             quicklistNode *node = ql->head;
+00737             asize = \textcolor{keyword}{sizeof}(*o)+\textcolor{keyword}{sizeof}(quicklist);
+00738             \textcolor{keywordflow}{do} \{
+00739                 elesize += \textcolor{keyword}{sizeof}(quicklistNode)+ziplistBlobLen(node->zl);
+00740                 samples++;
+00741             \} \textcolor{keywordflow}{while} ((node = node->next) && samples < sample\_size);
+00742             asize += (\textcolor{keywordtype}{double})elesize/samples*listTypeLength(o);
+00743         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (o->encoding == \hyperlink{server_8h_aabf064ede983103f1fd0df2086e84eee}{OBJ\_ENCODING\_ZIPLIST}) \{
+00744             asize = \textcolor{keyword}{sizeof}(*o)+ziplistBlobLen(o->ptr);
+00745         \} \textcolor{keywordflow}{else} \{
+00746             \hyperlink{server_8h_a11cc378e7778a830b41240578de3b204}{serverPanic}(\textcolor{stringliteral}{"Unknown list encoding"});
+00747         \}
+00748     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (o->type == \hyperlink{server_8h_a8d179375a4aac33d3fa7aa80c8ccc75f}{OBJ\_SET}) \{
+00749         \textcolor{keywordflow}{if} (o->encoding == \hyperlink{server_8h_a9c10219f68afc557d510d108257d238b}{OBJ\_ENCODING\_HT}) \{
+00750             d = o->ptr;
+00751             di = dictGetIterator(d);
+00752             asize = \textcolor{keyword}{sizeof}(*o)+\textcolor{keyword}{sizeof}(dict)+(\textcolor{keyword}{sizeof}(\textcolor{keyword}{struct} dictEntry*)*
+      \hyperlink{dict_8h_aca9596be4bcc2caa07c17dd8cebcceec}{dictSlots}(d));
+00753             \textcolor{keywordflow}{while}((de = dictNext(di)) != NULL && samples < sample\_size) \{
+00754                 ele = \hyperlink{dict_8h_a3271c334309904a3086deca94f96e46e}{dictGetKey}(de);
+00755                 elesize += \textcolor{keyword}{sizeof}(\textcolor{keyword}{struct} dictEntry) + sdsAllocSize(ele);
+00756                 samples++;
+00757             \}
+00758             dictReleaseIterator(di);
+00759             \textcolor{keywordflow}{if} (samples) asize += (\textcolor{keywordtype}{double})elesize/samples*\hyperlink{dict_8h_af193430dd3d5579a52b194512f72c1f0}{dictSize}(d);
+00760         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (o->encoding == \hyperlink{server_8h_a214173987de21c3b7661fddd42b05873}{OBJ\_ENCODING\_INTSET}) \{
+00761             intset *is = o->ptr;
+00762             asize = \textcolor{keyword}{sizeof}(*o)+\textcolor{keyword}{sizeof}(*is)+is->encoding*is->length;
+00763         \} \textcolor{keywordflow}{else} \{
+00764             \hyperlink{server_8h_a11cc378e7778a830b41240578de3b204}{serverPanic}(\textcolor{stringliteral}{"Unknown set encoding"});
+00765         \}
+00766     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (o->type == \hyperlink{server_8h_a8c356422ddbc03bd77694880a30a1953}{OBJ\_ZSET}) \{
+00767         \textcolor{keywordflow}{if} (o->encoding == \hyperlink{server_8h_aabf064ede983103f1fd0df2086e84eee}{OBJ\_ENCODING\_ZIPLIST}) \{
+00768             asize = \textcolor{keyword}{sizeof}(*o)+(ziplistBlobLen(o->ptr));
+00769         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (o->encoding == \hyperlink{server_8h_acfb35db5cb30ed113ed23aeb1a224c4c}{OBJ\_ENCODING\_SKIPLIST}) \{
+00770             d = ((zset*)o->ptr)->dict;
+00771             zskiplist *zsl = ((zset*)o->ptr)->zsl;
+00772             zskiplistNode *znode = zsl->header->level[0].forward;
+00773             asize = \textcolor{keyword}{sizeof}(*o)+\textcolor{keyword}{sizeof}(zset)+(\textcolor{keyword}{sizeof}(\textcolor{keyword}{struct} dictEntry*)*
+      \hyperlink{dict_8h_aca9596be4bcc2caa07c17dd8cebcceec}{dictSlots}(d));
+00774             \textcolor{keywordflow}{while}(znode != NULL && samples < sample\_size) \{
+00775                 elesize += sdsAllocSize(znode->ele);
+00776                 elesize += \textcolor{keyword}{sizeof}(\textcolor{keyword}{struct} dictEntry) + zmalloc\_size(znode);
+00777                 samples++;
+00778                 znode = znode->level[0].forward;
+00779             \}
+00780             \textcolor{keywordflow}{if} (samples) asize += (\textcolor{keywordtype}{double})elesize/samples*\hyperlink{dict_8h_af193430dd3d5579a52b194512f72c1f0}{dictSize}(d);
+00781         \} \textcolor{keywordflow}{else} \{
+00782             \hyperlink{server_8h_a11cc378e7778a830b41240578de3b204}{serverPanic}(\textcolor{stringliteral}{"Unknown sorted set encoding"});
+00783         \}
+00784     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (o->type == \hyperlink{server_8h_a87c05ba4f7f36741864277f02a4423fb}{OBJ\_HASH}) \{
+00785         \textcolor{keywordflow}{if} (o->encoding == \hyperlink{server_8h_aabf064ede983103f1fd0df2086e84eee}{OBJ\_ENCODING\_ZIPLIST}) \{
+00786             asize = \textcolor{keyword}{sizeof}(*o)+(ziplistBlobLen(o->ptr));
+00787         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (o->encoding == \hyperlink{server_8h_a9c10219f68afc557d510d108257d238b}{OBJ\_ENCODING\_HT}) \{
+00788             d = o->ptr;
+00789             di = dictGetIterator(d);
+00790             asize = \textcolor{keyword}{sizeof}(*o)+\textcolor{keyword}{sizeof}(dict)+(\textcolor{keyword}{sizeof}(\textcolor{keyword}{struct} dictEntry*)*
+      \hyperlink{dict_8h_aca9596be4bcc2caa07c17dd8cebcceec}{dictSlots}(d));
+00791             \textcolor{keywordflow}{while}((de = dictNext(di)) != NULL && samples < sample\_size) \{
+00792                 ele = \hyperlink{dict_8h_a3271c334309904a3086deca94f96e46e}{dictGetKey}(de);
+00793                 ele2 = \hyperlink{dict_8h_ae8d2cc391873b2bea2b87c4f80f43120}{dictGetVal}(de);
+00794                 elesize += sdsAllocSize(ele) + sdsAllocSize(ele2);
+00795                 elesize += \textcolor{keyword}{sizeof}(\textcolor{keyword}{struct} dictEntry);
+00796                 samples++;
+00797             \}
+00798             dictReleaseIterator(di);
+00799             \textcolor{keywordflow}{if} (samples) asize += (\textcolor{keywordtype}{double})elesize/samples*\hyperlink{dict_8h_af193430dd3d5579a52b194512f72c1f0}{dictSize}(d);
+00800         \} \textcolor{keywordflow}{else} \{
+00801             \hyperlink{server_8h_a11cc378e7778a830b41240578de3b204}{serverPanic}(\textcolor{stringliteral}{"Unknown hash encoding"});
+00802         \}
+00803     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (o->type == \hyperlink{server_8h_a2c2cc41300ca6b9daca7ea8a6d66edc6}{OBJ\_STREAM}) \{
+00804         stream *s = o->ptr;
+00805         \textcolor{comment}{/* Note: to guess the size of the radix tree is not trivial, so we}
+00806 \textcolor{comment}{         * approximate it considering 64 bytes of data overhead for each}
+00807 \textcolor{comment}{         * key (the ID), and then adding the number of bare nodes, plus some}
+00808 \textcolor{comment}{         * overhead due by the data and child pointers. This secret recipe}
+00809 \textcolor{comment}{         * was obtained by checking the average radix tree created by real}
+00810 \textcolor{comment}{         * workloads, and then adjusting the constants to get numbers that}
+00811 \textcolor{comment}{         * more or less match the real memory usage.}
+00812 \textcolor{comment}{         *}
+00813 \textcolor{comment}{         * Actually the number of nodes and keys may be different depending}
+00814 \textcolor{comment}{         * on the insertion speed and thus the ability of the radix tree}
+00815 \textcolor{comment}{         * to compress prefixes. */}
+00816         asize = \textcolor{keyword}{sizeof}(*o);
+00817         asize += s->rax->numele * 64;
+00818         asize += s->rax->numnodes * \textcolor{keyword}{sizeof}(raxNode);
+00819         asize += s->rax->numnodes * 32*7; \textcolor{comment}{/* Add a few child pointers... */}
+00820 
+00821         \textcolor{comment}{/* Now we have to add the listpacks. The last listpack is often non}
+00822 \textcolor{comment}{         * complete, so we estimate the size of the first N listpacks, and}
+00823 \textcolor{comment}{         * use the average to compute the size of the first N-1 listpacks, and}
+00824 \textcolor{comment}{         * finally add the real size of the last node. */}
+00825         \hyperlink{structraxIterator}{raxIterator} ri;
+00826         raxStart(&ri,s->rax);
+00827         raxSeek(&ri,\textcolor{stringliteral}{"^"},NULL,0);
+00828         size\_t lpsize = 0, samples = 0;
+00829         \textcolor{keywordflow}{while}(samples < sample\_size && raxNext(&ri)) \{
+00830             \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *lp = ri.data;
+00831             lpsize += lpBytes(lp);
+00832             samples++;
+00833         \}
+00834         \textcolor{keywordflow}{if} (s->rax->numele <= samples) \{
+00835             asize += lpsize;
+00836         \} \textcolor{keywordflow}{else} \{
+00837             \textcolor{keywordflow}{if} (samples) lpsize /= samples; \textcolor{comment}{/* Compute the average. */}
+00838             asize += lpsize * (s->rax->numele-1);
+00839             \textcolor{comment}{/* No need to check if seek succeeded, we enter this branch only}
+00840 \textcolor{comment}{             * if there are a few elements in the radix tree. */}
+00841             raxSeek(&ri,\textcolor{stringliteral}{"$"},NULL,0);
+00842             raxNext(&ri);
+00843             asize += lpBytes(ri.data);
+00844         \}
+00845         raxStop(&ri);
+00846     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (o->type == \hyperlink{server_8h_a92c1fed85f709180fda0ff10d37d649b}{OBJ\_MODULE}) \{
+00847         moduleValue *mv = o->ptr;
+00848         moduleType *mt = mv->type;
+00849         \textcolor{keywordflow}{if} (mt->mem\_usage != NULL) \{
+00850             asize = mt->mem\_usage(mv->value);
+00851         \} \textcolor{keywordflow}{else} \{
+00852             asize = 0;
+00853         \}
+00854     \} \textcolor{keywordflow}{else} \{
+00855         \hyperlink{server_8h_a11cc378e7778a830b41240578de3b204}{serverPanic}(\textcolor{stringliteral}{"Unknown object type"});
+00856     \}
+00857     \textcolor{keywordflow}{return} asize;
+00858 \}
+00859 
+00860 \textcolor{comment}{/* Release data obtained with getMemoryOverheadData(). */}
+00861 \textcolor{keywordtype}{void} freeMemoryOverheadData(\textcolor{keyword}{struct} \hyperlink{structredisMemOverhead}{redisMemOverhead} *mh) \{
+00862     zfree(mh->db);
+00863     zfree(mh);
+00864 \}
+00865 
+00866 \textcolor{comment}{/* Return a struct redisMemOverhead filled with memory overhead}
+00867 \textcolor{comment}{ * information used for the MEMORY OVERHEAD and INFO command. The returned}
+00868 \textcolor{comment}{ * structure pointer should be freed calling freeMemoryOverheadData(). */}
+00869 \textcolor{keyword}{struct} \hyperlink{structredisMemOverhead}{redisMemOverhead} *getMemoryOverheadData(\textcolor{keywordtype}{void}) \{
+00870     \textcolor{keywordtype}{int} j;
+00871     size\_t mem\_total = 0;
+00872     size\_t mem = 0;
+00873     size\_t zmalloc\_used = zmalloc\_used\_memory();
+00874     \textcolor{keyword}{struct} \hyperlink{structredisMemOverhead}{redisMemOverhead} *mh = zcalloc(\textcolor{keyword}{sizeof}(*mh));
+00875 
+00876     mh->total\_allocated = zmalloc\_used;
+00877     mh->startup\_allocated = server.initial\_memory\_usage;
+00878     mh->peak\_allocated = server.stat\_peak\_memory;
+00879     mh->fragmentation =
+00880         zmalloc\_get\_fragmentation\_ratio(server.resident\_set\_size);
+00881     mem\_total += server.initial\_memory\_usage;
+00882 
+00883     mem = 0;
+00884     \textcolor{keywordflow}{if} (server.repl\_backlog)
+00885         mem += zmalloc\_size(server.repl\_backlog);
+00886     mh->repl\_backlog = mem;
+00887     mem\_total += mem;
+00888 
+00889     mem = 0;
+00890     \textcolor{keywordflow}{if} (\hyperlink{adlist_8h_afde0ab079f934670e82119b43120e94b}{listLength}(server.slaves)) \{
+00891         listIter li;
+00892         listNode *ln;
+00893 
+00894         listRewind(server.slaves,&li);
+00895         \textcolor{keywordflow}{while}((ln = listNext(&li))) \{
+00896             \hyperlink{structclient}{client} *c = \hyperlink{adlist_8h_af84cae230e7180ebcda1e2736fce9f65}{listNodeValue}(ln);
+00897             mem += getClientOutputBufferMemoryUsage(c);
+00898             mem += sdsAllocSize(c->querybuf);
+00899             mem += \textcolor{keyword}{sizeof}(client);
+00900         \}
+00901     \}
+00902     mh->clients\_slaves = mem;
+00903     mem\_total+=mem;
+00904 
+00905     mem = 0;
+00906     \textcolor{keywordflow}{if} (\hyperlink{adlist_8h_afde0ab079f934670e82119b43120e94b}{listLength}(server.clients)) \{
+00907         listIter li;
+00908         listNode *ln;
+00909 
+00910         listRewind(server.clients,&li);
+00911         \textcolor{keywordflow}{while}((ln = listNext(&li))) \{
+00912             \hyperlink{structclient}{client} *c = \hyperlink{adlist_8h_af84cae230e7180ebcda1e2736fce9f65}{listNodeValue}(ln);
+00913             \textcolor{keywordflow}{if} (c->flags & \hyperlink{server_8h_ae9f6995948253652bc9454d79a72f4a7}{CLIENT\_SLAVE})
+00914                 \textcolor{keywordflow}{continue};
+00915             mem += getClientOutputBufferMemoryUsage(c);
+00916             mem += sdsAllocSize(c->querybuf);
+00917             mem += \textcolor{keyword}{sizeof}(client);
+00918         \}
+00919     \}
+00920     mh->clients\_normal = mem;
+00921     mem\_total+=mem;
+00922 
+00923     mem = 0;
+00924     \textcolor{keywordflow}{if} (server.aof\_state != \hyperlink{server_8h_a5226306fbcebcb6d5d02e0fef3c213c2}{AOF\_OFF}) \{
+00925         mem += sdslen(server.aof\_buf);
+00926         mem += aofRewriteBufferSize();
+00927     \}
+00928     mh->aof\_buffer = mem;
+00929     mem\_total+=mem;
+00930 
+00931     \textcolor{keywordflow}{for} (j = 0; j < server.dbnum; j++) \{
+00932         redisDb *db = server.db+j;
+00933         \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} keyscount = \hyperlink{dict_8h_af193430dd3d5579a52b194512f72c1f0}{dictSize}(db->dict);
+00934         \textcolor{keywordflow}{if} (keyscount==0) \textcolor{keywordflow}{continue};
+00935 
+00936         mh->total\_keys += keyscount;
+00937         mh->db = zrealloc(mh->db,\textcolor{keyword}{sizeof}(mh->db[0])*(mh->num\_dbs+1));
+00938         mh->db[mh->num\_dbs].dbid = j;
+00939 
+00940         mem = \hyperlink{dict_8h_af193430dd3d5579a52b194512f72c1f0}{dictSize}(db->dict) * \textcolor{keyword}{sizeof}(dictEntry) +
+00941               \hyperlink{dict_8h_aca9596be4bcc2caa07c17dd8cebcceec}{dictSlots}(db->dict) * \textcolor{keyword}{sizeof}(dictEntry*) +
+00942               \hyperlink{dict_8h_af193430dd3d5579a52b194512f72c1f0}{dictSize}(db->dict) * \textcolor{keyword}{sizeof}(robj);
+00943         mh->db[mh->num\_dbs].overhead\_ht\_main = mem;
+00944         mem\_total+=mem;
+00945 
+00946         mem = \hyperlink{dict_8h_af193430dd3d5579a52b194512f72c1f0}{dictSize}(db->expires) * \textcolor{keyword}{sizeof}(dictEntry) +
+00947               \hyperlink{dict_8h_aca9596be4bcc2caa07c17dd8cebcceec}{dictSlots}(db->expires) * \textcolor{keyword}{sizeof}(dictEntry*);
+00948         mh->db[mh->num\_dbs].overhead\_ht\_expires = mem;
+00949         mem\_total+=mem;
+00950 
+00951         mh->num\_dbs++;
+00952     \}
+00953 
+00954     mh->overhead\_total = mem\_total;
+00955     mh->dataset = zmalloc\_used - mem\_total;
+00956     mh->peak\_perc = (\textcolor{keywordtype}{float})zmalloc\_used*100/mh->peak\_allocated;
+00957 
+00958     \textcolor{comment}{/* Metrics computed after subtracting the startup memory from}
+00959 \textcolor{comment}{     * the total memory. */}
+00960     size\_t net\_usage = 1;
+00961     \textcolor{keywordflow}{if} (zmalloc\_used > mh->startup\_allocated)
+00962         net\_usage = zmalloc\_used - mh->startup\_allocated;
+00963     mh->dataset\_perc = (\textcolor{keywordtype}{float})mh->dataset*100/net\_usage;
+00964     mh->bytes\_per\_key = mh->total\_keys ? (net\_usage / mh->total\_keys) : 0;
+00965 
+00966     \textcolor{keywordflow}{return} mh;
+00967 \}
+00968 
+00969 \textcolor{comment}{/* Helper for "MEMORY allocator-stats", used as a callback for the jemalloc}
+00970 \textcolor{comment}{ * stats output. */}
+00971 \textcolor{keywordtype}{void} inputCatSds(\textcolor{keywordtype}{void} *result, \textcolor{keyword}{const} \textcolor{keywordtype}{char} *str) \{
+00972     \textcolor{comment}{/* result is actually a (sds *), so re-cast it here */}
+00973     sds *info = (sds *)result;
+00974     *info = sdscat(*info, str);
+00975 \}
+00976 
+00977 \textcolor{comment}{/* This implements MEMORY DOCTOR. An human readable analysis of the Redis}
+00978 \textcolor{comment}{ * memory condition. */}
+00979 sds getMemoryDoctorReport(\textcolor{keywordtype}{void}) \{
+00980     \textcolor{keywordtype}{int} empty = 0;          \textcolor{comment}{/* Instance is empty or almost empty. */}
+00981     \textcolor{keywordtype}{int} big\_peak = 0;       \textcolor{comment}{/* Memory peak is much larger than used mem. */}
+00982     \textcolor{keywordtype}{int} high\_frag = 0;      \textcolor{comment}{/* High fragmentation. */}
+00983     \textcolor{keywordtype}{int} big\_slave\_buf = 0;  \textcolor{comment}{/* Slave buffers are too big. */}
+00984     \textcolor{keywordtype}{int} big\_client\_buf = 0; \textcolor{comment}{/* Client buffers are too big. */}
+00985     \textcolor{keywordtype}{int} num\_reports = 0;
+00986     \textcolor{keyword}{struct} \hyperlink{structredisMemOverhead}{redisMemOverhead} *mh = getMemoryOverheadData();
+00987 
+00988     \textcolor{keywordflow}{if} (mh->total\_allocated < (1024*1024*5)) \{
+00989         empty = 1;
+00990         num\_reports++;
+00991     \} \textcolor{keywordflow}{else} \{
+00992         \textcolor{comment}{/* Peak is > 150% of current used memory? */}
+00993         \textcolor{keywordflow}{if} (((\textcolor{keywordtype}{float})mh->peak\_allocated / mh->total\_allocated) > 1.5) \{
+00994             big\_peak = 1;
+00995             num\_reports++;
+00996         \}
+00997 
+00998         \textcolor{comment}{/* Fragmentation is higher than 1.4? */}
+00999         \textcolor{keywordflow}{if} (mh->fragmentation > 1.4) \{
+01000             high\_frag = 1;
+01001             num\_reports++;
+01002         \}
+01003 
+01004         \textcolor{comment}{/* Clients using more than 200k each average? */}
+01005         \textcolor{keywordtype}{long} numslaves = \hyperlink{adlist_8h_afde0ab079f934670e82119b43120e94b}{listLength}(server.slaves);
+01006         \textcolor{keywordtype}{long} numclients = \hyperlink{adlist_8h_afde0ab079f934670e82119b43120e94b}{listLength}(server.clients)-numslaves;
+01007         \textcolor{keywordflow}{if} (mh->clients\_normal / numclients > (1024*200)) \{
+01008             big\_client\_buf = 1;
+01009             num\_reports++;
+01010         \}
+01011 
+01012         \textcolor{comment}{/* Slaves using more than 10 MB each? */}
+01013         \textcolor{keywordflow}{if} (numslaves > 0 && mh->clients\_slaves / numslaves > (1024*1024*10)) \{
+01014             big\_slave\_buf = 1;
+01015             num\_reports++;
+01016         \}
+01017     \}
+01018 
+01019     sds s;
+01020     \textcolor{keywordflow}{if} (num\_reports == 0) \{
+01021         s = sdsnew(
+01022         \textcolor{stringliteral}{"Hi Sam, I can't find any memory issue in your instance. "}
+01023         \textcolor{stringliteral}{"I can only account for what occurs on this base.\(\backslash\)n"});
+01024     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (empty == 1) \{
+01025         s = sdsnew(
+01026         \textcolor{stringliteral}{"Hi Sam, this instance is empty or is using very little memory, "}
+01027         \textcolor{stringliteral}{"my issues detector can't be used in these conditions. "}
+01028         \textcolor{stringliteral}{"Please, leave for your mission on Earth and fill it with some data. "}
+01029         \textcolor{stringliteral}{"The new Sam and I will be back to our programming as soon as I "}
+01030         \textcolor{stringliteral}{"finished rebooting.\(\backslash\)n"});
+01031     \} \textcolor{keywordflow}{else} \{
+01032         s = sdsnew(\textcolor{stringliteral}{"Sam, I detected a few issues in this Redis instance memory implants:\(\backslash\)n\(\backslash\)n"});
+01033         \textcolor{keywordflow}{if} (big\_peak) \{
+01034             s = sdscat(s,\textcolor{stringliteral}{" * Peak memory: In the past this instance used more than 150% the memory
+       that is currently using. The allocator is normally not able to release memory after a peak, so you can expect
+       to see a big fragmentation ratio, however this is actually harmless and is only due to the memory peak, and
+       if the Redis instance Resident Set Size (RSS) is currently bigger than expected, the memory will be used as
+       soon as you fill the Redis instance with more data. If the memory peak was only occasional and you want to
+       try to reclaim memory, please try the MEMORY PURGE command, otherwise the only other option is to shutdown and
+       restart the instance.\(\backslash\)n\(\backslash\)n"});
+01035         \}
+01036         \textcolor{keywordflow}{if} (high\_frag) \{
+01037             s = sdscatprintf(s,\textcolor{stringliteral}{" * High fragmentation: This instance has a memory fragmentation
+       greater than 1.4 (this means that the Resident Set Size of the Redis process is much larger than the sum of the
+       logical allocations Redis performed). This problem is usually due either to a large peak memory (check if
+       there is a peak memory entry above in the report) or may result from a workload that causes the allocator to
+       fragment memory a lot. If the problem is a large peak memory, then there is no issue. Otherwise, make sure you
+       are using the Jemalloc allocator and not the default libc malloc. Note: The currently used allocator is
+       \(\backslash\)"%s\(\backslash\)".\(\backslash\)n\(\backslash\)n"}, \hyperlink{zmalloc_8h_a374c6d7cf6c9817e1243093e03df7319}{ZMALLOC\_LIB});
+01038         \}
+01039         \textcolor{keywordflow}{if} (big\_slave\_buf) \{
+01040             s = sdscat(s,\textcolor{stringliteral}{" * Big slave buffers: The slave output buffers in this instance are greater
+       than 10MB for each slave (on average). This likely means that there is some slave instance that is
+       struggling receiving data, either because it is too slow or because of networking issues. As a result, data piles on
+       the master output buffers. Please try to identify what slave is not receiving data correctly and why. You
+       can use the INFO output in order to check the slaves delays and the CLIENT LIST command to check the output
+       buffers of each slave.\(\backslash\)n\(\backslash\)n"});
+01041         \}
+01042         \textcolor{keywordflow}{if} (big\_client\_buf) \{
+01043             s = sdscat(s,\textcolor{stringliteral}{" * Big client buffers: The clients output buffers in this instance are
+       greater than 200K per client (on average). This may result from different causes, like Pub/Sub clients subscribed
+       to channels bot not receiving data fast enough, so that data piles on the Redis instance output buffer, or
+       clients sending commands with large replies or very large sequences of commands in the same pipeline. Please
+       use the CLIENT LIST command in order to investigate the issue if it causes problems in your instance, or to
+       understand better why certain clients are using a big amount of memory.\(\backslash\)n\(\backslash\)n"});
+01044         \}
+01045         s = sdscat(s,\textcolor{stringliteral}{"I'm here to keep you safe, Sam. I want to help you.\(\backslash\)n"});
+01046     \}
+01047     freeMemoryOverheadData(mh);
+01048     \textcolor{keywordflow}{return} s;
+01049 \}
+01050 
+01051 \textcolor{comment}{/* ======================= The OBJECT and MEMORY commands =================== */}
+01052 
+01053 \textcolor{comment}{/* This is a helper function for the OBJECT command. We need to lookup keys}
+01054 \textcolor{comment}{ * without any modification of LRU or other parameters. */}
+01055 robj *objectCommandLookup(\hyperlink{structclient}{client} *c, robj *key) \{
+01056     dictEntry *de;
+01057 
+01058     \textcolor{keywordflow}{if} ((de = dictFind(c->db->dict,key->ptr)) == NULL) \textcolor{keywordflow}{return} NULL;
+01059     \textcolor{keywordflow}{return} (robj*) \hyperlink{dict_8h_ae8d2cc391873b2bea2b87c4f80f43120}{dictGetVal}(de);
+01060 \}
+01061 
+01062 robj *objectCommandLookupOrReply(\hyperlink{structclient}{client} *c, robj *key, robj *reply) \{
+01063     robj *o = objectCommandLookup(c,key);
+01064 
+01065     \textcolor{keywordflow}{if} (!o) addReply(c, reply);
+01066     \textcolor{keywordflow}{return} o;
+01067 \}
+01068 
+01069 \textcolor{comment}{/* Object command allows to inspect the internals of an Redis Object.}
+01070 \textcolor{comment}{ * Usage: OBJECT <refcount|encoding|idletime|freq> <key> */}
+01071 \textcolor{keywordtype}{void} objectCommand(\hyperlink{structclient}{client} *c) \{
+01072     robj *o;
+01073 
+01074     \textcolor{keywordflow}{if} (c->argc == 2 && !strcasecmp(c->argv[1]->ptr,\textcolor{stringliteral}{"help"})) \{
+01075         \textcolor{keyword}{const} \textcolor{keywordtype}{char} *help[] = \{
+01076 \textcolor{stringliteral}{"encoding <key> -- Return the kind of internal representation used in order to store the value
+       associated with a key."},
+01077 \textcolor{stringliteral}{"freq <key> -- Return the access frequency index of the key. The returned integer is proportional to
+       the logarithm of the recent access frequency of the key."},
+01078 \textcolor{stringliteral}{"idletime <key> -- Return the idle time of the key, that is the approximated number of seconds elapsed
+       since the last access to the key."},
+01079 \textcolor{stringliteral}{"refcount <key> -- Return the number of references of the value associated with the specified key."},
+01080 NULL
+01081         \};
+01082         addReplyHelp(c, help);
+01083     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcasecmp(c->argv[1]->ptr,\textcolor{stringliteral}{"refcount"}) && c->argc == 3) \{
+01084         \textcolor{keywordflow}{if} ((o = objectCommandLookupOrReply(c,c->argv[2],shared.nullbulk))
+01085                 == NULL) \textcolor{keywordflow}{return};
+01086         addReplyLongLong(c,o->refcount);
+01087     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcasecmp(c->argv[1]->ptr,\textcolor{stringliteral}{"encoding"}) && c->argc == 3) \{
+01088         \textcolor{keywordflow}{if} ((o = objectCommandLookupOrReply(c,c->argv[2],shared.nullbulk))
+01089                 == NULL) \textcolor{keywordflow}{return};
+01090         addReplyBulkCString(c,strEncoding(o->encoding));
+01091     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcasecmp(c->argv[1]->ptr,\textcolor{stringliteral}{"idletime"}) && c->argc == 3) \{
+01092         \textcolor{keywordflow}{if} ((o = objectCommandLookupOrReply(c,c->argv[2],shared.nullbulk))
+01093                 == NULL) \textcolor{keywordflow}{return};
+01094         \textcolor{keywordflow}{if} (server.maxmemory\_policy & \hyperlink{server_8h_aac2d3ad7a604f87e06e25233dbd01c9b}{MAXMEMORY\_FLAG\_LFU}) \{
+01095             addReplyError(c,\textcolor{stringliteral}{"An LFU maxmemory policy is selected, idle time not tracked. Please note
+       that when switching between policies at runtime LRU and LFU data will take some time to adjust."});
+01096             \textcolor{keywordflow}{return};
+01097         \}
+01098         addReplyLongLong(c,estimateObjectIdleTime(o)/1000);
+01099     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcasecmp(c->argv[1]->ptr,\textcolor{stringliteral}{"freq"}) && c->argc == 3) \{
+01100         \textcolor{keywordflow}{if} ((o = objectCommandLookupOrReply(c,c->argv[2],shared.nullbulk))
+01101                 == NULL) \textcolor{keywordflow}{return};
+01102         \textcolor{keywordflow}{if} (!(server.maxmemory\_policy & \hyperlink{server_8h_aac2d3ad7a604f87e06e25233dbd01c9b}{MAXMEMORY\_FLAG\_LFU})) \{
+01103             addReplyError(c,\textcolor{stringliteral}{"An LFU maxmemory policy is not selected, access frequency not tracked.
+       Please note that when switching between policies at runtime LRU and LFU data will take some time to adjust."});
+01104             \textcolor{keywordflow}{return};
+01105         \}
+01106         \textcolor{comment}{/* LFUDecrAndReturn should be called}
+01107 \textcolor{comment}{         * in case of the key has not been accessed for a long time,}
+01108 \textcolor{comment}{         * because we update the access time only}
+01109 \textcolor{comment}{         * when the key is read or overwritten. */}
+01110         addReplyLongLong(c,LFUDecrAndReturn(o));
+01111     \} \textcolor{keywordflow}{else} \{
+01112         addReplyErrorFormat(c, \textcolor{stringliteral}{"Unknown subcommand or wrong number of arguments for '%s'. Try OBJECT
+       help"}, (\textcolor{keywordtype}{char} *)c->argv[1]->ptr);
+01113     \}
+01114 \}
+01115 
+01116 \textcolor{comment}{/* The memory command will eventually be a complete interface for the}
+01117 \textcolor{comment}{ * memory introspection capabilities of Redis.}
+01118 \textcolor{comment}{ *}
+01119 \textcolor{comment}{ * Usage: MEMORY usage <key> */}
+01120 \textcolor{keywordtype}{void} memoryCommand(\hyperlink{structclient}{client} *c) \{
+01121     robj *o;
+01122 
+01123     \textcolor{keywordflow}{if} (!strcasecmp(c->argv[1]->ptr,\textcolor{stringliteral}{"usage"}) && c->argc >= 3) \{
+01124         \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} samples = \hyperlink{object_8c_a46d9ae99d237582e21c70e7de56a032e}{OBJ\_COMPUTE\_SIZE\_DEF\_SAMPLES};
+01125         \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} j = 3; j < c->argc; j++) \{
+01126             \textcolor{keywordflow}{if} (!strcasecmp(c->argv[j]->ptr,\textcolor{stringliteral}{"samples"}) &&
+01127                 j+1 < c->argc)
+01128             \{
+01129                 \textcolor{keywordflow}{if} (getLongLongFromObjectOrReply(c,c->argv[j+1],&samples,NULL)
+01130                      == \hyperlink{server_8h_af98ac28d5f4d23d7ed5985188e6fb7d1}{C\_ERR}) \textcolor{keywordflow}{return};
+01131                 \textcolor{keywordflow}{if} (samples < 0) \{
+01132                     addReply(c,shared.syntaxerr);
+01133                     \textcolor{keywordflow}{return};
+01134                 \}
+01135                 \textcolor{keywordflow}{if} (samples == 0) samples = LLONG\_MAX;;
+01136                 j++; \textcolor{comment}{/* skip option argument. */}
+01137             \} \textcolor{keywordflow}{else} \{
+01138                 addReply(c,shared.syntaxerr);
+01139                 \textcolor{keywordflow}{return};
+01140             \}
+01141         \}
+01142         \textcolor{keywordflow}{if} ((o = objectCommandLookupOrReply(c,c->argv[2],shared.nullbulk))
+01143                 == NULL) \textcolor{keywordflow}{return};
+01144         size\_t usage = objectComputeSize(o,samples);
+01145         usage += sdsAllocSize(c->argv[2]->ptr);
+01146         usage += \textcolor{keyword}{sizeof}(dictEntry);
+01147         addReplyLongLong(c,usage);
+01148     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcasecmp(c->argv[1]->ptr,\textcolor{stringliteral}{"stats"}) && c->argc == 2) \{
+01149         \textcolor{keyword}{struct} \hyperlink{structredisMemOverhead}{redisMemOverhead} *mh = getMemoryOverheadData();
+01150 
+01151         addReplyMultiBulkLen(c,(14+mh->num\_dbs)*2);
+01152 
+01153         addReplyBulkCString(c,\textcolor{stringliteral}{"peak.allocated"});
+01154         addReplyLongLong(c,mh->peak\_allocated);
+01155 
+01156         addReplyBulkCString(c,\textcolor{stringliteral}{"total.allocated"});
+01157         addReplyLongLong(c,mh->total\_allocated);
+01158 
+01159         addReplyBulkCString(c,\textcolor{stringliteral}{"startup.allocated"});
+01160         addReplyLongLong(c,mh->startup\_allocated);
+01161 
+01162         addReplyBulkCString(c,\textcolor{stringliteral}{"replication.backlog"});
+01163         addReplyLongLong(c,mh->repl\_backlog);
+01164 
+01165         addReplyBulkCString(c,\textcolor{stringliteral}{"clients.slaves"});
+01166         addReplyLongLong(c,mh->clients\_slaves);
+01167 
+01168         addReplyBulkCString(c,\textcolor{stringliteral}{"clients.normal"});
+01169         addReplyLongLong(c,mh->clients\_normal);
+01170 
+01171         addReplyBulkCString(c,\textcolor{stringliteral}{"aof.buffer"});
+01172         addReplyLongLong(c,mh->aof\_buffer);
+01173 
+01174         \textcolor{keywordflow}{for} (size\_t j = 0; j < mh->num\_dbs; j++) \{
+01175             \textcolor{keywordtype}{char} dbname[32];
+01176             snprintf(dbname,\textcolor{keyword}{sizeof}(dbname),\textcolor{stringliteral}{"db.%zd"},mh->db[j].dbid);
+01177             addReplyBulkCString(c,dbname);
+01178             addReplyMultiBulkLen(c,4);
+01179 
+01180             addReplyBulkCString(c,\textcolor{stringliteral}{"overhead.hashtable.main"});
+01181             addReplyLongLong(c,mh->db[j].overhead\_ht\_main);
+01182 
+01183             addReplyBulkCString(c,\textcolor{stringliteral}{"overhead.hashtable.expires"});
+01184             addReplyLongLong(c,mh->db[j].overhead\_ht\_expires);
+01185         \}
+01186 
+01187         addReplyBulkCString(c,\textcolor{stringliteral}{"overhead.total"});
+01188         addReplyLongLong(c,mh->overhead\_total);
+01189 
+01190         addReplyBulkCString(c,\textcolor{stringliteral}{"keys.count"});
+01191         addReplyLongLong(c,mh->total\_keys);
+01192 
+01193         addReplyBulkCString(c,\textcolor{stringliteral}{"keys.bytes-per-key"});
+01194         addReplyLongLong(c,mh->bytes\_per\_key);
+01195 
+01196         addReplyBulkCString(c,\textcolor{stringliteral}{"dataset.bytes"});
+01197         addReplyLongLong(c,mh->dataset);
+01198 
+01199         addReplyBulkCString(c,\textcolor{stringliteral}{"dataset.percentage"});
+01200         addReplyDouble(c,mh->dataset\_perc);
+01201 
+01202         addReplyBulkCString(c,\textcolor{stringliteral}{"peak.percentage"});
+01203         addReplyDouble(c,mh->peak\_perc);
+01204 
+01205         addReplyBulkCString(c,\textcolor{stringliteral}{"fragmentation"});
+01206         addReplyDouble(c,mh->fragmentation);
+01207 
+01208         freeMemoryOverheadData(mh);
+01209     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcasecmp(c->argv[1]->ptr,\textcolor{stringliteral}{"malloc-stats"}) && c->argc == 2) \{
+01210 \textcolor{preprocessor}{#}\textcolor{preprocessor}{if} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{USE\_JEMALLOC}\textcolor{preprocessor}{)}
+01211         sds info = sdsempty();
+01212         je\_malloc\_stats\_print(inputCatSds, &info, NULL);
+01213         addReplyBulkSds(c, info);
+01214 \textcolor{preprocessor}{#}\textcolor{preprocessor}{else}
+01215         addReplyBulkCString(c,\textcolor{stringliteral}{"Stats not supported for the current allocator"});
+01216 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+01217     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcasecmp(c->argv[1]->ptr,\textcolor{stringliteral}{"doctor"}) && c->argc == 2) \{
+01218         sds report = getMemoryDoctorReport();
+01219         addReplyBulkSds(c,report);
+01220     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcasecmp(c->argv[1]->ptr,\textcolor{stringliteral}{"purge"}) && c->argc == 2) \{
+01221 \textcolor{preprocessor}{#}\textcolor{preprocessor}{if} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{USE\_JEMALLOC}\textcolor{preprocessor}{)}
+01222         \textcolor{keywordtype}{char} tmp[32];
+01223         \textcolor{keywordtype}{unsigned} narenas = 0;
+01224         size\_t sz = \textcolor{keyword}{sizeof}(\textcolor{keywordtype}{unsigned});
+01225         \textcolor{keywordflow}{if} (!je\_mallctl(\textcolor{stringliteral}{"arenas.narenas"}, &narenas, &sz, NULL, 0)) \{
+01226             sprintf(tmp, \textcolor{stringliteral}{"arena.%d.purge"}, narenas);
+01227             \textcolor{keywordflow}{if} (!je\_mallctl(tmp, NULL, 0, NULL, 0)) \{
+01228                 addReply(c, shared.ok);
+01229                 \textcolor{keywordflow}{return};
+01230             \}
+01231         \}
+01232         addReplyError(c, \textcolor{stringliteral}{"Error purging dirty pages"});
+01233 \textcolor{preprocessor}{#}\textcolor{preprocessor}{else}
+01234         addReply(c, shared.ok);
+01235         \textcolor{comment}{/* Nothing to do for other allocators. */}
+01236 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+01237     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcasecmp(c->argv[1]->ptr,\textcolor{stringliteral}{"help"}) && c->argc == 2) \{
+01238         addReplyMultiBulkLen(c,5);
+01239         addReplyBulkCString(c,
+01240 \textcolor{stringliteral}{"MEMORY DOCTOR                        - Outputs memory problems report"});
+01241         addReplyBulkCString(c,
+01242 \textcolor{stringliteral}{"MEMORY USAGE <key> [SAMPLES <count>] - Estimate memory usage of key"});
+01243         addReplyBulkCString(c,
+01244 \textcolor{stringliteral}{"MEMORY STATS                         - Show memory usage details"});
+01245         addReplyBulkCString(c,
+01246 \textcolor{stringliteral}{"MEMORY PURGE                         - Ask the allocator to release memory"});
+01247         addReplyBulkCString(c,
+01248 \textcolor{stringliteral}{"MEMORY MALLOC-STATS                  - Show allocator internal stats"});
+01249     \} \textcolor{keywordflow}{else} \{
+01250         addReplyError(c,\textcolor{stringliteral}{"Syntax error. Try MEMORY HELP"});
+01251     \}
+01252 \}
+\end{DoxyCode}

@@ -1,0 +1,139 @@
+\hypertarget{atomicvar_8h_source}{}\section{atomicvar.\+h}
+\label{atomicvar_8h_source}\index{src/atomicvar.\+h@{src/atomicvar.\+h}}
+
+\begin{DoxyCode}
+00001 \textcolor{comment}{/* This file implements atomic counters using \_\_atomic or \_\_sync macros if}
+00002 \textcolor{comment}{ * available, otherwise synchronizing different threads using a mutex.}
+00003 \textcolor{comment}{ *}
+00004 \textcolor{comment}{ * The exported interaface is composed of three macros:}
+00005 \textcolor{comment}{ *}
+00006 \textcolor{comment}{ * atomicIncr(var,count) -- Increment the atomic counter}
+00007 \textcolor{comment}{ * atomicGetIncr(var,oldvalue\_var,count) -- Get and increment the atomic counter}
+00008 \textcolor{comment}{ * atomicDecr(var,count) -- Decrement the atomic counter}
+00009 \textcolor{comment}{ * atomicGet(var,dstvar) -- Fetch the atomic counter value}
+00010 \textcolor{comment}{ * atomicSet(var,value)  -- Set the atomic counter value}
+00011 \textcolor{comment}{ *}
+00012 \textcolor{comment}{ * The variable 'var' should also have a declared mutex with the same}
+00013 \textcolor{comment}{ * name and the "\_mutex" postfix, for instance:}
+00014 \textcolor{comment}{ *}
+00015 \textcolor{comment}{ *  long myvar;}
+00016 \textcolor{comment}{ *  pthread\_mutex\_t myvar\_mutex;}
+00017 \textcolor{comment}{ *  atomicSet(myvar,12345);}
+00018 \textcolor{comment}{ *}
+00019 \textcolor{comment}{ * If atomic primitives are availble (tested in config.h) the mutex}
+00020 \textcolor{comment}{ * is not used.}
+00021 \textcolor{comment}{ *}
+00022 \textcolor{comment}{ * Never use return value from the macros, instead use the AtomicGetIncr()}
+00023 \textcolor{comment}{ * if you need to get the current value and increment it atomically, like}
+00024 \textcolor{comment}{ * in the followign example:}
+00025 \textcolor{comment}{ *}
+00026 \textcolor{comment}{ *  long oldvalue;}
+00027 \textcolor{comment}{ *  atomicGetIncr(myvar,oldvalue,1);}
+00028 \textcolor{comment}{ *  doSomethingWith(oldvalue);}
+00029 \textcolor{comment}{ *}
+00030 \textcolor{comment}{ * ----------------------------------------------------------------------------}
+00031 \textcolor{comment}{ *}
+00032 \textcolor{comment}{ * Copyright (c) 2015, Salvatore Sanfilippo <antirez at gmail dot com>}
+00033 \textcolor{comment}{ * All rights reserved.}
+00034 \textcolor{comment}{ *}
+00035 \textcolor{comment}{ * Redistribution and use in source and binary forms, with or without}
+00036 \textcolor{comment}{ * modification, are permitted provided that the following conditions are met:}
+00037 \textcolor{comment}{ *}
+00038 \textcolor{comment}{ *   * Redistributions of source code must retain the above copyright notice,}
+00039 \textcolor{comment}{ *     this list of conditions and the following disclaimer.}
+00040 \textcolor{comment}{ *   * Redistributions in binary form must reproduce the above copyright}
+00041 \textcolor{comment}{ *     notice, this list of conditions and the following disclaimer in the}
+00042 \textcolor{comment}{ *     documentation and/or other materials provided with the distribution.}
+00043 \textcolor{comment}{ *   * Neither the name of Redis nor the names of its contributors may be used}
+00044 \textcolor{comment}{ *     to endorse or promote products derived from this software without}
+00045 \textcolor{comment}{ *     specific prior written permission.}
+00046 \textcolor{comment}{ *}
+00047 \textcolor{comment}{ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"}
+00048 \textcolor{comment}{ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE}
+00049 \textcolor{comment}{ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE}
+00050 \textcolor{comment}{ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE}
+00051 \textcolor{comment}{ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR}
+00052 \textcolor{comment}{ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF}
+00053 \textcolor{comment}{ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS}
+00054 \textcolor{comment}{ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN}
+00055 \textcolor{comment}{ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)}
+00056 \textcolor{comment}{ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE}
+00057 \textcolor{comment}{ * POSSIBILITY OF SUCH DAMAGE.}
+00058 \textcolor{comment}{ */}
+00059 
+00060 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{pthread}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00061 
+00062 \textcolor{preprocessor}{#}\textcolor{preprocessor}{ifndef} \textcolor{preprocessor}{\_\_ATOMIC\_VAR\_H}
+00063 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{\_\_ATOMIC\_VAR\_H}
+00064 
+00065 \textcolor{comment}{/* To test Redis with Helgrind (a Valgrind tool) it is useful to define}
+00066 \textcolor{comment}{ * the following macro, so that \_\_sync macros are used: those can be detected}
+00067 \textcolor{comment}{ * by Helgrind (even if they are less efficient) so that no false positive}
+00068 \textcolor{comment}{ * is reported. */}
+00069 \textcolor{comment}{// #define \_\_ATOMIC\_VAR\_FORCE\_SYNC\_MACROS}
+00070 
+00071 \textcolor{preprocessor}{#}\textcolor{preprocessor}{if} \textcolor{preprocessor}{!}\textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_\_ATOMIC\_VAR\_FORCE\_SYNC\_MACROS}\textcolor{preprocessor}{)} \textcolor{preprocessor}{&&} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\_\_ATOMIC\_RELAXED\textcolor{preprocessor}{)} \textcolor{preprocessor}{&&} \textcolor{preprocessor}{!}\textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_\_sun}\textcolor{preprocessor}{)} \textcolor{preprocessor}{&&} \textcolor{preprocessor}{(}\textcolor{preprocessor}{!}\textcolor{preprocessor}{
+      defined}\textcolor{preprocessor}{(}\_\_clang\_\_\textcolor{preprocessor}{)} \textcolor{preprocessor}{||} \textcolor{preprocessor}{!}\textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_\_APPLE\_\_}\textcolor{preprocessor}{)} \textcolor{preprocessor}{||} \textcolor{preprocessor}{\_\_apple\_build\_version\_\_} \textcolor{preprocessor}{>} 4210057\textcolor{preprocessor}{)}
+00072 \textcolor{comment}{/* Implementation using \_\_atomic macros. */}
+00073 
+00074 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{atomicIncr}\textcolor{preprocessor}{(}\textcolor{preprocessor}{var}\textcolor{preprocessor}{,}\textcolor{preprocessor}{count}\textcolor{preprocessor}{)} \textcolor{preprocessor}{\_\_atomic\_add\_fetch}\textcolor{preprocessor}{(}\textcolor{preprocessor}{&}\textcolor{preprocessor}{var}\textcolor{preprocessor}{,}\textcolor{preprocessor}{(}\textcolor{preprocessor}{count}\textcolor{preprocessor}{)}\textcolor{preprocessor}{,}\_\_ATOMIC\_RELAXED\textcolor{preprocessor}{)}
+00075 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{atomicGetIncr}\textcolor{preprocessor}{(}\textcolor{preprocessor}{var}\textcolor{preprocessor}{,}\textcolor{preprocessor}{oldvalue\_var}\textcolor{preprocessor}{,}\textcolor{preprocessor}{count}\textcolor{preprocessor}{)} \textcolor{keywordflow}{do} \textcolor{preprocessor}{\{}
+00076     \textcolor{preprocessor}{oldvalue\_var} \textcolor{preprocessor}{=} \textcolor{preprocessor}{\_\_atomic\_fetch\_add}\textcolor{preprocessor}{(}\textcolor{preprocessor}{&}\textcolor{preprocessor}{var}\textcolor{preprocessor}{,}\textcolor{preprocessor}{(}\textcolor{preprocessor}{count}\textcolor{preprocessor}{)}\textcolor{preprocessor}{,}\_\_ATOMIC\_RELAXED\textcolor{preprocessor}{)}\textcolor{preprocessor}{;} \textcolor{preprocessor}{\(\backslash\)}
+00077 \textcolor{preprocessor}{\}}\textcolor{keywordflow}{while}\textcolor{preprocessor}{(}0\textcolor{preprocessor}{)}
+00078 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{atomicDecr}\textcolor{preprocessor}{(}\textcolor{preprocessor}{var}\textcolor{preprocessor}{,}\textcolor{preprocessor}{count}\textcolor{preprocessor}{)} \textcolor{preprocessor}{\_\_atomic\_sub\_fetch}\textcolor{preprocessor}{(}\textcolor{preprocessor}{&}\textcolor{preprocessor}{var}\textcolor{preprocessor}{,}\textcolor{preprocessor}{(}\textcolor{preprocessor}{count}\textcolor{preprocessor}{)}\textcolor{preprocessor}{,}\_\_ATOMIC\_RELAXED\textcolor{preprocessor}{)}
+00079 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{atomicGet}\textcolor{preprocessor}{(}\textcolor{preprocessor}{var}\textcolor{preprocessor}{,}\textcolor{preprocessor}{dstvar}\textcolor{preprocessor}{)} \textcolor{keywordflow}{do} \textcolor{preprocessor}{\{}
+00080     \textcolor{preprocessor}{dstvar} \textcolor{preprocessor}{=} \textcolor{preprocessor}{\_\_atomic\_load\_n}\textcolor{preprocessor}{(}\textcolor{preprocessor}{&}\textcolor{preprocessor}{var}\textcolor{preprocessor}{,}\_\_ATOMIC\_RELAXED\textcolor{preprocessor}{)}\textcolor{preprocessor}{;} \textcolor{preprocessor}{\(\backslash\)}
+00081 \textcolor{preprocessor}{\}}\textcolor{keywordflow}{while}\textcolor{preprocessor}{(}0\textcolor{preprocessor}{)}
+00082 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{atomicSet}\textcolor{preprocessor}{(}\textcolor{preprocessor}{var}\textcolor{preprocessor}{,}\textcolor{preprocessor}{value}\textcolor{preprocessor}{)} \textcolor{preprocessor}{\_\_atomic\_store\_n}\textcolor{preprocessor}{(}\textcolor{preprocessor}{&}\textcolor{preprocessor}{var}\textcolor{preprocessor}{,}\textcolor{preprocessor}{value}\textcolor{preprocessor}{,}\_\_ATOMIC\_RELAXED\textcolor{preprocessor}{)}
+00083 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{REDIS\_ATOMIC\_API} \textcolor{stringliteral}{"atomic-builtin"}
+00084 
+00085 \textcolor{preprocessor}{#}\textcolor{preprocessor}{elif} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{HAVE\_ATOMIC}\textcolor{preprocessor}{)}
+00086 \textcolor{comment}{/* Implementation using \_\_sync macros. */}
+00087 
+00088 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{atomicIncr}\textcolor{preprocessor}{(}\textcolor{preprocessor}{var}\textcolor{preprocessor}{,}\textcolor{preprocessor}{count}\textcolor{preprocessor}{)} \textcolor{preprocessor}{\_\_sync\_add\_and\_fetch}\textcolor{preprocessor}{(}\textcolor{preprocessor}{&}\textcolor{preprocessor}{var}\textcolor{preprocessor}{,}\textcolor{preprocessor}{(}\textcolor{preprocessor}{count}\textcolor{preprocessor}{)}\textcolor{preprocessor}{)}
+00089 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{atomicGetIncr}\textcolor{preprocessor}{(}\textcolor{preprocessor}{var}\textcolor{preprocessor}{,}\textcolor{preprocessor}{oldvalue\_var}\textcolor{preprocessor}{,}\textcolor{preprocessor}{count}\textcolor{preprocessor}{)} \textcolor{preprocessor}{do} \textcolor{preprocessor}{\{}
+00090     \textcolor{preprocessor}{oldvalue\_var} \textcolor{preprocessor}{=} \textcolor{preprocessor}{\_\_sync\_fetch\_and\_add}\textcolor{preprocessor}{(}\textcolor{preprocessor}{&}\textcolor{preprocessor}{var}\textcolor{preprocessor}{,}\textcolor{preprocessor}{(}\textcolor{preprocessor}{count}\textcolor{preprocessor}{)}\textcolor{preprocessor}{)}\textcolor{preprocessor}{;} \textcolor{preprocessor}{\(\backslash\)}
+00091 \textcolor{preprocessor}{\}}\textcolor{preprocessor}{while}\textcolor{preprocessor}{(}0\textcolor{preprocessor}{)}
+00092 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{atomicDecr}\textcolor{preprocessor}{(}\textcolor{preprocessor}{var}\textcolor{preprocessor}{,}\textcolor{preprocessor}{count}\textcolor{preprocessor}{)} \textcolor{preprocessor}{\_\_sync\_sub\_and\_fetch}\textcolor{preprocessor}{(}\textcolor{preprocessor}{&}\textcolor{preprocessor}{var}\textcolor{preprocessor}{,}\textcolor{preprocessor}{(}\textcolor{preprocessor}{count}\textcolor{preprocessor}{)}\textcolor{preprocessor}{)}
+00093 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{atomicGet}\textcolor{preprocessor}{(}\textcolor{preprocessor}{var}\textcolor{preprocessor}{,}\textcolor{preprocessor}{dstvar}\textcolor{preprocessor}{)} \textcolor{preprocessor}{do} \textcolor{preprocessor}{\{}
+00094     \textcolor{preprocessor}{dstvar} \textcolor{preprocessor}{=} \textcolor{preprocessor}{\_\_sync\_sub\_and\_fetch}\textcolor{preprocessor}{(}\textcolor{preprocessor}{&}\textcolor{preprocessor}{var}\textcolor{preprocessor}{,}0\textcolor{preprocessor}{)}\textcolor{preprocessor}{;} \textcolor{preprocessor}{\(\backslash\)}
+00095 \textcolor{preprocessor}{\}}\textcolor{preprocessor}{while}\textcolor{preprocessor}{(}0\textcolor{preprocessor}{)}
+00096 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{atomicSet}\textcolor{preprocessor}{(}\textcolor{preprocessor}{var}\textcolor{preprocessor}{,}\textcolor{preprocessor}{value}\textcolor{preprocessor}{)} \textcolor{preprocessor}{do} \textcolor{preprocessor}{\{}
+00097     \textcolor{preprocessor}{while}\textcolor{preprocessor}{(}\textcolor{preprocessor}{!}\textcolor{preprocessor}{\_\_sync\_bool\_compare\_and\_swap}\textcolor{preprocessor}{(}\textcolor{preprocessor}{&}\textcolor{preprocessor}{var}\textcolor{preprocessor}{,}\textcolor{preprocessor}{var}\textcolor{preprocessor}{,}\textcolor{preprocessor}{value}\textcolor{preprocessor}{)}\textcolor{preprocessor}{)}\textcolor{preprocessor}{;} \textcolor{preprocessor}{\(\backslash\)}
+00098 \textcolor{preprocessor}{\}}\textcolor{preprocessor}{while}\textcolor{preprocessor}{(}0\textcolor{preprocessor}{)}
+00099 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{REDIS\_ATOMIC\_API} \textcolor{stringliteral}{"sync-builtin"}
+00100 
+00101 \textcolor{preprocessor}{#}\textcolor{preprocessor}{else}
+00102 \textcolor{comment}{/* Implementation using pthread mutex. */}
+00103 
+00104 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{atomicIncr}\textcolor{preprocessor}{(}\textcolor{preprocessor}{var}\textcolor{preprocessor}{,}\textcolor{preprocessor}{count}\textcolor{preprocessor}{)} \textcolor{preprocessor}{do} \textcolor{preprocessor}{\{}
+00105     \textcolor{preprocessor}{pthread\_mutex\_lock}\textcolor{preprocessor}{(}\textcolor{preprocessor}{&}\textcolor{preprocessor}{var} \textcolor{preprocessor}{##} \textcolor{preprocessor}{\_mutex}\textcolor{preprocessor}{)}\textcolor{preprocessor}{;}
+00106     \textcolor{preprocessor}{var} \textcolor{preprocessor}{+=} \textcolor{preprocessor}{(}\textcolor{preprocessor}{count}\textcolor{preprocessor}{)}\textcolor{preprocessor}{;}
+00107     \textcolor{preprocessor}{pthread\_mutex\_unlock}\textcolor{preprocessor}{(}\textcolor{preprocessor}{&}\textcolor{preprocessor}{var} \textcolor{preprocessor}{##} \textcolor{preprocessor}{\_mutex}\textcolor{preprocessor}{)}\textcolor{preprocessor}{;} \textcolor{preprocessor}{\(\backslash\)}
+00108 \textcolor{preprocessor}{\}}\textcolor{preprocessor}{while}\textcolor{preprocessor}{(}0\textcolor{preprocessor}{)}
+00109 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{atomicGetIncr}\textcolor{preprocessor}{(}\textcolor{preprocessor}{var}\textcolor{preprocessor}{,}\textcolor{preprocessor}{oldvalue\_var}\textcolor{preprocessor}{,}\textcolor{preprocessor}{count}\textcolor{preprocessor}{)} \textcolor{preprocessor}{do} \textcolor{preprocessor}{\{}
+00110     \textcolor{preprocessor}{pthread\_mutex\_lock}\textcolor{preprocessor}{(}\textcolor{preprocessor}{&}\textcolor{preprocessor}{var} \textcolor{preprocessor}{##} \textcolor{preprocessor}{\_mutex}\textcolor{preprocessor}{)}\textcolor{preprocessor}{;}
+00111     \textcolor{preprocessor}{oldvalue\_var} \textcolor{preprocessor}{=} \textcolor{preprocessor}{var}\textcolor{preprocessor}{;}
+00112     \textcolor{preprocessor}{var} \textcolor{preprocessor}{+=} \textcolor{preprocessor}{(}\textcolor{preprocessor}{count}\textcolor{preprocessor}{)}\textcolor{preprocessor}{;}
+00113     \textcolor{preprocessor}{pthread\_mutex\_unlock}\textcolor{preprocessor}{(}\textcolor{preprocessor}{&}\textcolor{preprocessor}{var} \textcolor{preprocessor}{##} \textcolor{preprocessor}{\_mutex}\textcolor{preprocessor}{)}\textcolor{preprocessor}{;} \textcolor{preprocessor}{\(\backslash\)}
+00114 \textcolor{preprocessor}{\}}\textcolor{preprocessor}{while}\textcolor{preprocessor}{(}0\textcolor{preprocessor}{)}
+00115 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{atomicDecr}\textcolor{preprocessor}{(}\textcolor{preprocessor}{var}\textcolor{preprocessor}{,}\textcolor{preprocessor}{count}\textcolor{preprocessor}{)} \textcolor{preprocessor}{do} \textcolor{preprocessor}{\{}
+00116     \textcolor{preprocessor}{pthread\_mutex\_lock}\textcolor{preprocessor}{(}\textcolor{preprocessor}{&}\textcolor{preprocessor}{var} \textcolor{preprocessor}{##} \textcolor{preprocessor}{\_mutex}\textcolor{preprocessor}{)}\textcolor{preprocessor}{;}
+00117     \textcolor{preprocessor}{var} \textcolor{preprocessor}{-=} \textcolor{preprocessor}{(}\textcolor{preprocessor}{count}\textcolor{preprocessor}{)}\textcolor{preprocessor}{;}
+00118     \textcolor{preprocessor}{pthread\_mutex\_unlock}\textcolor{preprocessor}{(}\textcolor{preprocessor}{&}\textcolor{preprocessor}{var} \textcolor{preprocessor}{##} \textcolor{preprocessor}{\_mutex}\textcolor{preprocessor}{)}\textcolor{preprocessor}{;} \textcolor{preprocessor}{\(\backslash\)}
+00119 \textcolor{preprocessor}{\}}\textcolor{preprocessor}{while}\textcolor{preprocessor}{(}0\textcolor{preprocessor}{)}
+00120 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{atomicGet}\textcolor{preprocessor}{(}\textcolor{preprocessor}{var}\textcolor{preprocessor}{,}\textcolor{preprocessor}{dstvar}\textcolor{preprocessor}{)} \textcolor{preprocessor}{do} \textcolor{preprocessor}{\{}
+00121     \textcolor{preprocessor}{pthread\_mutex\_lock}\textcolor{preprocessor}{(}\textcolor{preprocessor}{&}\textcolor{preprocessor}{var} \textcolor{preprocessor}{##} \textcolor{preprocessor}{\_mutex}\textcolor{preprocessor}{)}\textcolor{preprocessor}{;}
+00122     \textcolor{preprocessor}{dstvar} \textcolor{preprocessor}{=} \textcolor{preprocessor}{var}\textcolor{preprocessor}{;}
+00123     \textcolor{preprocessor}{pthread\_mutex\_unlock}\textcolor{preprocessor}{(}\textcolor{preprocessor}{&}\textcolor{preprocessor}{var} \textcolor{preprocessor}{##} \textcolor{preprocessor}{\_mutex}\textcolor{preprocessor}{)}\textcolor{preprocessor}{;} \textcolor{preprocessor}{\(\backslash\)}
+00124 \textcolor{preprocessor}{\}}\textcolor{preprocessor}{while}\textcolor{preprocessor}{(}0\textcolor{preprocessor}{)}
+00125 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{atomicSet}\textcolor{preprocessor}{(}\textcolor{preprocessor}{var}\textcolor{preprocessor}{,}\textcolor{preprocessor}{value}\textcolor{preprocessor}{)} \textcolor{preprocessor}{do} \textcolor{preprocessor}{\{}
+00126     \textcolor{preprocessor}{pthread\_mutex\_lock}\textcolor{preprocessor}{(}\textcolor{preprocessor}{&}\textcolor{preprocessor}{var} \textcolor{preprocessor}{##} \textcolor{preprocessor}{\_mutex}\textcolor{preprocessor}{)}\textcolor{preprocessor}{;}
+00127     \textcolor{preprocessor}{var} \textcolor{preprocessor}{=} \textcolor{preprocessor}{value}\textcolor{preprocessor}{;}
+00128     \textcolor{preprocessor}{pthread\_mutex\_unlock}\textcolor{preprocessor}{(}\textcolor{preprocessor}{&}\textcolor{preprocessor}{var} \textcolor{preprocessor}{##} \textcolor{preprocessor}{\_mutex}\textcolor{preprocessor}{)}\textcolor{preprocessor}{;} \textcolor{preprocessor}{\(\backslash\)}
+00129 \textcolor{preprocessor}{\}}\textcolor{preprocessor}{while}\textcolor{preprocessor}{(}0\textcolor{preprocessor}{)}
+00130 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{REDIS\_ATOMIC\_API} \textcolor{stringliteral}{"pthread-mutex"}
+00131 
+00132 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00133 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif} \textcolor{comment}{/* \_\_ATOMIC\_VAR\_H */}
+\end{DoxyCode}

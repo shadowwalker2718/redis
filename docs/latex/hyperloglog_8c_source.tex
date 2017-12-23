@@ -1,0 +1,1588 @@
+\hypertarget{hyperloglog_8c_source}{}\section{hyperloglog.\+c}
+\label{hyperloglog_8c_source}\index{src/hyperloglog.\+c@{src/hyperloglog.\+c}}
+
+\begin{DoxyCode}
+00001 \textcolor{comment}{/* hyperloglog.c - Redis HyperLogLog probabilistic cardinality approximation.}
+00002 \textcolor{comment}{ * This file implements the algorithm and the exported Redis commands.}
+00003 \textcolor{comment}{ *}
+00004 \textcolor{comment}{ * Copyright (c) 2014, Salvatore Sanfilippo <antirez at gmail dot com>}
+00005 \textcolor{comment}{ * All rights reserved.}
+00006 \textcolor{comment}{ *}
+00007 \textcolor{comment}{ * Redistribution and use in source and binary forms, with or without}
+00008 \textcolor{comment}{ * modification, are permitted provided that the following conditions are met:}
+00009 \textcolor{comment}{ *}
+00010 \textcolor{comment}{ *   * Redistributions of source code must retain the above copyright notice,}
+00011 \textcolor{comment}{ *     this list of conditions and the following disclaimer.}
+00012 \textcolor{comment}{ *   * Redistributions in binary form must reproduce the above copyright}
+00013 \textcolor{comment}{ *     notice, this list of conditions and the following disclaimer in the}
+00014 \textcolor{comment}{ *     documentation and/or other materials provided with the distribution.}
+00015 \textcolor{comment}{ *   * Neither the name of Redis nor the names of its contributors may be used}
+00016 \textcolor{comment}{ *     to endorse or promote products derived from this software without}
+00017 \textcolor{comment}{ *     specific prior written permission.}
+00018 \textcolor{comment}{ *}
+00019 \textcolor{comment}{ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"}
+00020 \textcolor{comment}{ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE}
+00021 \textcolor{comment}{ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE}
+00022 \textcolor{comment}{ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE}
+00023 \textcolor{comment}{ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR}
+00024 \textcolor{comment}{ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF}
+00025 \textcolor{comment}{ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS}
+00026 \textcolor{comment}{ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN}
+00027 \textcolor{comment}{ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)}
+00028 \textcolor{comment}{ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE}
+00029 \textcolor{comment}{ * POSSIBILITY OF SUCH DAMAGE.}
+00030 \textcolor{comment}{ */}
+00031 
+00032 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \hyperlink{server_8h}{"server.h"}
+00033 
+00034 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{stdint}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00035 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{math}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00036 
+00037 \textcolor{comment}{/* The Redis HyperLogLog implementation is based on the following ideas:}
+00038 \textcolor{comment}{ *}
+00039 \textcolor{comment}{ * * The use of a 64 bit hash function as proposed in [1], in order to don't}
+00040 \textcolor{comment}{ *   limited to cardinalities up to 10^9, at the cost of just 1 additional}
+00041 \textcolor{comment}{ *   bit per register.}
+00042 \textcolor{comment}{ * * The use of 16384 6-bit registers for a great level of accuracy, using}
+00043 \textcolor{comment}{ *   a total of 12k per key.}
+00044 \textcolor{comment}{ * * The use of the Redis string data type. No new type is introduced.}
+00045 \textcolor{comment}{ * * No attempt is made to compress the data structure as in [1]. Also the}
+00046 \textcolor{comment}{ *   algorithm used is the original HyperLogLog Algorithm as in [2], with}
+00047 \textcolor{comment}{ *   the only difference that a 64 bit hash function is used, so no correction}
+00048 \textcolor{comment}{ *   is performed for values near 2^32 as in [1].}
+00049 \textcolor{comment}{ *}
+00050 \textcolor{comment}{ * [1] Heule, Nunkesser, Hall: HyperLogLog in Practice: Algorithmic}
+00051 \textcolor{comment}{ *     Engineering of a State of The Art Cardinality Estimation Algorithm.}
+00052 \textcolor{comment}{ *}
+00053 \textcolor{comment}{ * [2] P. Flajolet, Éric Fusy, O. Gandouet, and F. Meunier. Hyperloglog: The}
+00054 \textcolor{comment}{ *     analysis of a near-optimal cardinality estimation algorithm.}
+00055 \textcolor{comment}{ *}
+00056 \textcolor{comment}{ * Redis uses two representations:}
+00057 \textcolor{comment}{ *}
+00058 \textcolor{comment}{ * 1) A "dense" representation where every entry is represented by}
+00059 \textcolor{comment}{ *    a 6-bit integer.}
+00060 \textcolor{comment}{ * 2) A "sparse" representation using run length compression suitable}
+00061 \textcolor{comment}{ *    for representing HyperLogLogs with many registers set to 0 in}
+00062 \textcolor{comment}{ *    a memory efficient way.}
+00063 \textcolor{comment}{ *}
+00064 \textcolor{comment}{ *}
+00065 \textcolor{comment}{ * HLL header}
+00066 \textcolor{comment}{ * ===}
+00067 \textcolor{comment}{ *}
+00068 \textcolor{comment}{ * Both the dense and sparse representation have a 16 byte header as follows:}
+00069 \textcolor{comment}{ *}
+00070 \textcolor{comment}{ * +------+---+-----+----------+}
+00071 \textcolor{comment}{ * | HYLL | E | N/U | Cardin.  |}
+00072 \textcolor{comment}{ * +------+---+-----+----------+}
+00073 \textcolor{comment}{ *}
+00074 \textcolor{comment}{ * The first 4 bytes are a magic string set to the bytes "HYLL".}
+00075 \textcolor{comment}{ * "E" is one byte encoding, currently set to HLL\_DENSE or}
+00076 \textcolor{comment}{ * HLL\_SPARSE. N/U are three not used bytes.}
+00077 \textcolor{comment}{ *}
+00078 \textcolor{comment}{ * The "Cardin." field is a 64 bit integer stored in little endian format}
+00079 \textcolor{comment}{ * with the latest cardinality computed that can be reused if the data}
+00080 \textcolor{comment}{ * structure was not modified since the last computation (this is useful}
+00081 \textcolor{comment}{ * because there are high probabilities that HLLADD operations don't}
+00082 \textcolor{comment}{ * modify the actual data structure and hence the approximated cardinality).}
+00083 \textcolor{comment}{ *}
+00084 \textcolor{comment}{ * When the most significant bit in the most significant byte of the cached}
+00085 \textcolor{comment}{ * cardinality is set, it means that the data structure was modified and}
+00086 \textcolor{comment}{ * we can't reuse the cached value that must be recomputed.}
+00087 \textcolor{comment}{ *}
+00088 \textcolor{comment}{ * Dense representation}
+00089 \textcolor{comment}{ * ===}
+00090 \textcolor{comment}{ *}
+00091 \textcolor{comment}{ * The dense representation used by Redis is the following:}
+00092 \textcolor{comment}{ *}
+00093 \textcolor{comment}{ * +--------+--------+--------+------//      //--+}
+00094 \textcolor{comment}{ * |11000000|22221111|33333322|55444444 ....     |}
+00095 \textcolor{comment}{ * +--------+--------+--------+------//      //--+}
+00096 \textcolor{comment}{ *}
+00097 \textcolor{comment}{ * The 6 bits counters are encoded one after the other starting from the}
+00098 \textcolor{comment}{ * LSB to the MSB, and using the next bytes as needed.}
+00099 \textcolor{comment}{ *}
+00100 \textcolor{comment}{ * Sparse representation}
+00101 \textcolor{comment}{ * ===}
+00102 \textcolor{comment}{ *}
+00103 \textcolor{comment}{ * The sparse representation encodes registers using a run length}
+00104 \textcolor{comment}{ * encoding composed of three opcodes, two using one byte, and one using}
+00105 \textcolor{comment}{ * of two bytes. The opcodes are called ZERO, XZERO and VAL.}
+00106 \textcolor{comment}{ *}
+00107 \textcolor{comment}{ * ZERO opcode is represented as 00xxxxxx. The 6-bit integer represented}
+00108 \textcolor{comment}{ * by the six bits 'xxxxxx', plus 1, means that there are N registers set}
+00109 \textcolor{comment}{ * to 0. This opcode can represent from 1 to 64 contiguous registers set}
+00110 \textcolor{comment}{ * to the value of 0.}
+00111 \textcolor{comment}{ *}
+00112 \textcolor{comment}{ * XZERO opcode is represented by two bytes 01xxxxxx yyyyyyyy. The 14-bit}
+00113 \textcolor{comment}{ * integer represented by the bits 'xxxxxx' as most significant bits and}
+00114 \textcolor{comment}{ * 'yyyyyyyy' as least significant bits, plus 1, means that there are N}
+00115 \textcolor{comment}{ * registers set to 0. This opcode can represent from 0 to 16384 contiguous}
+00116 \textcolor{comment}{ * registers set to the value of 0.}
+00117 \textcolor{comment}{ *}
+00118 \textcolor{comment}{ * VAL opcode is represented as 1vvvvvxx. It contains a 5-bit integer}
+00119 \textcolor{comment}{ * representing the value of a register, and a 2-bit integer representing}
+00120 \textcolor{comment}{ * the number of contiguous registers set to that value 'vvvvv'.}
+00121 \textcolor{comment}{ * To obtain the value and run length, the integers vvvvv and xx must be}
+00122 \textcolor{comment}{ * incremented by one. This opcode can represent values from 1 to 32,}
+00123 \textcolor{comment}{ * repeated from 1 to 4 times.}
+00124 \textcolor{comment}{ *}
+00125 \textcolor{comment}{ * The sparse representation can't represent registers with a value greater}
+00126 \textcolor{comment}{ * than 32, however it is very unlikely that we find such a register in an}
+00127 \textcolor{comment}{ * HLL with a cardinality where the sparse representation is still more}
+00128 \textcolor{comment}{ * memory efficient than the dense representation. When this happens the}
+00129 \textcolor{comment}{ * HLL is converted to the dense representation.}
+00130 \textcolor{comment}{ *}
+00131 \textcolor{comment}{ * The sparse representation is purely positional. For example a sparse}
+00132 \textcolor{comment}{ * representation of an empty HLL is just: XZERO:16384.}
+00133 \textcolor{comment}{ *}
+00134 \textcolor{comment}{ * An HLL having only 3 non-zero registers at position 1000, 1020, 1021}
+00135 \textcolor{comment}{ * respectively set to 2, 3, 3, is represented by the following three}
+00136 \textcolor{comment}{ * opcodes:}
+00137 \textcolor{comment}{ *}
+00138 \textcolor{comment}{ * XZERO:1000 (Registers 0-999 are set to 0)}
+00139 \textcolor{comment}{ * VAL:2,1    (1 register set to value 2, that is register 1000)}
+00140 \textcolor{comment}{ * ZERO:19    (Registers 1001-1019 set to 0)}
+00141 \textcolor{comment}{ * VAL:3,2    (2 registers set to value 3, that is registers 1020,1021)}
+00142 \textcolor{comment}{ * XZERO:15362 (Registers 1022-16383 set to 0)}
+00143 \textcolor{comment}{ *}
+00144 \textcolor{comment}{ * In the example the sparse representation used just 7 bytes instead}
+00145 \textcolor{comment}{ * of 12k in order to represent the HLL registers. In general for low}
+00146 \textcolor{comment}{ * cardinality there is a big win in terms of space efficiency, traded}
+00147 \textcolor{comment}{ * with CPU time since the sparse representation is slower to access:}
+00148 \textcolor{comment}{ *}
+00149 \textcolor{comment}{ * The following table shows average cardinality vs bytes used, 100}
+00150 \textcolor{comment}{ * samples per cardinality (when the set was not representable because}
+00151 \textcolor{comment}{ * of registers with too big value, the dense representation size was used}
+00152 \textcolor{comment}{ * as a sample).}
+00153 \textcolor{comment}{ *}
+00154 \textcolor{comment}{ * 100 267}
+00155 \textcolor{comment}{ * 200 485}
+00156 \textcolor{comment}{ * 300 678}
+00157 \textcolor{comment}{ * 400 859}
+00158 \textcolor{comment}{ * 500 1033}
+00159 \textcolor{comment}{ * 600 1205}
+00160 \textcolor{comment}{ * 700 1375}
+00161 \textcolor{comment}{ * 800 1544}
+00162 \textcolor{comment}{ * 900 1713}
+00163 \textcolor{comment}{ * 1000 1882}
+00164 \textcolor{comment}{ * 2000 3480}
+00165 \textcolor{comment}{ * 3000 4879}
+00166 \textcolor{comment}{ * 4000 6089}
+00167 \textcolor{comment}{ * 5000 7138}
+00168 \textcolor{comment}{ * 6000 8042}
+00169 \textcolor{comment}{ * 7000 8823}
+00170 \textcolor{comment}{ * 8000 9500}
+00171 \textcolor{comment}{ * 9000 10088}
+00172 \textcolor{comment}{ * 10000 10591}
+00173 \textcolor{comment}{ *}
+00174 \textcolor{comment}{ * The dense representation uses 12288 bytes, so there is a big win up to}
+00175 \textcolor{comment}{ * a cardinality of ~2000-3000. For bigger cardinalities the constant times}
+00176 \textcolor{comment}{ * involved in updating the sparse representation is not justified by the}
+00177 \textcolor{comment}{ * memory savings. The exact maximum length of the sparse representation}
+00178 \textcolor{comment}{ * when this implementation switches to the dense representation is}
+00179 \textcolor{comment}{ * configured via the define server.hll\_sparse\_max\_bytes.}
+00180 \textcolor{comment}{ */}
+00181 
+\Hypertarget{hyperloglog_8c_source_l00182}\hyperlink{structhllhdr}{00182} \textcolor{keyword}{struct} \hyperlink{structhllhdr}{hllhdr} \{
+00183     \textcolor{keywordtype}{char} magic[4];      \textcolor{comment}{/* "HYLL" */}
+00184     uint8\_t encoding;   \textcolor{comment}{/* HLL\_DENSE or HLL\_SPARSE. */}
+00185     uint8\_t notused[3]; \textcolor{comment}{/* Reserved for future use, must be zero. */}
+00186     uint8\_t card[8];    \textcolor{comment}{/* Cached cardinality, little endian. */}
+00187     uint8\_t registers[]; \textcolor{comment}{/* Data bytes. */}
+00188 \};
+00189 
+00190 \textcolor{comment}{/* The cached cardinality MSB is used to signal validity of the cached value. */}
+00191 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{HLL\_INVALIDATE\_CACHE}\textcolor{preprocessor}{(}\textcolor{preprocessor}{hdr}\textcolor{preprocessor}{)} \textcolor{preprocessor}{(}\textcolor{preprocessor}{hdr}\textcolor{preprocessor}{)}\textcolor{preprocessor}{->}\textcolor{preprocessor}{card}\textcolor{preprocessor}{[}7\textcolor{preprocessor}{]} \textcolor{preprocessor}{|=} \textcolor{preprocessor}{(}1\textcolor{preprocessor}{<<}7\textcolor{preprocessor}{)}
+00192 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{HLL\_VALID\_CACHE}\textcolor{preprocessor}{(}\textcolor{preprocessor}{hdr}\textcolor{preprocessor}{)} \textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{hdr}\textcolor{preprocessor}{)}\textcolor{preprocessor}{->}\textcolor{preprocessor}{card}\textcolor{preprocessor}{[}7\textcolor{preprocessor}{]} \textcolor{preprocessor}{&} \textcolor{preprocessor}{(}1\textcolor{preprocessor}{<<}7\textcolor{preprocessor}{)}\textcolor{preprocessor}{)} \textcolor{preprocessor}{==} 0\textcolor{preprocessor}{)}
+00193 
+00194 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{HLL\_P} 14 \textcolor{comment}{/* The greater is P, the smaller the error. */}
+00195 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{HLL\_REGISTERS} \textcolor{preprocessor}{(}1\textcolor{preprocessor}{<<}\hyperlink{hyperloglog_8c_a42896b243b4ffcf09e4457b6f174db9c}{HLL\_P}\textcolor{preprocessor}{)} \textcolor{comment}{/* With P=14, 16384 registers. */}
+00196 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{HLL\_P\_MASK} \textcolor{preprocessor}{(}\hyperlink{hyperloglog_8c_aa053beb90136828dcb46545c7445fc36}{HLL\_REGISTERS}\textcolor{preprocessor}{-}1\textcolor{preprocessor}{)} \textcolor{comment}{/* Mask to index register. */}
+00197 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{HLL\_BITS} 6 \textcolor{comment}{/* Enough to count up to 63 leading zeroes. */}
+00198 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{HLL\_REGISTER\_MAX} \textcolor{preprocessor}{(}\textcolor{preprocessor}{(}1\textcolor{preprocessor}{<<}\hyperlink{hyperloglog_8c_a9023d37e2b4b782b2b922d9599894d14}{HLL\_BITS}\textcolor{preprocessor}{)}\textcolor{preprocessor}{-}1\textcolor{preprocessor}{)}
+00199 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{HLL\_HDR\_SIZE} \textcolor{keyword}{sizeof}\textcolor{preprocessor}{(}\textcolor{keyword}{struct} \textcolor{preprocessor}{hllhdr}\textcolor{preprocessor}{)}
+00200 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{HLL\_DENSE\_SIZE} \textcolor{preprocessor}{(}\hyperlink{hyperloglog_8c_af04dc163054c4c79b0e6c93057b4032f}{HLL\_HDR\_SIZE}\textcolor{preprocessor}{+}\textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\hyperlink{hyperloglog_8c_aa053beb90136828dcb46545c7445fc36}{HLL\_REGISTERS}\textcolor{preprocessor}{*}
+      \hyperlink{hyperloglog_8c_a9023d37e2b4b782b2b922d9599894d14}{HLL\_BITS}\textcolor{preprocessor}{+}7\textcolor{preprocessor}{)}\textcolor{preprocessor}{/}8\textcolor{preprocessor}{)}\textcolor{preprocessor}{)}
+00201 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{HLL\_DENSE} 0 \textcolor{comment}{/* Dense encoding. */}
+00202 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{HLL\_SPARSE} 1 \textcolor{comment}{/* Sparse encoding. */}
+00203 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{HLL\_RAW} 255 \textcolor{comment}{/* Only used internally, never exposed. */}
+00204 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{HLL\_MAX\_ENCODING} 1
+00205 
+00206 \textcolor{keyword}{static} \textcolor{keywordtype}{char} *invalid\_hll\_err = \textcolor{stringliteral}{"-INVALIDOBJ Corrupted HLL object detected\(\backslash\)r\(\backslash\)n"};
+00207 
+00208 \textcolor{comment}{/* =========================== Low level bit macros ========================= */}
+00209 
+00210 \textcolor{comment}{/* Macros to access the dense representation.}
+00211 \textcolor{comment}{ *}
+00212 \textcolor{comment}{ * We need to get and set 6 bit counters in an array of 8 bit bytes.}
+00213 \textcolor{comment}{ * We use macros to make sure the code is inlined since speed is critical}
+00214 \textcolor{comment}{ * especially in order to compute the approximated cardinality in}
+00215 \textcolor{comment}{ * HLLCOUNT where we need to access all the registers at once.}
+00216 \textcolor{comment}{ * For the same reason we also want to avoid conditionals in this code path.}
+00217 \textcolor{comment}{ *}
+00218 \textcolor{comment}{ * +--------+--------+--------+------//}
+00219 \textcolor{comment}{ * |11000000|22221111|33333322|55444444}
+00220 \textcolor{comment}{ * +--------+--------+--------+------//}
+00221 \textcolor{comment}{ *}
+00222 \textcolor{comment}{ * Note: in the above representation the most significant bit (MSB)}
+00223 \textcolor{comment}{ * of every byte is on the left. We start using bits from the LSB to MSB,}
+00224 \textcolor{comment}{ * and so forth passing to the next byte.}
+00225 \textcolor{comment}{ *}
+00226 \textcolor{comment}{ * Example, we want to access to counter at pos = 1 ("111111" in the}
+00227 \textcolor{comment}{ * illustration above).}
+00228 \textcolor{comment}{ *}
+00229 \textcolor{comment}{ * The index of the first byte b0 containing our data is:}
+00230 \textcolor{comment}{ *}
+00231 \textcolor{comment}{ *  b0 = 6 * pos / 8 = 0}
+00232 \textcolor{comment}{ *}
+00233 \textcolor{comment}{ *   +--------+}
+00234 \textcolor{comment}{ *   |11000000|  <- Our byte at b0}
+00235 \textcolor{comment}{ *   +--------+}
+00236 \textcolor{comment}{ *}
+00237 \textcolor{comment}{ * The position of the first bit (counting from the LSB = 0) in the byte}
+00238 \textcolor{comment}{ * is given by:}
+00239 \textcolor{comment}{ *}
+00240 \textcolor{comment}{ *  fb = 6 * pos % 8 -> 6}
+00241 \textcolor{comment}{ *}
+00242 \textcolor{comment}{ * Right shift b0 of 'fb' bits.}
+00243 \textcolor{comment}{ *}
+00244 \textcolor{comment}{ *   +--------+}
+00245 \textcolor{comment}{ *   |11000000|  <- Initial value of b0}
+00246 \textcolor{comment}{ *   |00000011|  <- After right shift of 6 pos.}
+00247 \textcolor{comment}{ *   +--------+}
+00248 \textcolor{comment}{ *}
+00249 \textcolor{comment}{ * Left shift b1 of bits 8-fb bits (2 bits)}
+00250 \textcolor{comment}{ *}
+00251 \textcolor{comment}{ *   +--------+}
+00252 \textcolor{comment}{ *   |22221111|  <- Initial value of b1}
+00253 \textcolor{comment}{ *   |22111100|  <- After left shift of 2 bits.}
+00254 \textcolor{comment}{ *   +--------+}
+00255 \textcolor{comment}{ *}
+00256 \textcolor{comment}{ * OR the two bits, and finally AND with 111111 (63 in decimal) to}
+00257 \textcolor{comment}{ * clean the higher order bits we are not interested in:}
+00258 \textcolor{comment}{ *}
+00259 \textcolor{comment}{ *   +--------+}
+00260 \textcolor{comment}{ *   |00000011|  <- b0 right shifted}
+00261 \textcolor{comment}{ *   |22111100|  <- b1 left shifted}
+00262 \textcolor{comment}{ *   |22111111|  <- b0 OR b1}
+00263 \textcolor{comment}{ *   |  111111|  <- (b0 OR b1) AND 63, our value.}
+00264 \textcolor{comment}{ *   +--------+}
+00265 \textcolor{comment}{ *}
+00266 \textcolor{comment}{ * We can try with a different example, like pos = 0. In this case}
+00267 \textcolor{comment}{ * the 6-bit counter is actually contained in a single byte.}
+00268 \textcolor{comment}{ *}
+00269 \textcolor{comment}{ *  b0 = 6 * pos / 8 = 0}
+00270 \textcolor{comment}{ *}
+00271 \textcolor{comment}{ *   +--------+}
+00272 \textcolor{comment}{ *   |11000000|  <- Our byte at b0}
+00273 \textcolor{comment}{ *   +--------+}
+00274 \textcolor{comment}{ *}
+00275 \textcolor{comment}{ *  fb = 6 * pos % 8 = 0}
+00276 \textcolor{comment}{ *}
+00277 \textcolor{comment}{ *  So we right shift of 0 bits (no shift in practice) and}
+00278 \textcolor{comment}{ *  left shift the next byte of 8 bits, even if we don't use it,}
+00279 \textcolor{comment}{ *  but this has the effect of clearing the bits so the result}
+00280 \textcolor{comment}{ *  will not be affacted after the OR.}
+00281 \textcolor{comment}{ *}
+00282 \textcolor{comment}{ * -------------------------------------------------------------------------}
+00283 \textcolor{comment}{ *}
+00284 \textcolor{comment}{ * Setting the register is a bit more complex, let's assume that 'val'}
+00285 \textcolor{comment}{ * is the value we want to set, already in the right range.}
+00286 \textcolor{comment}{ *}
+00287 \textcolor{comment}{ * We need two steps, in one we need to clear the bits, and in the other}
+00288 \textcolor{comment}{ * we need to bitwise-OR the new bits.}
+00289 \textcolor{comment}{ *}
+00290 \textcolor{comment}{ * Let's try with 'pos' = 1, so our first byte at 'b' is 0,}
+00291 \textcolor{comment}{ *}
+00292 \textcolor{comment}{ * "fb" is 6 in this case.}
+00293 \textcolor{comment}{ *}
+00294 \textcolor{comment}{ *   +--------+}
+00295 \textcolor{comment}{ *   |11000000|  <- Our byte at b0}
+00296 \textcolor{comment}{ *   +--------+}
+00297 \textcolor{comment}{ *}
+00298 \textcolor{comment}{ * To create a AND-mask to clear the bits about this position, we just}
+00299 \textcolor{comment}{ * initialize the mask with the value 63, left shift it of "fs" bits,}
+00300 \textcolor{comment}{ * and finally invert the result.}
+00301 \textcolor{comment}{ *}
+00302 \textcolor{comment}{ *   +--------+}
+00303 \textcolor{comment}{ *   |00111111|  <- "mask" starts at 63}
+00304 \textcolor{comment}{ *   |11000000|  <- "mask" after left shift of "ls" bits.}
+00305 \textcolor{comment}{ *   |00111111|  <- "mask" after invert.}
+00306 \textcolor{comment}{ *   +--------+}
+00307 \textcolor{comment}{ *}
+00308 \textcolor{comment}{ * Now we can bitwise-AND the byte at "b" with the mask, and bitwise-OR}
+00309 \textcolor{comment}{ * it with "val" left-shifted of "ls" bits to set the new bits.}
+00310 \textcolor{comment}{ *}
+00311 \textcolor{comment}{ * Now let's focus on the next byte b1:}
+00312 \textcolor{comment}{ *}
+00313 \textcolor{comment}{ *   +--------+}
+00314 \textcolor{comment}{ *   |22221111|  <- Initial value of b1}
+00315 \textcolor{comment}{ *   +--------+}
+00316 \textcolor{comment}{ *}
+00317 \textcolor{comment}{ * To build the AND mask we start again with the 63 value, right shift}
+00318 \textcolor{comment}{ * it by 8-fb bits, and invert it.}
+00319 \textcolor{comment}{ *}
+00320 \textcolor{comment}{ *   +--------+}
+00321 \textcolor{comment}{ *   |00111111|  <- "mask" set at 2&6-1}
+00322 \textcolor{comment}{ *   |00001111|  <- "mask" after the right shift by 8-fb = 2 bits}
+00323 \textcolor{comment}{ *   |11110000|  <- "mask" after bitwise not.}
+00324 \textcolor{comment}{ *   +--------+}
+00325 \textcolor{comment}{ *}
+00326 \textcolor{comment}{ * Now we can mask it with b+1 to clear the old bits, and bitwise-OR}
+00327 \textcolor{comment}{ * with "val" left-shifted by "rs" bits to set the new value.}
+00328 \textcolor{comment}{ */}
+00329 
+00330 \textcolor{comment}{/* Note: if we access the last counter, we will also access the b+1 byte}
+00331 \textcolor{comment}{ * that is out of the array, but sds strings always have an implicit null}
+00332 \textcolor{comment}{ * term, so the byte exists, and we can skip the conditional (or the need}
+00333 \textcolor{comment}{ * to allocate 1 byte more explicitly). */}
+00334 
+00335 \textcolor{comment}{/* Store the value of the register at position 'regnum' into variable 'target'.}
+00336 \textcolor{comment}{ * 'p' is an array of unsigned bytes. */}
+00337 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{HLL\_DENSE\_GET\_REGISTER}\textcolor{preprocessor}{(}\textcolor{preprocessor}{target}\textcolor{preprocessor}{,}\textcolor{preprocessor}{p}\textcolor{preprocessor}{,}\textcolor{preprocessor}{regnum}\textcolor{preprocessor}{)} \textcolor{keywordflow}{do} \textcolor{preprocessor}{\{}
+00338     \textcolor{preprocessor}{uint8\_t} \textcolor{preprocessor}{*}\textcolor{preprocessor}{\_p} \textcolor{preprocessor}{=} \textcolor{preprocessor}{(}\textcolor{preprocessor}{uint8\_t}\textcolor{preprocessor}{*}\textcolor{preprocessor}{)} \textcolor{preprocessor}{p}\textcolor{preprocessor}{;}
+00339     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} \textcolor{preprocessor}{\_byte} \textcolor{preprocessor}{=} \textcolor{preprocessor}{regnum}\textcolor{preprocessor}{*}\hyperlink{hyperloglog_8c_a9023d37e2b4b782b2b922d9599894d14}{HLL\_BITS}\textcolor{preprocessor}{/}8\textcolor{preprocessor}{;}
+00340     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} \textcolor{preprocessor}{\_fb} \textcolor{preprocessor}{=} \textcolor{preprocessor}{regnum}\textcolor{preprocessor}{*}\hyperlink{hyperloglog_8c_a9023d37e2b4b782b2b922d9599894d14}{HLL\_BITS}\textcolor{preprocessor}{&}7\textcolor{preprocessor}{;}
+00341     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} \textcolor{preprocessor}{\_fb8} \textcolor{preprocessor}{=} 8 \textcolor{preprocessor}{-} \textcolor{preprocessor}{\_fb}\textcolor{preprocessor}{;}
+00342     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} \textcolor{preprocessor}{b0} \textcolor{preprocessor}{=} \textcolor{preprocessor}{\_p}\textcolor{preprocessor}{[}\textcolor{preprocessor}{\_byte}\textcolor{preprocessor}{]}\textcolor{preprocessor}{;}
+00343     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} \textcolor{preprocessor}{b1} \textcolor{preprocessor}{=} \textcolor{preprocessor}{\_p}\textcolor{preprocessor}{[}\textcolor{preprocessor}{\_byte}\textcolor{preprocessor}{+}1\textcolor{preprocessor}{]}\textcolor{preprocessor}{;}
+00344     \textcolor{preprocessor}{target} \textcolor{preprocessor}{=} \textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{b0} \textcolor{preprocessor}{>>} \textcolor{preprocessor}{\_fb}\textcolor{preprocessor}{)} \textcolor{preprocessor}{|} \textcolor{preprocessor}{(}\textcolor{preprocessor}{b1} \textcolor{preprocessor}{<<} \textcolor{preprocessor}{\_fb8}\textcolor{preprocessor}{)}\textcolor{preprocessor}{)} \textcolor{preprocessor}{&} \hyperlink{hyperloglog_8c_af33bbd0f0613975a8821000c92febd31}{HLL\_REGISTER\_MAX}\textcolor{preprocessor}{;} \textcolor{preprocessor}{\(\backslash\)}
+00345 \textcolor{preprocessor}{\}}\textcolor{keywordflow}{while}\textcolor{preprocessor}{(}0\textcolor{preprocessor}{)}
+00346 
+00347 \textcolor{comment}{/* Set the value of the register at position 'regnum' to 'val'.}
+00348 \textcolor{comment}{ * 'p' is an array of unsigned bytes. */}
+00349 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{HLL\_DENSE\_SET\_REGISTER}\textcolor{preprocessor}{(}\textcolor{preprocessor}{p}\textcolor{preprocessor}{,}\textcolor{preprocessor}{regnum}\textcolor{preprocessor}{,}\textcolor{preprocessor}{val}\textcolor{preprocessor}{)} \textcolor{keywordflow}{do} \textcolor{preprocessor}{\{}
+00350     \textcolor{preprocessor}{uint8\_t} \textcolor{preprocessor}{*}\textcolor{preprocessor}{\_p} \textcolor{preprocessor}{=} \textcolor{preprocessor}{(}\textcolor{preprocessor}{uint8\_t}\textcolor{preprocessor}{*}\textcolor{preprocessor}{)} \textcolor{preprocessor}{p}\textcolor{preprocessor}{;}
+00351     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} \textcolor{preprocessor}{\_byte} \textcolor{preprocessor}{=} \textcolor{preprocessor}{regnum}\textcolor{preprocessor}{*}\hyperlink{hyperloglog_8c_a9023d37e2b4b782b2b922d9599894d14}{HLL\_BITS}\textcolor{preprocessor}{/}8\textcolor{preprocessor}{;}
+00352     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} \textcolor{preprocessor}{\_fb} \textcolor{preprocessor}{=} \textcolor{preprocessor}{regnum}\textcolor{preprocessor}{*}\hyperlink{hyperloglog_8c_a9023d37e2b4b782b2b922d9599894d14}{HLL\_BITS}\textcolor{preprocessor}{&}7\textcolor{preprocessor}{;}
+00353     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} \textcolor{preprocessor}{\_fb8} \textcolor{preprocessor}{=} 8 \textcolor{preprocessor}{-} \textcolor{preprocessor}{\_fb}\textcolor{preprocessor}{;}
+00354     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} \textcolor{preprocessor}{\_v} \textcolor{preprocessor}{=} \textcolor{preprocessor}{val}\textcolor{preprocessor}{;}
+00355     \textcolor{preprocessor}{\_p}\textcolor{preprocessor}{[}\textcolor{preprocessor}{\_byte}\textcolor{preprocessor}{]} \textcolor{preprocessor}{&=} \textcolor{preprocessor}{~}\textcolor{preprocessor}{(}\hyperlink{hyperloglog_8c_af33bbd0f0613975a8821000c92febd31}{HLL\_REGISTER\_MAX} \textcolor{preprocessor}{<<} \textcolor{preprocessor}{\_fb}\textcolor{preprocessor}{)}\textcolor{preprocessor}{;}
+00356     \textcolor{preprocessor}{\_p}\textcolor{preprocessor}{[}\textcolor{preprocessor}{\_byte}\textcolor{preprocessor}{]} \textcolor{preprocessor}{|=} \textcolor{preprocessor}{\_v} \textcolor{preprocessor}{<<} \textcolor{preprocessor}{\_fb}\textcolor{preprocessor}{;}
+00357     \textcolor{preprocessor}{\_p}\textcolor{preprocessor}{[}\textcolor{preprocessor}{\_byte}\textcolor{preprocessor}{+}1\textcolor{preprocessor}{]} \textcolor{preprocessor}{&=} \textcolor{preprocessor}{~}\textcolor{preprocessor}{(}\hyperlink{hyperloglog_8c_af33bbd0f0613975a8821000c92febd31}{HLL\_REGISTER\_MAX} \textcolor{preprocessor}{>>} \textcolor{preprocessor}{\_fb8}\textcolor{preprocessor}{)}\textcolor{preprocessor}{;}
+00358     \textcolor{preprocessor}{\_p}\textcolor{preprocessor}{[}\textcolor{preprocessor}{\_byte}\textcolor{preprocessor}{+}1\textcolor{preprocessor}{]} \textcolor{preprocessor}{|=} \textcolor{preprocessor}{\_v} \textcolor{preprocessor}{>>} \textcolor{preprocessor}{\_fb8}\textcolor{preprocessor}{;} \textcolor{preprocessor}{\(\backslash\)}
+00359 \textcolor{preprocessor}{\}}\textcolor{keywordflow}{while}\textcolor{preprocessor}{(}0\textcolor{preprocessor}{)}
+00360 
+00361 \textcolor{comment}{/* Macros to access the sparse representation.}
+00362 \textcolor{comment}{ * The macros parameter is expected to be an uint8\_t pointer. */}
+00363 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{HLL\_SPARSE\_XZERO\_BIT} 0x40 \textcolor{comment}{/* 01xxxxxx */}
+00364 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{HLL\_SPARSE\_VAL\_BIT} 0x80 \textcolor{comment}{/* 1vvvvvxx */}
+00365 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{HLL\_SPARSE\_IS\_ZERO}\textcolor{preprocessor}{(}\textcolor{preprocessor}{p}\textcolor{preprocessor}{)} \textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{*}\textcolor{preprocessor}{(}\textcolor{preprocessor}{p}\textcolor{preprocessor}{)}\textcolor{preprocessor}{)} \textcolor{preprocessor}{&} 0xc0\textcolor{preprocessor}{)} \textcolor{preprocessor}{==} 0\textcolor{preprocessor}{)} \textcolor{comment}{/* 00xxxxxx */}
+00366 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{HLL\_SPARSE\_IS\_XZERO}\textcolor{preprocessor}{(}\textcolor{preprocessor}{p}\textcolor{preprocessor}{)} \textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{*}\textcolor{preprocessor}{(}\textcolor{preprocessor}{p}\textcolor{preprocessor}{)}\textcolor{preprocessor}{)} \textcolor{preprocessor}{&} 0xc0\textcolor{preprocessor}{)} \textcolor{preprocessor}{==} \hyperlink{hyperloglog_8c_a7dd7864cc78ee794a3bca920e8860d2a}{HLL\_SPARSE\_XZERO\_BIT}\textcolor{preprocessor}{)}
+00367 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{HLL\_SPARSE\_IS\_VAL}\textcolor{preprocessor}{(}\textcolor{preprocessor}{p}\textcolor{preprocessor}{)} \textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{*}\textcolor{preprocessor}{(}\textcolor{preprocessor}{p}\textcolor{preprocessor}{)}\textcolor{preprocessor}{)} \textcolor{preprocessor}{&} \hyperlink{hyperloglog_8c_a7256ab56392f80b9d89451fdd4ff5657}{HLL\_SPARSE\_VAL\_BIT}\textcolor{preprocessor}{)}
+00368 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{HLL\_SPARSE\_ZERO\_LEN}\textcolor{preprocessor}{(}\textcolor{preprocessor}{p}\textcolor{preprocessor}{)} \textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{*}\textcolor{preprocessor}{(}\textcolor{preprocessor}{p}\textcolor{preprocessor}{)}\textcolor{preprocessor}{)} \textcolor{preprocessor}{&} 0x3f\textcolor{preprocessor}{)}\textcolor{preprocessor}{+}1\textcolor{preprocessor}{)}
+00369 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{HLL\_SPARSE\_XZERO\_LEN}\textcolor{preprocessor}{(}\textcolor{preprocessor}{p}\textcolor{preprocessor}{)} \textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{*}\textcolor{preprocessor}{(}\textcolor{preprocessor}{p}\textcolor{preprocessor}{)}\textcolor{preprocessor}{)} \textcolor{preprocessor}{&} 0x3f\textcolor{preprocessor}{)} \textcolor{preprocessor}{<<} 8\textcolor{preprocessor}{)} \textcolor{preprocessor}{|} \textcolor{preprocessor}{(}\textcolor{preprocessor}{*}\textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{p}\textcolor{preprocessor}{)}\textcolor{preprocessor}{+}1\textcolor{preprocessor}{)}\textcolor{preprocessor}{)}\textcolor{preprocessor}{)}\textcolor{preprocessor}{+}1\textcolor{preprocessor}{)}
+00370 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{HLL\_SPARSE\_VAL\_VALUE}\textcolor{preprocessor}{(}\textcolor{preprocessor}{p}\textcolor{preprocessor}{)} \textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{*}\textcolor{preprocessor}{(}\textcolor{preprocessor}{p}\textcolor{preprocessor}{)}\textcolor{preprocessor}{)} \textcolor{preprocessor}{>>} 2\textcolor{preprocessor}{)} \textcolor{preprocessor}{&} 0x1f\textcolor{preprocessor}{)}\textcolor{preprocessor}{+}1\textcolor{preprocessor}{)}
+00371 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{HLL\_SPARSE\_VAL\_LEN}\textcolor{preprocessor}{(}\textcolor{preprocessor}{p}\textcolor{preprocessor}{)} \textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{*}\textcolor{preprocessor}{(}\textcolor{preprocessor}{p}\textcolor{preprocessor}{)}\textcolor{preprocessor}{)} \textcolor{preprocessor}{&} 0x3\textcolor{preprocessor}{)}\textcolor{preprocessor}{+}1\textcolor{preprocessor}{)}
+00372 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{HLL\_SPARSE\_VAL\_MAX\_VALUE} 32
+00373 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{HLL\_SPARSE\_VAL\_MAX\_LEN} 4
+00374 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{HLL\_SPARSE\_ZERO\_MAX\_LEN} 64
+00375 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{HLL\_SPARSE\_XZERO\_MAX\_LEN} 16384
+00376 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{HLL\_SPARSE\_VAL\_SET}\textcolor{preprocessor}{(}\textcolor{preprocessor}{p}\textcolor{preprocessor}{,}\textcolor{preprocessor}{val}\textcolor{preprocessor}{,}\textcolor{preprocessor}{len}\textcolor{preprocessor}{)} \textcolor{keywordflow}{do} \textcolor{preprocessor}{\{}
+00377     \textcolor{preprocessor}{*}\textcolor{preprocessor}{(}\textcolor{preprocessor}{p}\textcolor{preprocessor}{)} \textcolor{preprocessor}{=} \textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{val}\textcolor{preprocessor}{)}\textcolor{preprocessor}{-}1\textcolor{preprocessor}{)}\textcolor{preprocessor}{<<}2\textcolor{preprocessor}{|}\textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{len}\textcolor{preprocessor}{)}\textcolor{preprocessor}{-}1\textcolor{preprocessor}{)}\textcolor{preprocessor}{)}\textcolor{preprocessor}{|}\hyperlink{hyperloglog_8c_a7256ab56392f80b9d89451fdd4ff5657}{HLL\_SPARSE\_VAL\_BIT}\textcolor{preprocessor}{;} \textcolor{preprocessor}{\(\backslash\)}
+00378 \textcolor{preprocessor}{\}}\textcolor{keywordflow}{while}\textcolor{preprocessor}{(}0\textcolor{preprocessor}{)}
+00379 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{HLL\_SPARSE\_ZERO\_SET}\textcolor{preprocessor}{(}\textcolor{preprocessor}{p}\textcolor{preprocessor}{,}\textcolor{preprocessor}{len}\textcolor{preprocessor}{)} \textcolor{keywordflow}{do} \textcolor{preprocessor}{\{}
+00380     \textcolor{preprocessor}{*}\textcolor{preprocessor}{(}\textcolor{preprocessor}{p}\textcolor{preprocessor}{)} \textcolor{preprocessor}{=} \textcolor{preprocessor}{(}\textcolor{preprocessor}{len}\textcolor{preprocessor}{)}\textcolor{preprocessor}{-}1\textcolor{preprocessor}{;} \textcolor{preprocessor}{\(\backslash\)}
+00381 \textcolor{preprocessor}{\}}\textcolor{keywordflow}{while}\textcolor{preprocessor}{(}0\textcolor{preprocessor}{)}
+00382 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{HLL\_SPARSE\_XZERO\_SET}\textcolor{preprocessor}{(}\textcolor{preprocessor}{p}\textcolor{preprocessor}{,}\textcolor{preprocessor}{len}\textcolor{preprocessor}{)} \textcolor{keywordflow}{do} \textcolor{preprocessor}{\{}
+00383     \textcolor{keywordtype}{int} \textcolor{preprocessor}{\_l} \textcolor{preprocessor}{=} \textcolor{preprocessor}{(}\textcolor{preprocessor}{len}\textcolor{preprocessor}{)}\textcolor{preprocessor}{-}1\textcolor{preprocessor}{;}
+00384     \textcolor{preprocessor}{*}\textcolor{preprocessor}{(}\textcolor{preprocessor}{p}\textcolor{preprocessor}{)} \textcolor{preprocessor}{=} \textcolor{preprocessor}{(}\textcolor{preprocessor}{\_l}\textcolor{preprocessor}{>>}8\textcolor{preprocessor}{)} \textcolor{preprocessor}{|} \hyperlink{hyperloglog_8c_a7dd7864cc78ee794a3bca920e8860d2a}{HLL\_SPARSE\_XZERO\_BIT}\textcolor{preprocessor}{;}
+00385     \textcolor{preprocessor}{*}\textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{p}\textcolor{preprocessor}{)}\textcolor{preprocessor}{+}1\textcolor{preprocessor}{)} \textcolor{preprocessor}{=} \textcolor{preprocessor}{(}\textcolor{preprocessor}{\_l}\textcolor{preprocessor}{&}0xff\textcolor{preprocessor}{)}\textcolor{preprocessor}{;} \textcolor{preprocessor}{\(\backslash\)}
+00386 \textcolor{preprocessor}{\}}\textcolor{keywordflow}{while}\textcolor{preprocessor}{(}0\textcolor{preprocessor}{)}
+00387 
+00388 \textcolor{comment}{/* ========================= HyperLogLog algorithm  ========================= */}
+00389 
+00390 \textcolor{comment}{/* Our hash function is MurmurHash2, 64 bit version.}
+00391 \textcolor{comment}{ * It was modified for Redis in order to provide the same result in}
+00392 \textcolor{comment}{ * big and little endian archs (endian neutral). */}
+00393 uint64\_t MurmurHash64A (\textcolor{keyword}{const} \textcolor{keywordtype}{void} * key, \textcolor{keywordtype}{int} len, \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{int} seed) \{
+00394     \textcolor{keyword}{const} uint64\_t m = 0xc6a4a7935bd1e995;
+00395     \textcolor{keyword}{const} \textcolor{keywordtype}{int} r = 47;
+00396     uint64\_t h = seed ^ (len * m);
+00397     \textcolor{keyword}{const} uint8\_t *data = (\textcolor{keyword}{const} uint8\_t *)key;
+00398     \textcolor{keyword}{const} uint8\_t *end = data + (len-(len&7));
+00399 
+00400     \textcolor{keywordflow}{while}(data != end) \{
+00401         uint64\_t k;
+00402 
+00403 \textcolor{preprocessor}{#}\textcolor{preprocessor}{if} \textcolor{preprocessor}{(}BYTE\_ORDER \textcolor{preprocessor}{==} \hyperlink{config_8h_a8782a401fbf55261460863fc2f8df1ce}{LITTLE\_ENDIAN}\textcolor{preprocessor}{)}
+00404     \textcolor{preprocessor}{#}\textcolor{preprocessor}{ifdef} \textcolor{preprocessor}{USE\_ALIGNED\_ACCESS}
+00405     memcpy(&k,data,\textcolor{keyword}{sizeof}(uint64\_t));
+00406     \textcolor{preprocessor}{#}\textcolor{preprocessor}{else}
+00407         k = *((uint64\_t*)data);
+00408     \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00409 \textcolor{preprocessor}{#}\textcolor{preprocessor}{else}
+00410         k = (uint64\_t) data[0];
+00411         k |= (uint64\_t) data[1] << 8;
+00412         k |= (uint64\_t) data[2] << 16;
+00413         k |= (uint64\_t) data[3] << 24;
+00414         k |= (uint64\_t) data[4] << 32;
+00415         k |= (uint64\_t) data[5] << 40;
+00416         k |= (uint64\_t) data[6] << 48;
+00417         k |= (uint64\_t) data[7] << 56;
+00418 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00419 
+00420         k *= m;
+00421         k ^= k >> r;
+00422         k *= m;
+00423         h ^= k;
+00424         h *= m;
+00425         data += 8;
+00426     \}
+00427 
+00428     \textcolor{keywordflow}{switch}(len & 7) \{
+00429     \textcolor{keywordflow}{case} 7: h ^= (uint64\_t)data[6] << 48;
+00430     \textcolor{keywordflow}{case} 6: h ^= (uint64\_t)data[5] << 40;
+00431     \textcolor{keywordflow}{case} 5: h ^= (uint64\_t)data[4] << 32;
+00432     \textcolor{keywordflow}{case} 4: h ^= (uint64\_t)data[3] << 24;
+00433     \textcolor{keywordflow}{case} 3: h ^= (uint64\_t)data[2] << 16;
+00434     \textcolor{keywordflow}{case} 2: h ^= (uint64\_t)data[1] << 8;
+00435     \textcolor{keywordflow}{case} 1: h ^= (uint64\_t)data[0];
+00436             h *= m;
+00437     \};
+00438 
+00439     h ^= h >> r;
+00440     h *= m;
+00441     h ^= h >> r;
+00442     \textcolor{keywordflow}{return} h;
+00443 \}
+00444 
+00445 \textcolor{comment}{/* Given a string element to add to the HyperLogLog, returns the length}
+00446 \textcolor{comment}{ * of the pattern 000..1 of the element hash. As a side effect 'regp' is}
+00447 \textcolor{comment}{ * set to the register index this element hashes to. */}
+00448 \textcolor{keywordtype}{int} hllPatLen(\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *ele, size\_t elesize, \textcolor{keywordtype}{long} *regp) \{
+00449     uint64\_t hash, bit, index;
+00450     \textcolor{keywordtype}{int} count;
+00451 
+00452     \textcolor{comment}{/* Count the number of zeroes starting from bit HLL\_REGISTERS}
+00453 \textcolor{comment}{     * (that is a power of two corresponding to the first bit we don't use}
+00454 \textcolor{comment}{     * as index). The max run can be 64-P+1 bits.}
+00455 \textcolor{comment}{     *}
+00456 \textcolor{comment}{     * Note that the final "1" ending the sequence of zeroes must be}
+00457 \textcolor{comment}{     * included in the count, so if we find "001" the count is 3, and}
+00458 \textcolor{comment}{     * the smallest count possible is no zeroes at all, just a 1 bit}
+00459 \textcolor{comment}{     * at the first position, that is a count of 1.}
+00460 \textcolor{comment}{     *}
+00461 \textcolor{comment}{     * This may sound like inefficient, but actually in the average case}
+00462 \textcolor{comment}{     * there are high probabilities to find a 1 after a few iterations. */}
+00463     hash = MurmurHash64A(ele,elesize,0xadc83b19ULL);
+00464     index = hash & \hyperlink{hyperloglog_8c_a044fc7c4835cb04bc9e115baa49805f7}{HLL\_P\_MASK}; \textcolor{comment}{/* Register index. */}
+00465     hash |= ((uint64\_t)1<<63); \textcolor{comment}{/* Make sure the loop terminates. */}
+00466     bit = \hyperlink{hyperloglog_8c_aa053beb90136828dcb46545c7445fc36}{HLL\_REGISTERS}; \textcolor{comment}{/* First bit not used to address the register. */}
+00467     count = 1; \textcolor{comment}{/* Initialized to 1 since we count the "00000...1" pattern. */}
+00468     \textcolor{keywordflow}{while}((hash & bit) == 0) \{
+00469         count++;
+00470         bit <<= 1;
+00471     \}
+00472     *regp = (\textcolor{keywordtype}{int}) index;
+00473     \textcolor{keywordflow}{return} count;
+00474 \}
+00475 
+00476 \textcolor{comment}{/* ================== Dense representation implementation  ================== */}
+00477 
+00478 \textcolor{comment}{/* Low level function to set the dense HLL register at 'index' to the}
+00479 \textcolor{comment}{ * specified value if the current value is smaller than 'count'.}
+00480 \textcolor{comment}{ *}
+00481 \textcolor{comment}{ * 'registers' is expected to have room for HLL\_REGISTERS plus an}
+00482 \textcolor{comment}{ * additional byte on the right. This requirement is met by sds strings}
+00483 \textcolor{comment}{ * automatically since they are implicitly null terminated.}
+00484 \textcolor{comment}{ *}
+00485 \textcolor{comment}{ * The function always succeed, however if as a result of the operation}
+00486 \textcolor{comment}{ * the approximated cardinality changed, 1 is returned. Otherwise 0}
+00487 \textcolor{comment}{ * is returned. */}
+00488 \textcolor{keywordtype}{int} hllDenseSet(uint8\_t *registers, \textcolor{keywordtype}{long} index, uint8\_t count) \{
+00489     uint8\_t oldcount;
+00490 
+00491     \hyperlink{hyperloglog_8c_abace3387aeb1543c9bcbd0d9a62c7ebc}{HLL\_DENSE\_GET\_REGISTER}(oldcount,registers,index);
+00492     \textcolor{keywordflow}{if} (count > oldcount) \{
+00493         \hyperlink{hyperloglog_8c_a57f99ca1675593d83a5b1fc014b3945a}{HLL\_DENSE\_SET\_REGISTER}(registers,index,count);
+00494         \textcolor{keywordflow}{return} 1;
+00495     \} \textcolor{keywordflow}{else} \{
+00496         \textcolor{keywordflow}{return} 0;
+00497     \}
+00498 \}
+00499 
+00500 \textcolor{comment}{/* "Add" the element in the dense hyperloglog data structure.}
+00501 \textcolor{comment}{ * Actually nothing is added, but the max 0 pattern counter of the subset}
+00502 \textcolor{comment}{ * the element belongs to is incremented if needed.}
+00503 \textcolor{comment}{ *}
+00504 \textcolor{comment}{ * This is just a wrapper to hllDenseSet(), performing the hashing of the}
+00505 \textcolor{comment}{ * element in order to retrieve the index and zero-run count. */}
+00506 \textcolor{keywordtype}{int} hllDenseAdd(uint8\_t *registers, \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *ele, size\_t elesize) \{
+00507     \textcolor{keywordtype}{long} index;
+00508     uint8\_t count = hllPatLen(ele,elesize,&index);
+00509     \textcolor{comment}{/* Update the register if this element produced a longer run of zeroes. */}
+00510     \textcolor{keywordflow}{return} hllDenseSet(registers,index,count);
+00511 \}
+00512 
+00513 \textcolor{comment}{/* Compute SUM(2^-reg) in the dense representation.}
+00514 \textcolor{comment}{ * PE is an array with a pre-computer table of values 2^-reg indexed by reg.}
+00515 \textcolor{comment}{ * As a side effect the integer pointed by 'ezp' is set to the number}
+00516 \textcolor{comment}{ * of zero registers. */}
+00517 \textcolor{keywordtype}{double} hllDenseSum(uint8\_t *registers, \textcolor{keywordtype}{double} *PE, \textcolor{keywordtype}{int} *ezp) \{
+00518     \textcolor{keywordtype}{double} E = 0;
+00519     \textcolor{keywordtype}{int} j, ez = 0;
+00520 
+00521     \textcolor{comment}{/* Redis default is to use 16384 registers 6 bits each. The code works}
+00522 \textcolor{comment}{     * with other values by modifying the defines, but for our target value}
+00523 \textcolor{comment}{     * we take a faster path with unrolled loops. */}
+00524     \textcolor{keywordflow}{if} (\hyperlink{hyperloglog_8c_aa053beb90136828dcb46545c7445fc36}{HLL\_REGISTERS} == 16384 && \hyperlink{hyperloglog_8c_a9023d37e2b4b782b2b922d9599894d14}{HLL\_BITS} == 6) \{
+00525         uint8\_t *r = registers;
+00526         \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} r0, r1, r2, r3, r4, r5, r6, r7, r8, r9,
+00527                       r10, r11, r12, r13, r14, r15;
+00528         \textcolor{keywordflow}{for} (j = 0; j < 1024; j++) \{
+00529             \textcolor{comment}{/* Handle 16 registers per iteration. */}
+00530             r0 = r[0] & 63; \textcolor{keywordflow}{if} (r0 == 0) ez++;
+00531             r1 = (r[0] >> 6 | r[1] << 2) & 63; \textcolor{keywordflow}{if} (r1 == 0) ez++;
+00532             r2 = (r[1] >> 4 | r[2] << 4) & 63; \textcolor{keywordflow}{if} (r2 == 0) ez++;
+00533             r3 = (r[2] >> 2) & 63; \textcolor{keywordflow}{if} (r3 == 0) ez++;
+00534             r4 = r[3] & 63; \textcolor{keywordflow}{if} (r4 == 0) ez++;
+00535             r5 = (r[3] >> 6 | r[4] << 2) & 63; \textcolor{keywordflow}{if} (r5 == 0) ez++;
+00536             r6 = (r[4] >> 4 | r[5] << 4) & 63; \textcolor{keywordflow}{if} (r6 == 0) ez++;
+00537             r7 = (r[5] >> 2) & 63; \textcolor{keywordflow}{if} (r7 == 0) ez++;
+00538             r8 = r[6] & 63; \textcolor{keywordflow}{if} (r8 == 0) ez++;
+00539             r9 = (r[6] >> 6 | r[7] << 2) & 63; \textcolor{keywordflow}{if} (r9 == 0) ez++;
+00540             r10 = (r[7] >> 4 | r[8] << 4) & 63; \textcolor{keywordflow}{if} (r10 == 0) ez++;
+00541             r11 = (r[8] >> 2) & 63; \textcolor{keywordflow}{if} (r11 == 0) ez++;
+00542             r12 = r[9] & 63; \textcolor{keywordflow}{if} (r12 == 0) ez++;
+00543             r13 = (r[9] >> 6 | r[10] << 2) & 63; \textcolor{keywordflow}{if} (r13 == 0) ez++;
+00544             r14 = (r[10] >> 4 | r[11] << 4) & 63; \textcolor{keywordflow}{if} (r14 == 0) ez++;
+00545             r15 = (r[11] >> 2) & 63; \textcolor{keywordflow}{if} (r15 == 0) ez++;
+00546 
+00547             \textcolor{comment}{/* Additional parens will allow the compiler to optimize the}
+00548 \textcolor{comment}{             * code more with a loss of precision that is not very relevant}
+00549 \textcolor{comment}{             * here (floating point math is not commutative!). */}
+00550             E += (PE[r0] + PE[r1]) + (PE[r2] + PE[r3]) + (PE[r4] + PE[r5]) +
+00551                  (PE[r6] + PE[r7]) + (PE[r8] + PE[r9]) + (PE[r10] + PE[r11]) +
+00552                  (PE[r12] + PE[r13]) + (PE[r14] + PE[r15]);
+00553             r += 12;
+00554         \}
+00555     \} \textcolor{keywordflow}{else} \{
+00556         \textcolor{keywordflow}{for} (j = 0; j < \hyperlink{hyperloglog_8c_aa053beb90136828dcb46545c7445fc36}{HLL\_REGISTERS}; j++) \{
+00557             \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} reg;
+00558 
+00559             \hyperlink{hyperloglog_8c_abace3387aeb1543c9bcbd0d9a62c7ebc}{HLL\_DENSE\_GET\_REGISTER}(reg,registers,j);
+00560             \textcolor{keywordflow}{if} (reg == 0) \{
+00561                 ez++;
+00562                 \textcolor{comment}{/* Increment E at the end of the loop. */}
+00563             \} \textcolor{keywordflow}{else} \{
+00564                 E += PE[reg]; \textcolor{comment}{/* Precomputed 2^(-reg[j]). */}
+00565             \}
+00566         \}
+00567         E += ez; \textcolor{comment}{/* Add 2^0 'ez' times. */}
+00568     \}
+00569     *ezp = ez;
+00570     \textcolor{keywordflow}{return} E;
+00571 \}
+00572 
+00573 \textcolor{comment}{/* ================== Sparse representation implementation  ================= */}
+00574 
+00575 \textcolor{comment}{/* Convert the HLL with sparse representation given as input in its dense}
+00576 \textcolor{comment}{ * representation. Both representations are represented by SDS strings, and}
+00577 \textcolor{comment}{ * the input representation is freed as a side effect.}
+00578 \textcolor{comment}{ *}
+00579 \textcolor{comment}{ * The function returns C\_OK if the sparse representation was valid,}
+00580 \textcolor{comment}{ * otherwise C\_ERR is returned if the representation was corrupted. */}
+00581 \textcolor{keywordtype}{int} hllSparseToDense(robj *o) \{
+00582     sds sparse = o->ptr, dense;
+00583     \textcolor{keyword}{struct} \hyperlink{structhllhdr}{hllhdr} *hdr, *oldhdr = (\textcolor{keyword}{struct} hllhdr*)sparse;
+00584     \textcolor{keywordtype}{int} idx = 0, runlen, regval;
+00585     uint8\_t *p = (uint8\_t*)sparse, *end = p+sdslen(sparse);
+00586 
+00587     \textcolor{comment}{/* If the representation is already the right one return ASAP. */}
+00588     hdr = (\textcolor{keyword}{struct} hllhdr*) sparse;
+00589     \textcolor{keywordflow}{if} (hdr->encoding == \hyperlink{hyperloglog_8c_a5f2ead2492fc9cc4ff39f8c1752875a1}{HLL\_DENSE}) \textcolor{keywordflow}{return} \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK};
+00590 
+00591     \textcolor{comment}{/* Create a string of the right size filled with zero bytes.}
+00592 \textcolor{comment}{     * Note that the cached cardinality is set to 0 as a side effect}
+00593 \textcolor{comment}{     * that is exactly the cardinality of an empty HLL. */}
+00594     dense = sdsnewlen(NULL,\hyperlink{hyperloglog_8c_ad677821a745c7306ef02ccca0ff6f92f}{HLL\_DENSE\_SIZE});
+00595     hdr = (\textcolor{keyword}{struct} \hyperlink{structhllhdr}{hllhdr}*) dense;
+00596     *hdr = *oldhdr; \textcolor{comment}{/* This will copy the magic and cached cardinality. */}
+00597     hdr->encoding = \hyperlink{hyperloglog_8c_a5f2ead2492fc9cc4ff39f8c1752875a1}{HLL\_DENSE};
+00598 
+00599     \textcolor{comment}{/* Now read the sparse representation and set non-zero registers}
+00600 \textcolor{comment}{     * accordingly. */}
+00601     p += \hyperlink{hyperloglog_8c_af04dc163054c4c79b0e6c93057b4032f}{HLL\_HDR\_SIZE};
+00602     \textcolor{keywordflow}{while}(p < end) \{
+00603         \textcolor{keywordflow}{if} (\hyperlink{hyperloglog_8c_a0b65ae2290df116ae4ed18188dffb5ad}{HLL\_SPARSE\_IS\_ZERO}(p)) \{
+00604             runlen = \hyperlink{hyperloglog_8c_a0ed89a76f49a89991af87cce34c3260b}{HLL\_SPARSE\_ZERO\_LEN}(p);
+00605             idx += runlen;
+00606             p++;
+00607         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (\hyperlink{hyperloglog_8c_ac672e0af491e4cbfe7a5859ae4dc74f9}{HLL\_SPARSE\_IS\_XZERO}(p)) \{
+00608             runlen = \hyperlink{hyperloglog_8c_a95fbeb27967ea46816fd354ddb59564e}{HLL\_SPARSE\_XZERO\_LEN}(p);
+00609             idx += runlen;
+00610             p += 2;
+00611         \} \textcolor{keywordflow}{else} \{
+00612             runlen = \hyperlink{hyperloglog_8c_a5c74b3b50c822c01c1976a72b84db12f}{HLL\_SPARSE\_VAL\_LEN}(p);
+00613             regval = \hyperlink{hyperloglog_8c_ad36de263468a9ce3b1409743b8da64d7}{HLL\_SPARSE\_VAL\_VALUE}(p);
+00614             \textcolor{keywordflow}{while}(runlen--) \{
+00615                 \hyperlink{hyperloglog_8c_a57f99ca1675593d83a5b1fc014b3945a}{HLL\_DENSE\_SET\_REGISTER}(hdr->registers,idx,regval);
+00616                 idx++;
+00617             \}
+00618             p++;
+00619         \}
+00620     \}
+00621 
+00622     \textcolor{comment}{/* If the sparse representation was valid, we expect to find idx}
+00623 \textcolor{comment}{     * set to HLL\_REGISTERS. */}
+00624     \textcolor{keywordflow}{if} (idx != \hyperlink{hyperloglog_8c_aa053beb90136828dcb46545c7445fc36}{HLL\_REGISTERS}) \{
+00625         sdsfree(dense);
+00626         \textcolor{keywordflow}{return} \hyperlink{server_8h_af98ac28d5f4d23d7ed5985188e6fb7d1}{C\_ERR};
+00627     \}
+00628 
+00629     \textcolor{comment}{/* Free the old representation and set the new one. */}
+00630     sdsfree(o->ptr);
+00631     o->ptr = dense;
+00632     \textcolor{keywordflow}{return} \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK};
+00633 \}
+00634 
+00635 \textcolor{comment}{/* Low level function to set the sparse HLL register at 'index' to the}
+00636 \textcolor{comment}{ * specified value if the current value is smaller than 'count'.}
+00637 \textcolor{comment}{ *}
+00638 \textcolor{comment}{ * The object 'o' is the String object holding the HLL. The function requires}
+00639 \textcolor{comment}{ * a reference to the object in order to be able to enlarge the string if}
+00640 \textcolor{comment}{ * needed.}
+00641 \textcolor{comment}{ *}
+00642 \textcolor{comment}{ * On success, the function returns 1 if the cardinality changed, or 0}
+00643 \textcolor{comment}{ * if the register for this element was not updated.}
+00644 \textcolor{comment}{ * On error (if the representation is invalid) -1 is returned.}
+00645 \textcolor{comment}{ *}
+00646 \textcolor{comment}{ * As a side effect the function may promote the HLL representation from}
+00647 \textcolor{comment}{ * sparse to dense: this happens when a register requires to be set to a value}
+00648 \textcolor{comment}{ * not representable with the sparse representation, or when the resulting}
+00649 \textcolor{comment}{ * size would be greater than server.hll\_sparse\_max\_bytes. */}
+00650 \textcolor{keywordtype}{int} hllSparseSet(robj *o, \textcolor{keywordtype}{long} index, uint8\_t count) \{
+00651     \textcolor{keyword}{struct} \hyperlink{structhllhdr}{hllhdr} *hdr;
+00652     uint8\_t oldcount, *sparse, *end, *p, *prev, *next;
+00653     \textcolor{keywordtype}{long} first, span;
+00654     \textcolor{keywordtype}{long} is\_zero = 0, is\_xzero = 0, is\_val = 0, runlen = 0;
+00655 
+00656     \textcolor{comment}{/* If the count is too big to be representable by the sparse representation}
+00657 \textcolor{comment}{     * switch to dense representation. */}
+00658     \textcolor{keywordflow}{if} (count > \hyperlink{hyperloglog_8c_a5076b83f0a16a0645d7e488b21b05248}{HLL\_SPARSE\_VAL\_MAX\_VALUE}) \textcolor{keywordflow}{goto} promote;
+00659 
+00660     \textcolor{comment}{/* When updating a sparse representation, sometimes we may need to}
+00661 \textcolor{comment}{     * enlarge the buffer for up to 3 bytes in the worst case (XZERO split}
+00662 \textcolor{comment}{     * into XZERO-VAL-XZERO). Make sure there is enough space right now}
+00663 \textcolor{comment}{     * so that the pointers we take during the execution of the function}
+00664 \textcolor{comment}{     * will be valid all the time. */}
+00665     o->ptr = sdsMakeRoomFor(o->ptr,3);
+00666 
+00667     \textcolor{comment}{/* Step 1: we need to locate the opcode we need to modify to check}
+00668 \textcolor{comment}{     * if a value update is actually needed. */}
+00669     sparse = p = ((uint8\_t*)o->ptr) + \hyperlink{hyperloglog_8c_af04dc163054c4c79b0e6c93057b4032f}{HLL\_HDR\_SIZE};
+00670     end = p + sdslen(o->ptr) - \hyperlink{hyperloglog_8c_af04dc163054c4c79b0e6c93057b4032f}{HLL\_HDR\_SIZE};
+00671 
+00672     first = 0;
+00673     prev = NULL; \textcolor{comment}{/* Points to previos opcode at the end of the loop. */}
+00674     next = NULL; \textcolor{comment}{/* Points to the next opcode at the end of the loop. */}
+00675     span = 0;
+00676     \textcolor{keywordflow}{while}(p < end) \{
+00677         \textcolor{keywordtype}{long} oplen;
+00678 
+00679         \textcolor{comment}{/* Set span to the number of registers covered by this opcode.}
+00680 \textcolor{comment}{         *}
+00681 \textcolor{comment}{         * This is the most performance critical loop of the sparse}
+00682 \textcolor{comment}{         * representation. Sorting the conditionals from the most to the}
+00683 \textcolor{comment}{         * least frequent opcode in many-bytes sparse HLLs is faster. */}
+00684         oplen = 1;
+00685         \textcolor{keywordflow}{if} (\hyperlink{hyperloglog_8c_a0b65ae2290df116ae4ed18188dffb5ad}{HLL\_SPARSE\_IS\_ZERO}(p)) \{
+00686             span = \hyperlink{hyperloglog_8c_a0ed89a76f49a89991af87cce34c3260b}{HLL\_SPARSE\_ZERO\_LEN}(p);
+00687         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (\hyperlink{hyperloglog_8c_a14fe08c54ac70efe9d8db79b1b582890}{HLL\_SPARSE\_IS\_VAL}(p)) \{
+00688             span = \hyperlink{hyperloglog_8c_a5c74b3b50c822c01c1976a72b84db12f}{HLL\_SPARSE\_VAL\_LEN}(p);
+00689         \} \textcolor{keywordflow}{else} \{ \textcolor{comment}{/* XZERO. */}
+00690             span = \hyperlink{hyperloglog_8c_a95fbeb27967ea46816fd354ddb59564e}{HLL\_SPARSE\_XZERO\_LEN}(p);
+00691             oplen = 2;
+00692         \}
+00693         \textcolor{comment}{/* Break if this opcode covers the register as 'index'. */}
+00694         \textcolor{keywordflow}{if} (index <= first+span-1) \textcolor{keywordflow}{break};
+00695         prev = p;
+00696         p += oplen;
+00697         first += span;
+00698     \}
+00699     \textcolor{keywordflow}{if} (span == 0) \textcolor{keywordflow}{return} -1; \textcolor{comment}{/* Invalid format. */}
+00700 
+00701     next = \hyperlink{hyperloglog_8c_ac672e0af491e4cbfe7a5859ae4dc74f9}{HLL\_SPARSE\_IS\_XZERO}(p) ? p+2 : p+1;
+00702     \textcolor{keywordflow}{if} (next >= end) next = NULL;
+00703 
+00704     \textcolor{comment}{/* Cache current opcode type to avoid using the macro again and}
+00705 \textcolor{comment}{     * again for something that will not change.}
+00706 \textcolor{comment}{     * Also cache the run-length of the opcode. */}
+00707     \textcolor{keywordflow}{if} (\hyperlink{hyperloglog_8c_a0b65ae2290df116ae4ed18188dffb5ad}{HLL\_SPARSE\_IS\_ZERO}(p)) \{
+00708         is\_zero = 1;
+00709         runlen = \hyperlink{hyperloglog_8c_a0ed89a76f49a89991af87cce34c3260b}{HLL\_SPARSE\_ZERO\_LEN}(p);
+00710     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (\hyperlink{hyperloglog_8c_ac672e0af491e4cbfe7a5859ae4dc74f9}{HLL\_SPARSE\_IS\_XZERO}(p)) \{
+00711         is\_xzero = 1;
+00712         runlen = \hyperlink{hyperloglog_8c_a95fbeb27967ea46816fd354ddb59564e}{HLL\_SPARSE\_XZERO\_LEN}(p);
+00713     \} \textcolor{keywordflow}{else} \{
+00714         is\_val = 1;
+00715         runlen = \hyperlink{hyperloglog_8c_a5c74b3b50c822c01c1976a72b84db12f}{HLL\_SPARSE\_VAL\_LEN}(p);
+00716     \}
+00717 
+00718     \textcolor{comment}{/* Step 2: After the loop:}
+00719 \textcolor{comment}{     *}
+00720 \textcolor{comment}{     * 'first' stores to the index of the first register covered}
+00721 \textcolor{comment}{     *  by the current opcode, which is pointed by 'p'.}
+00722 \textcolor{comment}{     *}
+00723 \textcolor{comment}{     * 'next' ad 'prev' store respectively the next and previous opcode,}
+00724 \textcolor{comment}{     *  or NULL if the opcode at 'p' is respectively the last or first.}
+00725 \textcolor{comment}{     *}
+00726 \textcolor{comment}{     * 'span' is set to the number of registers covered by the current}
+00727 \textcolor{comment}{     *  opcode.}
+00728 \textcolor{comment}{     *}
+00729 \textcolor{comment}{     * There are different cases in order to update the data structure}
+00730 \textcolor{comment}{     * in place without generating it from scratch:}
+00731 \textcolor{comment}{     *}
+00732 \textcolor{comment}{     * A) If it is a VAL opcode already set to a value >= our 'count'}
+00733 \textcolor{comment}{     *    no update is needed, regardless of the VAL run-length field.}
+00734 \textcolor{comment}{     *    In this case PFADD returns 0 since no changes are performed.}
+00735 \textcolor{comment}{     *}
+00736 \textcolor{comment}{     * B) If it is a VAL opcode with len = 1 (representing only our}
+00737 \textcolor{comment}{     *    register) and the value is less than 'count', we just update it}
+00738 \textcolor{comment}{     *    since this is a trivial case. */}
+00739     \textcolor{keywordflow}{if} (is\_val) \{
+00740         oldcount = \hyperlink{hyperloglog_8c_ad36de263468a9ce3b1409743b8da64d7}{HLL\_SPARSE\_VAL\_VALUE}(p);
+00741         \textcolor{comment}{/* Case A. */}
+00742         \textcolor{keywordflow}{if} (oldcount >= count) \textcolor{keywordflow}{return} 0;
+00743 
+00744         \textcolor{comment}{/* Case B. */}
+00745         \textcolor{keywordflow}{if} (runlen == 1) \{
+00746             \hyperlink{hyperloglog_8c_a27a040f2d48978974a593fdc306241f9}{HLL\_SPARSE\_VAL\_SET}(p,count,1);
+00747             \textcolor{keywordflow}{goto} updated;
+00748         \}
+00749     \}
+00750 
+00751     \textcolor{comment}{/* C) Another trivial to handle case is a ZERO opcode with a len of 1.}
+00752 \textcolor{comment}{     * We can just replace it with a VAL opcode with our value and len of 1. */}
+00753     \textcolor{keywordflow}{if} (is\_zero && runlen == 1) \{
+00754         \hyperlink{hyperloglog_8c_a27a040f2d48978974a593fdc306241f9}{HLL\_SPARSE\_VAL\_SET}(p,count,1);
+00755         \textcolor{keywordflow}{goto} updated;
+00756     \}
+00757 
+00758     \textcolor{comment}{/* D) General case.}
+00759 \textcolor{comment}{     *}
+00760 \textcolor{comment}{     * The other cases are more complex: our register requires to be updated}
+00761 \textcolor{comment}{     * and is either currently represented by a VAL opcode with len > 1,}
+00762 \textcolor{comment}{     * by a ZERO opcode with len > 1, or by an XZERO opcode.}
+00763 \textcolor{comment}{     *}
+00764 \textcolor{comment}{     * In those cases the original opcode must be split into muliple}
+00765 \textcolor{comment}{     * opcodes. The worst case is an XZERO split in the middle resuling into}
+00766 \textcolor{comment}{     * XZERO - VAL - XZERO, so the resulting sequence max length is}
+00767 \textcolor{comment}{     * 5 bytes.}
+00768 \textcolor{comment}{     *}
+00769 \textcolor{comment}{     * We perform the split writing the new sequence into the 'new' buffer}
+00770 \textcolor{comment}{     * with 'newlen' as length. Later the new sequence is inserted in place}
+00771 \textcolor{comment}{     * of the old one, possibly moving what is on the right a few bytes}
+00772 \textcolor{comment}{     * if the new sequence is longer than the older one. */}
+00773     uint8\_t seq[5], *n = seq;
+00774     \textcolor{keywordtype}{int} last = first+span-1; \textcolor{comment}{/* Last register covered by the sequence. */}
+00775     \textcolor{keywordtype}{int} len;
+00776 
+00777     \textcolor{keywordflow}{if} (is\_zero || is\_xzero) \{
+00778         \textcolor{comment}{/* Handle splitting of ZERO / XZERO. */}
+00779         \textcolor{keywordflow}{if} (index != first) \{
+00780             len = index-first;
+00781             \textcolor{keywordflow}{if} (len > \hyperlink{hyperloglog_8c_ada0fd7046dacafc7e150cf8743b34c62}{HLL\_SPARSE\_ZERO\_MAX\_LEN}) \{
+00782                 \hyperlink{hyperloglog_8c_a1e40105f1b438075006c8b38b07f7198}{HLL\_SPARSE\_XZERO\_SET}(n,len);
+00783                 n += 2;
+00784             \} \textcolor{keywordflow}{else} \{
+00785                 \hyperlink{hyperloglog_8c_a587a8a0c93dc2d75f019b49a3f08c14f}{HLL\_SPARSE\_ZERO\_SET}(n,len);
+00786                 n++;
+00787             \}
+00788         \}
+00789         \hyperlink{hyperloglog_8c_a27a040f2d48978974a593fdc306241f9}{HLL\_SPARSE\_VAL\_SET}(n,count,1);
+00790         n++;
+00791         \textcolor{keywordflow}{if} (index != last) \{
+00792             len = last-index;
+00793             \textcolor{keywordflow}{if} (len > \hyperlink{hyperloglog_8c_ada0fd7046dacafc7e150cf8743b34c62}{HLL\_SPARSE\_ZERO\_MAX\_LEN}) \{
+00794                 \hyperlink{hyperloglog_8c_a1e40105f1b438075006c8b38b07f7198}{HLL\_SPARSE\_XZERO\_SET}(n,len);
+00795                 n += 2;
+00796             \} \textcolor{keywordflow}{else} \{
+00797                 \hyperlink{hyperloglog_8c_a587a8a0c93dc2d75f019b49a3f08c14f}{HLL\_SPARSE\_ZERO\_SET}(n,len);
+00798                 n++;
+00799             \}
+00800         \}
+00801     \} \textcolor{keywordflow}{else} \{
+00802         \textcolor{comment}{/* Handle splitting of VAL. */}
+00803         \textcolor{keywordtype}{int} curval = \hyperlink{hyperloglog_8c_ad36de263468a9ce3b1409743b8da64d7}{HLL\_SPARSE\_VAL\_VALUE}(p);
+00804 
+00805         \textcolor{keywordflow}{if} (index != first) \{
+00806             len = index-first;
+00807             \hyperlink{hyperloglog_8c_a27a040f2d48978974a593fdc306241f9}{HLL\_SPARSE\_VAL\_SET}(n,curval,len);
+00808             n++;
+00809         \}
+00810         \hyperlink{hyperloglog_8c_a27a040f2d48978974a593fdc306241f9}{HLL\_SPARSE\_VAL\_SET}(n,count,1);
+00811         n++;
+00812         \textcolor{keywordflow}{if} (index != last) \{
+00813             len = last-index;
+00814             \hyperlink{hyperloglog_8c_a27a040f2d48978974a593fdc306241f9}{HLL\_SPARSE\_VAL\_SET}(n,curval,len);
+00815             n++;
+00816         \}
+00817     \}
+00818 
+00819     \textcolor{comment}{/* Step 3: substitute the new sequence with the old one.}
+00820 \textcolor{comment}{     *}
+00821 \textcolor{comment}{     * Note that we already allocated space on the sds string}
+00822 \textcolor{comment}{     * calling sdsMakeRoomFor(). */}
+00823      \textcolor{keywordtype}{int} seqlen = n-seq;
+00824      \textcolor{keywordtype}{int} oldlen = is\_xzero ? 2 : 1;
+00825      \textcolor{keywordtype}{int} deltalen = seqlen-oldlen;
+00826 
+00827      \textcolor{keywordflow}{if} (deltalen > 0 &&
+00828          sdslen(o->ptr)+deltalen > server.hll\_sparse\_max\_bytes) \textcolor{keywordflow}{goto} promote;
+00829      \textcolor{keywordflow}{if} (deltalen && next) memmove(next+deltalen,next,end-next);
+00830      sdsIncrLen(o->ptr,deltalen);
+00831      memcpy(p,seq,seqlen);
+00832      end += deltalen;
+00833 
+00834 updated:
+00835     \textcolor{comment}{/* Step 4: Merge adjacent values if possible.}
+00836 \textcolor{comment}{     *}
+00837 \textcolor{comment}{     * The representation was updated, however the resulting representation}
+00838 \textcolor{comment}{     * may not be optimal: adjacent VAL opcodes can sometimes be merged into}
+00839 \textcolor{comment}{     * a single one. */}
+00840     p = prev ? prev : sparse;
+00841     \textcolor{keywordtype}{int} scanlen = 5; \textcolor{comment}{/* Scan up to 5 upcodes starting from prev. */}
+00842     \textcolor{keywordflow}{while} (p < end && scanlen--) \{
+00843         \textcolor{keywordflow}{if} (\hyperlink{hyperloglog_8c_ac672e0af491e4cbfe7a5859ae4dc74f9}{HLL\_SPARSE\_IS\_XZERO}(p)) \{
+00844             p += 2;
+00845             \textcolor{keywordflow}{continue};
+00846         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (\hyperlink{hyperloglog_8c_a0b65ae2290df116ae4ed18188dffb5ad}{HLL\_SPARSE\_IS\_ZERO}(p)) \{
+00847             p++;
+00848             \textcolor{keywordflow}{continue};
+00849         \}
+00850         \textcolor{comment}{/* We need two adjacent VAL opcodes to try a merge, having}
+00851 \textcolor{comment}{         * the same value, and a len that fits the VAL opcode max len. */}
+00852         \textcolor{keywordflow}{if} (p+1 < end && \hyperlink{hyperloglog_8c_a14fe08c54ac70efe9d8db79b1b582890}{HLL\_SPARSE\_IS\_VAL}(p+1)) \{
+00853             \textcolor{keywordtype}{int} v1 = \hyperlink{hyperloglog_8c_ad36de263468a9ce3b1409743b8da64d7}{HLL\_SPARSE\_VAL\_VALUE}(p);
+00854             \textcolor{keywordtype}{int} v2 = \hyperlink{hyperloglog_8c_ad36de263468a9ce3b1409743b8da64d7}{HLL\_SPARSE\_VAL\_VALUE}(p+1);
+00855             \textcolor{keywordflow}{if} (v1 == v2) \{
+00856                 \textcolor{keywordtype}{int} len = \hyperlink{hyperloglog_8c_a5c74b3b50c822c01c1976a72b84db12f}{HLL\_SPARSE\_VAL\_LEN}(p)+
+      \hyperlink{hyperloglog_8c_a5c74b3b50c822c01c1976a72b84db12f}{HLL\_SPARSE\_VAL\_LEN}(p+1);
+00857                 \textcolor{keywordflow}{if} (len <= \hyperlink{hyperloglog_8c_ac4d915198fed97094a5ad89223a06429}{HLL\_SPARSE\_VAL\_MAX\_LEN}) \{
+00858                     \hyperlink{hyperloglog_8c_a27a040f2d48978974a593fdc306241f9}{HLL\_SPARSE\_VAL\_SET}(p+1,v1,len);
+00859                     memmove(p,p+1,end-p);
+00860                     sdsIncrLen(o->ptr,-1);
+00861                     end--;
+00862                     \textcolor{comment}{/* After a merge we reiterate without incrementing 'p'}
+00863 \textcolor{comment}{                     * in order to try to merge the just merged value with}
+00864 \textcolor{comment}{                     * a value on its right. */}
+00865                     \textcolor{keywordflow}{continue};
+00866                 \}
+00867             \}
+00868         \}
+00869         p++;
+00870     \}
+00871 
+00872     \textcolor{comment}{/* Invalidate the cached cardinality. */}
+00873     hdr = o->ptr;
+00874     \hyperlink{hyperloglog_8c_aba6246a823dc41dc866a6af8828ae375}{HLL\_INVALIDATE\_CACHE}(hdr);
+00875     \textcolor{keywordflow}{return} 1;
+00876 
+00877 promote: \textcolor{comment}{/* Promote to dense representation. */}
+00878     \textcolor{keywordflow}{if} (hllSparseToDense(o) == \hyperlink{server_8h_af98ac28d5f4d23d7ed5985188e6fb7d1}{C\_ERR}) \textcolor{keywordflow}{return} -1; \textcolor{comment}{/* Corrupted HLL. */}
+00879     hdr = o->ptr;
+00880 
+00881     \textcolor{comment}{/* We need to call hllDenseAdd() to perform the operation after the}
+00882 \textcolor{comment}{     * conversion. However the result must be 1, since if we need to}
+00883 \textcolor{comment}{     * convert from sparse to dense a register requires to be updated.}
+00884 \textcolor{comment}{     *}
+00885 \textcolor{comment}{     * Note that this in turn means that PFADD will make sure the command}
+00886 \textcolor{comment}{     * is propagated to slaves / AOF, so if there is a sparse -> dense}
+00887 \textcolor{comment}{     * convertion, it will be performed in all the slaves as well. */}
+00888     \textcolor{keywordtype}{int} dense\_retval = hllDenseSet(hdr->registers,index,count);
+00889     \hyperlink{server_8h_a88114b5169b4c382df6b56506285e56a}{serverAssert}(dense\_retval == 1);
+00890     \textcolor{keywordflow}{return} dense\_retval;
+00891 \}
+00892 
+00893 \textcolor{comment}{/* "Add" the element in the sparse hyperloglog data structure.}
+00894 \textcolor{comment}{ * Actually nothing is added, but the max 0 pattern counter of the subset}
+00895 \textcolor{comment}{ * the element belongs to is incremented if needed.}
+00896 \textcolor{comment}{ *}
+00897 \textcolor{comment}{ * This function is actually a wrapper for hllSparseSet(), it only performs}
+00898 \textcolor{comment}{ * the hashshing of the elmenet to obtain the index and zeros run length. */}
+00899 \textcolor{keywordtype}{int} hllSparseAdd(robj *o, \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *ele, size\_t elesize) \{
+00900     \textcolor{keywordtype}{long} index;
+00901     uint8\_t count = hllPatLen(ele,elesize,&index);
+00902     \textcolor{comment}{/* Update the register if this element produced a longer run of zeroes. */}
+00903     \textcolor{keywordflow}{return} hllSparseSet(o,index,count);
+00904 \}
+00905 
+00906 \textcolor{comment}{/* Compute SUM(2^-reg) in the sparse representation.}
+00907 \textcolor{comment}{ * PE is an array with a pre-computer table of values 2^-reg indexed by reg.}
+00908 \textcolor{comment}{ * As a side effect the integer pointed by 'ezp' is set to the number}
+00909 \textcolor{comment}{ * of zero registers. */}
+00910 \textcolor{keywordtype}{double} hllSparseSum(uint8\_t *sparse, \textcolor{keywordtype}{int} sparselen, \textcolor{keywordtype}{double} *PE, \textcolor{keywordtype}{int} *ezp, \textcolor{keywordtype}{int} *invalid) \{
+00911     \textcolor{keywordtype}{double} E = 0;
+00912     \textcolor{keywordtype}{int} ez = 0, idx = 0, runlen, regval;
+00913     uint8\_t *end = sparse+sparselen, *p = sparse;
+00914 
+00915     \textcolor{keywordflow}{while}(p < end) \{
+00916         \textcolor{keywordflow}{if} (\hyperlink{hyperloglog_8c_a0b65ae2290df116ae4ed18188dffb5ad}{HLL\_SPARSE\_IS\_ZERO}(p)) \{
+00917             runlen = \hyperlink{hyperloglog_8c_a0ed89a76f49a89991af87cce34c3260b}{HLL\_SPARSE\_ZERO\_LEN}(p);
+00918             idx += runlen;
+00919             ez += runlen;
+00920             \textcolor{comment}{/* Increment E at the end of the loop. */}
+00921             p++;
+00922         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (\hyperlink{hyperloglog_8c_ac672e0af491e4cbfe7a5859ae4dc74f9}{HLL\_SPARSE\_IS\_XZERO}(p)) \{
+00923             runlen = \hyperlink{hyperloglog_8c_a95fbeb27967ea46816fd354ddb59564e}{HLL\_SPARSE\_XZERO\_LEN}(p);
+00924             idx += runlen;
+00925             ez += runlen;
+00926             \textcolor{comment}{/* Increment E at the end of the loop. */}
+00927             p += 2;
+00928         \} \textcolor{keywordflow}{else} \{
+00929             runlen = \hyperlink{hyperloglog_8c_a5c74b3b50c822c01c1976a72b84db12f}{HLL\_SPARSE\_VAL\_LEN}(p);
+00930             regval = \hyperlink{hyperloglog_8c_ad36de263468a9ce3b1409743b8da64d7}{HLL\_SPARSE\_VAL\_VALUE}(p);
+00931             idx += runlen;
+00932             E += PE[regval]*runlen;
+00933             p++;
+00934         \}
+00935     \}
+00936     \textcolor{keywordflow}{if} (idx != \hyperlink{hyperloglog_8c_aa053beb90136828dcb46545c7445fc36}{HLL\_REGISTERS} && invalid) *invalid = 1;
+00937     E += ez; \textcolor{comment}{/* Add 2^0 'ez' times. */}
+00938     *ezp = ez;
+00939     \textcolor{keywordflow}{return} E;
+00940 \}
+00941 
+00942 \textcolor{comment}{/* ========================= HyperLogLog Count ==============================}
+00943 \textcolor{comment}{ * This is the core of the algorithm where the approximated count is computed.}
+00944 \textcolor{comment}{ * The function uses the lower level hllDenseSum() and hllSparseSum() functions}
+00945 \textcolor{comment}{ * as helpers to compute the SUM(2^-reg) part of the computation, which is}
+00946 \textcolor{comment}{ * representation-specific, while all the rest is common. */}
+00947 
+00948 \textcolor{comment}{/* Implements the SUM operation for uint8\_t data type which is only used}
+00949 \textcolor{comment}{ * internally as speedup for PFCOUNT with multiple keys. */}
+00950 \textcolor{keywordtype}{double} hllRawSum(uint8\_t *registers, \textcolor{keywordtype}{double} *PE, \textcolor{keywordtype}{int} *ezp) \{
+00951     \textcolor{keywordtype}{double} E = 0;
+00952     \textcolor{keywordtype}{int} j, ez = 0;
+00953     uint64\_t *word = (uint64\_t*) registers;
+00954     uint8\_t *bytes;
+00955 
+00956     \textcolor{keywordflow}{for} (j = 0; j < \hyperlink{hyperloglog_8c_aa053beb90136828dcb46545c7445fc36}{HLL\_REGISTERS}/8; j++) \{
+00957         \textcolor{keywordflow}{if} (*word == 0) \{
+00958             ez += 8;
+00959         \} \textcolor{keywordflow}{else} \{
+00960             bytes = (uint8\_t*) word;
+00961             \textcolor{keywordflow}{if} (bytes[0]) E += PE[bytes[0]]; \textcolor{keywordflow}{else} ez++;
+00962             \textcolor{keywordflow}{if} (bytes[1]) E += PE[bytes[1]]; \textcolor{keywordflow}{else} ez++;
+00963             \textcolor{keywordflow}{if} (bytes[2]) E += PE[bytes[2]]; \textcolor{keywordflow}{else} ez++;
+00964             \textcolor{keywordflow}{if} (bytes[3]) E += PE[bytes[3]]; \textcolor{keywordflow}{else} ez++;
+00965             \textcolor{keywordflow}{if} (bytes[4]) E += PE[bytes[4]]; \textcolor{keywordflow}{else} ez++;
+00966             \textcolor{keywordflow}{if} (bytes[5]) E += PE[bytes[5]]; \textcolor{keywordflow}{else} ez++;
+00967             \textcolor{keywordflow}{if} (bytes[6]) E += PE[bytes[6]]; \textcolor{keywordflow}{else} ez++;
+00968             \textcolor{keywordflow}{if} (bytes[7]) E += PE[bytes[7]]; \textcolor{keywordflow}{else} ez++;
+00969         \}
+00970         word++;
+00971     \}
+00972     E += ez; \textcolor{comment}{/* 2^(-reg[j]) is 1 when m is 0, add it 'ez' times for every}
+00973 \textcolor{comment}{                zero register in the HLL. */}
+00974     *ezp = ez;
+00975     \textcolor{keywordflow}{return} E;
+00976 \}
+00977 
+00978 \textcolor{comment}{/* Return the approximated cardinality of the set based on the harmonic}
+00979 \textcolor{comment}{ * mean of the registers values. 'hdr' points to the start of the SDS}
+00980 \textcolor{comment}{ * representing the String object holding the HLL representation.}
+00981 \textcolor{comment}{ *}
+00982 \textcolor{comment}{ * If the sparse representation of the HLL object is not valid, the integer}
+00983 \textcolor{comment}{ * pointed by 'invalid' is set to non-zero, otherwise it is left untouched.}
+00984 \textcolor{comment}{ *}
+00985 \textcolor{comment}{ * hllCount() supports a special internal-only encoding of HLL\_RAW, that}
+00986 \textcolor{comment}{ * is, hdr->registers will point to an uint8\_t array of HLL\_REGISTERS element.}
+00987 \textcolor{comment}{ * This is useful in order to speedup PFCOUNT when called against multiple}
+00988 \textcolor{comment}{ * keys (no need to work with 6-bit integers encoding). */}
+00989 uint64\_t hllCount(\textcolor{keyword}{struct} \hyperlink{structhllhdr}{hllhdr} *hdr, \textcolor{keywordtype}{int} *invalid) \{
+00990     \textcolor{keywordtype}{double} m = \hyperlink{hyperloglog_8c_aa053beb90136828dcb46545c7445fc36}{HLL\_REGISTERS};
+00991     \textcolor{keywordtype}{double} E, alpha = 0.7213/(1+1.079/m);
+00992     \textcolor{keywordtype}{int} j, ez; \textcolor{comment}{/* Number of registers equal to 0. */}
+00993 
+00994     \textcolor{comment}{/* We precompute 2^(-reg[j]) in a small table in order to}
+00995 \textcolor{comment}{     * speedup the computation of SUM(2^-register[0..i]). */}
+00996     \textcolor{keyword}{static} \textcolor{keywordtype}{int} initialized = 0;
+00997     \textcolor{keyword}{static} \textcolor{keywordtype}{double} PE[64];
+00998     \textcolor{keywordflow}{if} (!initialized) \{
+00999         PE[0] = 1; \textcolor{comment}{/* 2^(-reg[j]) is 1 when m is 0. */}
+01000         \textcolor{keywordflow}{for} (j = 1; j < 64; j++) \{
+01001             \textcolor{comment}{/* 2^(-reg[j]) is the same as 1/2^reg[j]. */}
+01002             PE[j] = 1.0/(1ULL << j);
+01003         \}
+01004         initialized = 1;
+01005     \}
+01006 
+01007     \textcolor{comment}{/* Compute SUM(2^-register[0..i]). */}
+01008     \textcolor{keywordflow}{if} (hdr->encoding == \hyperlink{hyperloglog_8c_a5f2ead2492fc9cc4ff39f8c1752875a1}{HLL\_DENSE}) \{
+01009         E = hllDenseSum(hdr->registers,PE,&ez);
+01010     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (hdr->encoding == \hyperlink{hyperloglog_8c_afe326d57dd3d7c27c8fe52dc2c19cecd}{HLL\_SPARSE}) \{
+01011         E = hllSparseSum(hdr->registers,
+01012                          sdslen((sds)hdr)-\hyperlink{hyperloglog_8c_af04dc163054c4c79b0e6c93057b4032f}{HLL\_HDR\_SIZE},PE,&ez,invalid);
+01013     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (hdr->encoding == \hyperlink{hyperloglog_8c_aafa7fcced873855fe756c6e29831114a}{HLL\_RAW}) \{
+01014         E = hllRawSum(hdr->registers,PE,&ez);
+01015     \} \textcolor{keywordflow}{else} \{
+01016         \hyperlink{server_8h_a11cc378e7778a830b41240578de3b204}{serverPanic}(\textcolor{stringliteral}{"Unknown HyperLogLog encoding in hllCount()"});
+01017     \}
+01018 
+01019     \textcolor{comment}{/* Apply loglog-beta to the raw estimate. See:}
+01020 \textcolor{comment}{     * "LogLog-Beta and More: A New Algorithm for Cardinality Estimation}
+01021 \textcolor{comment}{     * Based on LogLog Counting" Jason Qin, Denys Kim, Yumei Tung}
+01022 \textcolor{comment}{     * arXiv:1612.02284 */}
+01023     \textcolor{keywordtype}{double} zl = log(ez + 1);
+01024     \textcolor{keywordtype}{double} beta = -0.370393911*ez +
+01025                    0.070471823*zl +
+01026                    0.17393686*pow(zl,2) +
+01027                    0.16339839*pow(zl,3) +
+01028                   -0.09237745*pow(zl,4) +
+01029                    0.03738027*pow(zl,5) +
+01030                   -0.005384159*pow(zl,6) +
+01031                    0.00042419*pow(zl,7);
+01032 
+01033     E  = llroundl(alpha*m*(m-ez)*(1/(E+beta)));
+01034     \textcolor{keywordflow}{return} (uint64\_t) E;
+01035 \}
+01036 
+01037 \textcolor{comment}{/* Call hllDenseAdd() or hllSparseAdd() according to the HLL encoding. */}
+01038 \textcolor{keywordtype}{int} hllAdd(robj *o, \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *ele, size\_t elesize) \{
+01039     \textcolor{keyword}{struct} \hyperlink{structhllhdr}{hllhdr} *hdr = o->ptr;
+01040     \textcolor{keywordflow}{switch}(hdr->encoding) \{
+01041     \textcolor{keywordflow}{case} \hyperlink{hyperloglog_8c_a5f2ead2492fc9cc4ff39f8c1752875a1}{HLL\_DENSE}: \textcolor{keywordflow}{return} hllDenseAdd(hdr->registers,ele,elesize);
+01042     \textcolor{keywordflow}{case} \hyperlink{hyperloglog_8c_afe326d57dd3d7c27c8fe52dc2c19cecd}{HLL\_SPARSE}: \textcolor{keywordflow}{return} hllSparseAdd(o,ele,elesize);
+01043     \textcolor{keywordflow}{default}: \textcolor{keywordflow}{return} -1; \textcolor{comment}{/* Invalid representation. */}
+01044     \}
+01045 \}
+01046 
+01047 \textcolor{comment}{/* Merge by computing MAX(registers[i],hll[i]) the HyperLogLog 'hll'}
+01048 \textcolor{comment}{ * with an array of uint8\_t HLL\_REGISTERS registers pointed by 'max'.}
+01049 \textcolor{comment}{ *}
+01050 \textcolor{comment}{ * The hll object must be already validated via isHLLObjectOrReply()}
+01051 \textcolor{comment}{ * or in some other way.}
+01052 \textcolor{comment}{ *}
+01053 \textcolor{comment}{ * If the HyperLogLog is sparse and is found to be invalid, C\_ERR}
+01054 \textcolor{comment}{ * is returned, otherwise the function always succeeds. */}
+01055 \textcolor{keywordtype}{int} hllMerge(uint8\_t *max, robj *hll) \{
+01056     \textcolor{keyword}{struct} \hyperlink{structhllhdr}{hllhdr} *hdr = hll->ptr;
+01057     \textcolor{keywordtype}{int} i;
+01058 
+01059     \textcolor{keywordflow}{if} (hdr->encoding == \hyperlink{hyperloglog_8c_a5f2ead2492fc9cc4ff39f8c1752875a1}{HLL\_DENSE}) \{
+01060         uint8\_t val;
+01061 
+01062         \textcolor{keywordflow}{for} (i = 0; i < \hyperlink{hyperloglog_8c_aa053beb90136828dcb46545c7445fc36}{HLL\_REGISTERS}; i++) \{
+01063             \hyperlink{hyperloglog_8c_abace3387aeb1543c9bcbd0d9a62c7ebc}{HLL\_DENSE\_GET\_REGISTER}(val,hdr->registers,i);
+01064             \textcolor{keywordflow}{if} (val > max[i]) max[i] = val;
+01065         \}
+01066     \} \textcolor{keywordflow}{else} \{
+01067         uint8\_t *p = hll->ptr, *end = p + sdslen(hll->ptr);
+01068         \textcolor{keywordtype}{long} runlen, regval;
+01069 
+01070         p += \hyperlink{hyperloglog_8c_af04dc163054c4c79b0e6c93057b4032f}{HLL\_HDR\_SIZE};
+01071         i = 0;
+01072         \textcolor{keywordflow}{while}(p < end) \{
+01073             \textcolor{keywordflow}{if} (\hyperlink{hyperloglog_8c_a0b65ae2290df116ae4ed18188dffb5ad}{HLL\_SPARSE\_IS\_ZERO}(p)) \{
+01074                 runlen = \hyperlink{hyperloglog_8c_a0ed89a76f49a89991af87cce34c3260b}{HLL\_SPARSE\_ZERO\_LEN}(p);
+01075                 i += runlen;
+01076                 p++;
+01077             \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (\hyperlink{hyperloglog_8c_ac672e0af491e4cbfe7a5859ae4dc74f9}{HLL\_SPARSE\_IS\_XZERO}(p)) \{
+01078                 runlen = \hyperlink{hyperloglog_8c_a95fbeb27967ea46816fd354ddb59564e}{HLL\_SPARSE\_XZERO\_LEN}(p);
+01079                 i += runlen;
+01080                 p += 2;
+01081             \} \textcolor{keywordflow}{else} \{
+01082                 runlen = \hyperlink{hyperloglog_8c_a5c74b3b50c822c01c1976a72b84db12f}{HLL\_SPARSE\_VAL\_LEN}(p);
+01083                 regval = \hyperlink{hyperloglog_8c_ad36de263468a9ce3b1409743b8da64d7}{HLL\_SPARSE\_VAL\_VALUE}(p);
+01084                 \textcolor{keywordflow}{while}(runlen--) \{
+01085                     \textcolor{keywordflow}{if} (regval > max[i]) max[i] = regval;
+01086                     i++;
+01087                 \}
+01088                 p++;
+01089             \}
+01090         \}
+01091         \textcolor{keywordflow}{if} (i != \hyperlink{hyperloglog_8c_aa053beb90136828dcb46545c7445fc36}{HLL\_REGISTERS}) \textcolor{keywordflow}{return} \hyperlink{server_8h_af98ac28d5f4d23d7ed5985188e6fb7d1}{C\_ERR};
+01092     \}
+01093     \textcolor{keywordflow}{return} \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK};
+01094 \}
+01095 
+01096 \textcolor{comment}{/* ========================== HyperLogLog commands ========================== */}
+01097 
+01098 \textcolor{comment}{/* Create an HLL object. We always create the HLL using sparse encoding.}
+01099 \textcolor{comment}{ * This will be upgraded to the dense representation as needed. */}
+01100 robj *createHLLObject(\textcolor{keywordtype}{void}) \{
+01101     robj *o;
+01102     \textcolor{keyword}{struct} \hyperlink{structhllhdr}{hllhdr} *hdr;
+01103     sds s;
+01104     uint8\_t *p;
+01105     \textcolor{keywordtype}{int} sparselen = \hyperlink{hyperloglog_8c_af04dc163054c4c79b0e6c93057b4032f}{HLL\_HDR\_SIZE} +
+01106                     (((\hyperlink{hyperloglog_8c_aa053beb90136828dcb46545c7445fc36}{HLL\_REGISTERS}+(\hyperlink{hyperloglog_8c_a63a340a0d93270bd5ac0c1c7343408e6}{HLL\_SPARSE\_XZERO\_MAX\_LEN}-1)
+      ) /
+01107                      \hyperlink{hyperloglog_8c_a63a340a0d93270bd5ac0c1c7343408e6}{HLL\_SPARSE\_XZERO\_MAX\_LEN})*2);
+01108     \textcolor{keywordtype}{int} aux;
+01109 
+01110     \textcolor{comment}{/* Populate the sparse representation with as many XZERO opcodes as}
+01111 \textcolor{comment}{     * needed to represent all the registers. */}
+01112     aux = \hyperlink{hyperloglog_8c_aa053beb90136828dcb46545c7445fc36}{HLL\_REGISTERS};
+01113     s = sdsnewlen(NULL,sparselen);
+01114     p = (uint8\_t*)s + \hyperlink{hyperloglog_8c_af04dc163054c4c79b0e6c93057b4032f}{HLL\_HDR\_SIZE};
+01115     \textcolor{keywordflow}{while}(aux) \{
+01116         \textcolor{keywordtype}{int} xzero = \hyperlink{hyperloglog_8c_a63a340a0d93270bd5ac0c1c7343408e6}{HLL\_SPARSE\_XZERO\_MAX\_LEN};
+01117         \textcolor{keywordflow}{if} (xzero > aux) xzero = aux;
+01118         \hyperlink{hyperloglog_8c_a1e40105f1b438075006c8b38b07f7198}{HLL\_SPARSE\_XZERO\_SET}(p,xzero);
+01119         p += 2;
+01120         aux -= xzero;
+01121     \}
+01122     \hyperlink{server_8h_a88114b5169b4c382df6b56506285e56a}{serverAssert}((p-(uint8\_t*)s) == sparselen);
+01123 
+01124     \textcolor{comment}{/* Create the actual object. */}
+01125     o = createObject(\hyperlink{server_8h_a65236ea160f69cdef33ec942092af88f}{OBJ\_STRING},s);
+01126     hdr = o->ptr;
+01127     memcpy(hdr->magic,\textcolor{stringliteral}{"HYLL"},4);
+01128     hdr->encoding = \hyperlink{hyperloglog_8c_afe326d57dd3d7c27c8fe52dc2c19cecd}{HLL\_SPARSE};
+01129     \textcolor{keywordflow}{return} o;
+01130 \}
+01131 
+01132 \textcolor{comment}{/* Check if the object is a String with a valid HLL representation.}
+01133 \textcolor{comment}{ * Return C\_OK if this is true, otherwise reply to the client}
+01134 \textcolor{comment}{ * with an error and return C\_ERR. */}
+01135 \textcolor{keywordtype}{int} isHLLObjectOrReply(\hyperlink{structclient}{client} *c, robj *o) \{
+01136     \textcolor{keyword}{struct} \hyperlink{structhllhdr}{hllhdr} *hdr;
+01137 
+01138     \textcolor{comment}{/* Key exists, check type */}
+01139     \textcolor{keywordflow}{if} (checkType(c,o,\hyperlink{server_8h_a65236ea160f69cdef33ec942092af88f}{OBJ\_STRING}))
+01140         \textcolor{keywordflow}{return} \hyperlink{server_8h_af98ac28d5f4d23d7ed5985188e6fb7d1}{C\_ERR}; \textcolor{comment}{/* Error already sent. */}
+01141 
+01142     \textcolor{keywordflow}{if} (!\hyperlink{server_8h_afcfb5bd97af52d1dbce331745cae030c}{sdsEncodedObject}(o)) \textcolor{keywordflow}{goto} invalid;
+01143     \textcolor{keywordflow}{if} (stringObjectLen(o) < \textcolor{keyword}{sizeof}(*hdr)) \textcolor{keywordflow}{goto} invalid;
+01144     hdr = o->ptr;
+01145 
+01146     \textcolor{comment}{/* Magic should be "HYLL". */}
+01147     \textcolor{keywordflow}{if} (hdr->magic[0] != \textcolor{stringliteral}{'H'} || hdr->magic[1] != \textcolor{stringliteral}{'Y'} ||
+01148         hdr->magic[2] != \textcolor{stringliteral}{'L'} || hdr->magic[3] != \textcolor{stringliteral}{'L'}) \textcolor{keywordflow}{goto} invalid;
+01149 
+01150     \textcolor{keywordflow}{if} (hdr->encoding > \hyperlink{hyperloglog_8c_ae5c2b03f2019eb1c3fb9497ca8f3e8f3}{HLL\_MAX\_ENCODING}) \textcolor{keywordflow}{goto} invalid;
+01151 
+01152     \textcolor{comment}{/* Dense representation string length should match exactly. */}
+01153     \textcolor{keywordflow}{if} (hdr->encoding == \hyperlink{hyperloglog_8c_a5f2ead2492fc9cc4ff39f8c1752875a1}{HLL\_DENSE} &&
+01154         stringObjectLen(o) != \hyperlink{hyperloglog_8c_ad677821a745c7306ef02ccca0ff6f92f}{HLL\_DENSE\_SIZE}) \textcolor{keywordflow}{goto} invalid;
+01155 
+01156     \textcolor{comment}{/* All tests passed. */}
+01157     \textcolor{keywordflow}{return} \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK};
+01158 
+01159 invalid:
+01160     addReplySds(c,
+01161         sdsnew(\textcolor{stringliteral}{"-WRONGTYPE Key is not a valid "}
+01162                \textcolor{stringliteral}{"HyperLogLog string value.\(\backslash\)r\(\backslash\)n"}));
+01163     \textcolor{keywordflow}{return} \hyperlink{server_8h_af98ac28d5f4d23d7ed5985188e6fb7d1}{C\_ERR};
+01164 \}
+01165 
+01166 \textcolor{comment}{/* PFADD var ele ele ele ... ele => :0 or :1 */}
+01167 \textcolor{keywordtype}{void} pfaddCommand(\hyperlink{structclient}{client} *c) \{
+01168     robj *o = lookupKeyWrite(c->db,c->argv[1]);
+01169     \textcolor{keyword}{struct} \hyperlink{structhllhdr}{hllhdr} *hdr;
+01170     \textcolor{keywordtype}{int} updated = 0, j;
+01171 
+01172     \textcolor{keywordflow}{if} (o == NULL) \{
+01173         \textcolor{comment}{/* Create the key with a string value of the exact length to}
+01174 \textcolor{comment}{         * hold our HLL data structure. sdsnewlen() when NULL is passed}
+01175 \textcolor{comment}{         * is guaranteed to return bytes initialized to zero. */}
+01176         o = createHLLObject();
+01177         dbAdd(c->db,c->argv[1],o);
+01178         updated++;
+01179     \} \textcolor{keywordflow}{else} \{
+01180         \textcolor{keywordflow}{if} (isHLLObjectOrReply(c,o) != \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK}) \textcolor{keywordflow}{return};
+01181         o = dbUnshareStringValue(c->db,c->argv[1],o);
+01182     \}
+01183     \textcolor{comment}{/* Perform the low level ADD operation for every element. */}
+01184     \textcolor{keywordflow}{for} (j = 2; j < c->argc; j++) \{
+01185         \textcolor{keywordtype}{int} retval = hllAdd(o, (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char}*)c->argv[j]->ptr,
+01186                                sdslen(c->argv[j]->ptr));
+01187         \textcolor{keywordflow}{switch}(retval) \{
+01188         \textcolor{keywordflow}{case} 1:
+01189             updated++;
+01190             \textcolor{keywordflow}{break};
+01191         \textcolor{keywordflow}{case} -1:
+01192             addReplySds(c,sdsnew(invalid\_hll\_err));
+01193             \textcolor{keywordflow}{return};
+01194         \}
+01195     \}
+01196     hdr = o->ptr;
+01197     \textcolor{keywordflow}{if} (updated) \{
+01198         signalModifiedKey(c->db,c->argv[1]);
+01199         notifyKeyspaceEvent(\hyperlink{server_8h_a1902292b73b71baa65d86db2d61b47ce}{NOTIFY\_STRING},\textcolor{stringliteral}{"pfadd"},c->argv[1],c->db->id);
+01200         server.dirty++;
+01201         \hyperlink{hyperloglog_8c_aba6246a823dc41dc866a6af8828ae375}{HLL\_INVALIDATE\_CACHE}(hdr);
+01202     \}
+01203     addReply(c, updated ? shared.cone : shared.czero);
+01204 \}
+01205 
+01206 \textcolor{comment}{/* PFCOUNT var -> approximated cardinality of set. */}
+01207 \textcolor{keywordtype}{void} pfcountCommand(\hyperlink{structclient}{client} *c) \{
+01208     robj *o;
+01209     \textcolor{keyword}{struct} \hyperlink{structhllhdr}{hllhdr} *hdr;
+01210     uint64\_t card;
+01211 
+01212     \textcolor{comment}{/* Case 1: multi-key keys, cardinality of the union.}
+01213 \textcolor{comment}{     *}
+01214 \textcolor{comment}{     * When multiple keys are specified, PFCOUNT actually computes}
+01215 \textcolor{comment}{     * the cardinality of the merge of the N HLLs specified. */}
+01216     \textcolor{keywordflow}{if} (c->argc > 2) \{
+01217         uint8\_t max[\hyperlink{hyperloglog_8c_af04dc163054c4c79b0e6c93057b4032f}{HLL\_HDR\_SIZE}+\hyperlink{hyperloglog_8c_aa053beb90136828dcb46545c7445fc36}{HLL\_REGISTERS}], *registers;
+01218         \textcolor{keywordtype}{int} j;
+01219 
+01220         \textcolor{comment}{/* Compute an HLL with M[i] = MAX(M[i]\_j). */}
+01221         memset(max,0,\textcolor{keyword}{sizeof}(max));
+01222         hdr = (\textcolor{keyword}{struct} \hyperlink{structhllhdr}{hllhdr}*) max;
+01223         hdr->encoding = \hyperlink{hyperloglog_8c_aafa7fcced873855fe756c6e29831114a}{HLL\_RAW}; \textcolor{comment}{/* Special internal-only encoding. */}
+01224         registers = max + \hyperlink{hyperloglog_8c_af04dc163054c4c79b0e6c93057b4032f}{HLL\_HDR\_SIZE};
+01225         \textcolor{keywordflow}{for} (j = 1; j < c->argc; j++) \{
+01226             \textcolor{comment}{/* Check type and size. */}
+01227             robj *o = lookupKeyRead(c->db,c->argv[j]);
+01228             \textcolor{keywordflow}{if} (o == NULL) \textcolor{keywordflow}{continue}; \textcolor{comment}{/* Assume empty HLL for non existing var.*/}
+01229             \textcolor{keywordflow}{if} (isHLLObjectOrReply(c,o) != \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK}) \textcolor{keywordflow}{return};
+01230 
+01231             \textcolor{comment}{/* Merge with this HLL with our 'max' HHL by setting max[i]}
+01232 \textcolor{comment}{             * to MAX(max[i],hll[i]). */}
+01233             \textcolor{keywordflow}{if} (hllMerge(registers,o) == \hyperlink{server_8h_af98ac28d5f4d23d7ed5985188e6fb7d1}{C\_ERR}) \{
+01234                 addReplySds(c,sdsnew(invalid\_hll\_err));
+01235                 \textcolor{keywordflow}{return};
+01236             \}
+01237         \}
+01238 
+01239         \textcolor{comment}{/* Compute cardinality of the resulting set. */}
+01240         addReplyLongLong(c,hllCount(hdr,NULL));
+01241         \textcolor{keywordflow}{return};
+01242     \}
+01243 
+01244     \textcolor{comment}{/* Case 2: cardinality of the single HLL.}
+01245 \textcolor{comment}{     *}
+01246 \textcolor{comment}{     * The user specified a single key. Either return the cached value}
+01247 \textcolor{comment}{     * or compute one and update the cache. */}
+01248     o = lookupKeyWrite(c->db,c->argv[1]);
+01249     \textcolor{keywordflow}{if} (o == NULL) \{
+01250         \textcolor{comment}{/* No key? Cardinality is zero since no element was added, otherwise}
+01251 \textcolor{comment}{         * we would have a key as HLLADD creates it as a side effect. */}
+01252         addReply(c,shared.czero);
+01253     \} \textcolor{keywordflow}{else} \{
+01254         \textcolor{keywordflow}{if} (isHLLObjectOrReply(c,o) != \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK}) \textcolor{keywordflow}{return};
+01255         o = dbUnshareStringValue(c->db,c->argv[1],o);
+01256 
+01257         \textcolor{comment}{/* Check if the cached cardinality is valid. */}
+01258         hdr = o->ptr;
+01259         \textcolor{keywordflow}{if} (\hyperlink{hyperloglog_8c_af43935d3efe680c096b65a63aa8eeb0c}{HLL\_VALID\_CACHE}(hdr)) \{
+01260             \textcolor{comment}{/* Just return the cached value. */}
+01261             card = (uint64\_t)hdr->card[0];
+01262             card |= (uint64\_t)hdr->card[1] << 8;
+01263             card |= (uint64\_t)hdr->card[2] << 16;
+01264             card |= (uint64\_t)hdr->card[3] << 24;
+01265             card |= (uint64\_t)hdr->card[4] << 32;
+01266             card |= (uint64\_t)hdr->card[5] << 40;
+01267             card |= (uint64\_t)hdr->card[6] << 48;
+01268             card |= (uint64\_t)hdr->card[7] << 56;
+01269         \} \textcolor{keywordflow}{else} \{
+01270             \textcolor{keywordtype}{int} invalid = 0;
+01271             \textcolor{comment}{/* Recompute it and update the cached value. */}
+01272             card = hllCount(hdr,&invalid);
+01273             \textcolor{keywordflow}{if} (invalid) \{
+01274                 addReplySds(c,sdsnew(invalid\_hll\_err));
+01275                 \textcolor{keywordflow}{return};
+01276             \}
+01277             hdr->card[0] = card & 0xff;
+01278             hdr->card[1] = (card >> 8) & 0xff;
+01279             hdr->card[2] = (card >> 16) & 0xff;
+01280             hdr->card[3] = (card >> 24) & 0xff;
+01281             hdr->card[4] = (card >> 32) & 0xff;
+01282             hdr->card[5] = (card >> 40) & 0xff;
+01283             hdr->card[6] = (card >> 48) & 0xff;
+01284             hdr->card[7] = (card >> 56) & 0xff;
+01285             \textcolor{comment}{/* This is not considered a read-only command even if the}
+01286 \textcolor{comment}{             * data structure is not modified, since the cached value}
+01287 \textcolor{comment}{             * may be modified and given that the HLL is a Redis string}
+01288 \textcolor{comment}{             * we need to propagate the change. */}
+01289             signalModifiedKey(c->db,c->argv[1]);
+01290             server.dirty++;
+01291         \}
+01292         addReplyLongLong(c,card);
+01293     \}
+01294 \}
+01295 
+01296 \textcolor{comment}{/* PFMERGE dest src1 src2 src3 ... srcN => OK */}
+01297 \textcolor{keywordtype}{void} pfmergeCommand(\hyperlink{structclient}{client} *c) \{
+01298     uint8\_t max[\hyperlink{hyperloglog_8c_aa053beb90136828dcb46545c7445fc36}{HLL\_REGISTERS}];
+01299     \textcolor{keyword}{struct} \hyperlink{structhllhdr}{hllhdr} *hdr;
+01300     \textcolor{keywordtype}{int} j;
+01301     \textcolor{keywordtype}{int} use\_dense = 0; \textcolor{comment}{/* Use dense representation as target? */}
+01302 
+01303     \textcolor{comment}{/* Compute an HLL with M[i] = MAX(M[i]\_j).}
+01304 \textcolor{comment}{     * We store the maximum into the max array of registers. We'll write}
+01305 \textcolor{comment}{     * it to the target variable later. */}
+01306     memset(max,0,\textcolor{keyword}{sizeof}(max));
+01307     \textcolor{keywordflow}{for} (j = 1; j < c->argc; j++) \{
+01308         \textcolor{comment}{/* Check type and size. */}
+01309         robj *o = lookupKeyRead(c->db,c->argv[j]);
+01310         \textcolor{keywordflow}{if} (o == NULL) \textcolor{keywordflow}{continue}; \textcolor{comment}{/* Assume empty HLL for non existing var. */}
+01311         \textcolor{keywordflow}{if} (isHLLObjectOrReply(c,o) != \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK}) \textcolor{keywordflow}{return};
+01312 
+01313         \textcolor{comment}{/* If at least one involved HLL is dense, use the dense representation}
+01314 \textcolor{comment}{         * as target ASAP to save time and avoid the conversion step. */}
+01315         hdr = o->ptr;
+01316         \textcolor{keywordflow}{if} (hdr->encoding == \hyperlink{hyperloglog_8c_a5f2ead2492fc9cc4ff39f8c1752875a1}{HLL\_DENSE}) use\_dense = 1;
+01317 
+01318         \textcolor{comment}{/* Merge with this HLL with our 'max' HHL by setting max[i]}
+01319 \textcolor{comment}{         * to MAX(max[i],hll[i]). */}
+01320         \textcolor{keywordflow}{if} (hllMerge(max,o) == \hyperlink{server_8h_af98ac28d5f4d23d7ed5985188e6fb7d1}{C\_ERR}) \{
+01321             addReplySds(c,sdsnew(invalid\_hll\_err));
+01322             \textcolor{keywordflow}{return};
+01323         \}
+01324     \}
+01325 
+01326     \textcolor{comment}{/* Create / unshare the destination key's value if needed. */}
+01327     robj *o = lookupKeyWrite(c->db,c->argv[1]);
+01328     \textcolor{keywordflow}{if} (o == NULL) \{
+01329         \textcolor{comment}{/* Create the key with a string value of the exact length to}
+01330 \textcolor{comment}{         * hold our HLL data structure. sdsnewlen() when NULL is passed}
+01331 \textcolor{comment}{         * is guaranteed to return bytes initialized to zero. */}
+01332         o = createHLLObject();
+01333         dbAdd(c->db,c->argv[1],o);
+01334     \} \textcolor{keywordflow}{else} \{
+01335         \textcolor{comment}{/* If key exists we are sure it's of the right type/size}
+01336 \textcolor{comment}{         * since we checked when merging the different HLLs, so we}
+01337 \textcolor{comment}{         * don't check again. */}
+01338         o = dbUnshareStringValue(c->db,c->argv[1],o);
+01339     \}
+01340 
+01341     \textcolor{comment}{/* Convert the destination object to dense representation if at least}
+01342 \textcolor{comment}{     * one of the inputs was dense. */}
+01343     \textcolor{keywordflow}{if} (use\_dense && hllSparseToDense(o) == \hyperlink{server_8h_af98ac28d5f4d23d7ed5985188e6fb7d1}{C\_ERR}) \{
+01344         addReplySds(c,sdsnew(invalid\_hll\_err));
+01345         \textcolor{keywordflow}{return};
+01346     \}
+01347 
+01348     \textcolor{comment}{/* Write the resulting HLL to the destination HLL registers and}
+01349 \textcolor{comment}{     * invalidate the cached value. */}
+01350     \textcolor{keywordflow}{for} (j = 0; j < \hyperlink{hyperloglog_8c_aa053beb90136828dcb46545c7445fc36}{HLL\_REGISTERS}; j++) \{
+01351         \textcolor{keywordflow}{if} (max[j] == 0) \textcolor{keywordflow}{continue};
+01352         hdr = o->ptr;
+01353         \textcolor{keywordflow}{switch}(hdr->encoding) \{
+01354         \textcolor{keywordflow}{case} \hyperlink{hyperloglog_8c_a5f2ead2492fc9cc4ff39f8c1752875a1}{HLL\_DENSE}: hllDenseSet(hdr->registers,j,max[j]); \textcolor{keywordflow}{break};
+01355         \textcolor{keywordflow}{case} \hyperlink{hyperloglog_8c_afe326d57dd3d7c27c8fe52dc2c19cecd}{HLL\_SPARSE}: hllSparseSet(o,j,max[j]); \textcolor{keywordflow}{break};
+01356         \}
+01357     \}
+01358     hdr = o->ptr; \textcolor{comment}{/* o->ptr may be different now, as a side effect of}
+01359 \textcolor{comment}{                     last hllSparseSet() call. */}
+01360     \hyperlink{hyperloglog_8c_aba6246a823dc41dc866a6af8828ae375}{HLL\_INVALIDATE\_CACHE}(hdr);
+01361 
+01362     signalModifiedKey(c->db,c->argv[1]);
+01363     \textcolor{comment}{/* We generate a PFADD event for PFMERGE for semantical simplicity}
+01364 \textcolor{comment}{     * since in theory this is a mass-add of elements. */}
+01365     notifyKeyspaceEvent(\hyperlink{server_8h_a1902292b73b71baa65d86db2d61b47ce}{NOTIFY\_STRING},\textcolor{stringliteral}{"pfadd"},c->argv[1],c->db->id);
+01366     server.dirty++;
+01367     addReply(c,shared.ok);
+01368 \}
+01369 
+01370 \textcolor{comment}{/* ========================== Testing / Debugging  ========================== */}
+01371 
+01372 \textcolor{comment}{/* PFSELFTEST}
+01373 \textcolor{comment}{ * This command performs a self-test of the HLL registers implementation.}
+01374 \textcolor{comment}{ * Something that is not easy to test from within the outside. */}
+01375 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{HLL\_TEST\_CYCLES} 1000
+01376 \textcolor{keywordtype}{void} pfselftestCommand(\hyperlink{structclient}{client} *c) \{
+01377     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{int} j, i;
+01378     sds bitcounters = sdsnewlen(NULL,\hyperlink{hyperloglog_8c_ad677821a745c7306ef02ccca0ff6f92f}{HLL\_DENSE\_SIZE});
+01379     \textcolor{keyword}{struct} \hyperlink{structhllhdr}{hllhdr} *hdr = (\textcolor{keyword}{struct} \hyperlink{structhllhdr}{hllhdr}*) bitcounters, *hdr2;
+01380     robj *o = NULL;
+01381     uint8\_t bytecounters[\hyperlink{hyperloglog_8c_aa053beb90136828dcb46545c7445fc36}{HLL\_REGISTERS}];
+01382 
+01383     \textcolor{comment}{/* Test 1: access registers.}
+01384 \textcolor{comment}{     * The test is conceived to test that the different counters of our data}
+01385 \textcolor{comment}{     * structure are accessible and that setting their values both result in}
+01386 \textcolor{comment}{     * the correct value to be retained and not affect adjacent values. */}
+01387     \textcolor{keywordflow}{for} (j = 0; j < \hyperlink{hyperloglog_8c_a5739eae82e6d3a654a6af38974511bd2}{HLL\_TEST\_CYCLES}; j++) \{
+01388         \textcolor{comment}{/* Set the HLL counters and an array of unsigned byes of the}
+01389 \textcolor{comment}{         * same size to the same set of random values. */}
+01390         \textcolor{keywordflow}{for} (i = 0; i < \hyperlink{hyperloglog_8c_aa053beb90136828dcb46545c7445fc36}{HLL\_REGISTERS}; i++) \{
+01391             \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{int} r = rand() & \hyperlink{hyperloglog_8c_af33bbd0f0613975a8821000c92febd31}{HLL\_REGISTER\_MAX};
+01392 
+01393             bytecounters[i] = r;
+01394             \hyperlink{hyperloglog_8c_a57f99ca1675593d83a5b1fc014b3945a}{HLL\_DENSE\_SET\_REGISTER}(hdr->registers,i,r);
+01395         \}
+01396         \textcolor{comment}{/* Check that we are able to retrieve the same values. */}
+01397         \textcolor{keywordflow}{for} (i = 0; i < \hyperlink{hyperloglog_8c_aa053beb90136828dcb46545c7445fc36}{HLL\_REGISTERS}; i++) \{
+01398             \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{int} val;
+01399 
+01400             \hyperlink{hyperloglog_8c_abace3387aeb1543c9bcbd0d9a62c7ebc}{HLL\_DENSE\_GET\_REGISTER}(val,hdr->registers,i);
+01401             \textcolor{keywordflow}{if} (val != bytecounters[i]) \{
+01402                 addReplyErrorFormat(c,
+01403                     \textcolor{stringliteral}{"TESTFAILED Register %d should be %d but is %d"},
+01404                     i, (\textcolor{keywordtype}{int}) bytecounters[i], (\textcolor{keywordtype}{int}) val);
+01405                 \textcolor{keywordflow}{goto} cleanup;
+01406             \}
+01407         \}
+01408     \}
+01409 
+01410     \textcolor{comment}{/* Test 2: approximation error.}
+01411 \textcolor{comment}{     * The test adds unique elements and check that the estimated value}
+01412 \textcolor{comment}{     * is always reasonable bounds.}
+01413 \textcolor{comment}{     *}
+01414 \textcolor{comment}{     * We check that the error is smaller than a few times than the expected}
+01415 \textcolor{comment}{     * standard error, to make it very unlikely for the test to fail because}
+01416 \textcolor{comment}{     * of a "bad" run.}
+01417 \textcolor{comment}{     *}
+01418 \textcolor{comment}{     * The test is performed with both dense and sparse HLLs at the same}
+01419 \textcolor{comment}{     * time also verifying that the computed cardinality is the same. */}
+01420     memset(hdr->registers,0,\hyperlink{hyperloglog_8c_ad677821a745c7306ef02ccca0ff6f92f}{HLL\_DENSE\_SIZE}-\hyperlink{hyperloglog_8c_af04dc163054c4c79b0e6c93057b4032f}{HLL\_HDR\_SIZE});
+01421     o = createHLLObject();
+01422     \textcolor{keywordtype}{double} relerr = 1.04/sqrt(\hyperlink{hyperloglog_8c_aa053beb90136828dcb46545c7445fc36}{HLL\_REGISTERS});
+01423     int64\_t checkpoint = 1;
+01424     uint64\_t seed = (uint64\_t)rand() | (uint64\_t)rand() << 32;
+01425     uint64\_t ele;
+01426     \textcolor{keywordflow}{for} (j = 1; j <= 10000000; j++) \{
+01427         ele = j ^ seed;
+01428         hllDenseAdd(hdr->registers,(\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char}*)&ele,\textcolor{keyword}{sizeof}(ele));
+01429         hllAdd(o,(\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char}*)&ele,\textcolor{keyword}{sizeof}(ele));
+01430 
+01431         \textcolor{comment}{/* Make sure that for small cardinalities we use sparse}
+01432 \textcolor{comment}{         * encoding. */}
+01433         \textcolor{keywordflow}{if} (j == checkpoint && j < server.hll\_sparse\_max\_bytes/2) \{
+01434             hdr2 = o->ptr;
+01435             \textcolor{keywordflow}{if} (hdr2->encoding != \hyperlink{hyperloglog_8c_afe326d57dd3d7c27c8fe52dc2c19cecd}{HLL\_SPARSE}) \{
+01436                 addReplyError(c, \textcolor{stringliteral}{"TESTFAILED sparse encoding not used"});
+01437                 \textcolor{keywordflow}{goto} cleanup;
+01438             \}
+01439         \}
+01440 
+01441         \textcolor{comment}{/* Check that dense and sparse representations agree. */}
+01442         \textcolor{keywordflow}{if} (j == checkpoint && hllCount(hdr,NULL) != hllCount(o->ptr,NULL)) \{
+01443                 addReplyError(c, \textcolor{stringliteral}{"TESTFAILED dense/sparse disagree"});
+01444                 \textcolor{keywordflow}{goto} cleanup;
+01445         \}
+01446 
+01447         \textcolor{comment}{/* Check error. */}
+01448         \textcolor{keywordflow}{if} (j == checkpoint) \{
+01449             int64\_t abserr = checkpoint - (int64\_t)hllCount(hdr,NULL);
+01450             uint64\_t maxerr = ceil(relerr*6*checkpoint);
+01451 
+01452             \textcolor{comment}{/* Adjust the max error we expect for cardinality 10}
+01453 \textcolor{comment}{             * since from time to time it is statistically likely to get}
+01454 \textcolor{comment}{             * much higher error due to collision, resulting into a false}
+01455 \textcolor{comment}{             * positive. */}
+01456             \textcolor{keywordflow}{if} (j == 10) maxerr = 1;
+01457 
+01458             \textcolor{keywordflow}{if} (abserr < 0) abserr = -abserr;
+01459             \textcolor{keywordflow}{if} (abserr > (int64\_t)maxerr) \{
+01460                 addReplyErrorFormat(c,
+01461                     \textcolor{stringliteral}{"TESTFAILED Too big error. card:%llu abserr:%llu"},
+01462                     (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} \textcolor{keywordtype}{long}) checkpoint,
+01463                     (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} \textcolor{keywordtype}{long}) abserr);
+01464                 \textcolor{keywordflow}{goto} cleanup;
+01465             \}
+01466             checkpoint *= 10;
+01467         \}
+01468     \}
+01469 
+01470     \textcolor{comment}{/* Success! */}
+01471     addReply(c,shared.ok);
+01472 
+01473 cleanup:
+01474     sdsfree(bitcounters);
+01475     \textcolor{keywordflow}{if} (o) decrRefCount(o);
+01476 \}
+01477 
+01478 \textcolor{comment}{/* PFDEBUG <subcommand> <key> ... args ...}
+01479 \textcolor{comment}{ * Different debugging related operations about the HLL implementation. */}
+01480 \textcolor{keywordtype}{void} pfdebugCommand(\hyperlink{structclient}{client} *c) \{
+01481     \textcolor{keywordtype}{char} *cmd = c->argv[1]->ptr;
+01482     \textcolor{keyword}{struct} \hyperlink{structhllhdr}{hllhdr} *hdr;
+01483     robj *o;
+01484     \textcolor{keywordtype}{int} j;
+01485 
+01486     o = lookupKeyWrite(c->db,c->argv[2]);
+01487     \textcolor{keywordflow}{if} (o == NULL) \{
+01488         addReplyError(c,\textcolor{stringliteral}{"The specified key does not exist"});
+01489         \textcolor{keywordflow}{return};
+01490     \}
+01491     \textcolor{keywordflow}{if} (isHLLObjectOrReply(c,o) != \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK}) \textcolor{keywordflow}{return};
+01492     o = dbUnshareStringValue(c->db,c->argv[2],o);
+01493     hdr = o->ptr;
+01494 
+01495     \textcolor{comment}{/* PFDEBUG GETREG <key> */}
+01496     \textcolor{keywordflow}{if} (!strcasecmp(cmd,\textcolor{stringliteral}{"getreg"})) \{
+01497         \textcolor{keywordflow}{if} (c->argc != 3) \textcolor{keywordflow}{goto} arityerr;
+01498 
+01499         \textcolor{keywordflow}{if} (hdr->encoding == \hyperlink{hyperloglog_8c_afe326d57dd3d7c27c8fe52dc2c19cecd}{HLL\_SPARSE}) \{
+01500             \textcolor{keywordflow}{if} (hllSparseToDense(o) == \hyperlink{server_8h_af98ac28d5f4d23d7ed5985188e6fb7d1}{C\_ERR}) \{
+01501                 addReplySds(c,sdsnew(invalid\_hll\_err));
+01502                 \textcolor{keywordflow}{return};
+01503             \}
+01504             server.dirty++; \textcolor{comment}{/* Force propagation on encoding change. */}
+01505         \}
+01506 
+01507         hdr = o->ptr;
+01508         addReplyMultiBulkLen(c,\hyperlink{hyperloglog_8c_aa053beb90136828dcb46545c7445fc36}{HLL\_REGISTERS});
+01509         \textcolor{keywordflow}{for} (j = 0; j < \hyperlink{hyperloglog_8c_aa053beb90136828dcb46545c7445fc36}{HLL\_REGISTERS}; j++) \{
+01510             uint8\_t val;
+01511 
+01512             \hyperlink{hyperloglog_8c_abace3387aeb1543c9bcbd0d9a62c7ebc}{HLL\_DENSE\_GET\_REGISTER}(val,hdr->registers,j);
+01513             addReplyLongLong(c,val);
+01514         \}
+01515     \}
+01516     \textcolor{comment}{/* PFDEBUG DECODE <key> */}
+01517     \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcasecmp(cmd,\textcolor{stringliteral}{"decode"})) \{
+01518         \textcolor{keywordflow}{if} (c->argc != 3) \textcolor{keywordflow}{goto} arityerr;
+01519 
+01520         uint8\_t *p = o->ptr, *end = p+sdslen(o->ptr);
+01521         sds decoded = sdsempty();
+01522 
+01523         \textcolor{keywordflow}{if} (hdr->encoding != \hyperlink{hyperloglog_8c_afe326d57dd3d7c27c8fe52dc2c19cecd}{HLL\_SPARSE}) \{
+01524             addReplyError(c,\textcolor{stringliteral}{"HLL encoding is not sparse"});
+01525             \textcolor{keywordflow}{return};
+01526         \}
+01527 
+01528         p += \hyperlink{hyperloglog_8c_af04dc163054c4c79b0e6c93057b4032f}{HLL\_HDR\_SIZE};
+01529         \textcolor{keywordflow}{while}(p < end) \{
+01530             \textcolor{keywordtype}{int} runlen, regval;
+01531 
+01532             \textcolor{keywordflow}{if} (\hyperlink{hyperloglog_8c_a0b65ae2290df116ae4ed18188dffb5ad}{HLL\_SPARSE\_IS\_ZERO}(p)) \{
+01533                 runlen = \hyperlink{hyperloglog_8c_a0ed89a76f49a89991af87cce34c3260b}{HLL\_SPARSE\_ZERO\_LEN}(p);
+01534                 p++;
+01535                 decoded = sdscatprintf(decoded,\textcolor{stringliteral}{"z:%d "},runlen);
+01536             \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (\hyperlink{hyperloglog_8c_ac672e0af491e4cbfe7a5859ae4dc74f9}{HLL\_SPARSE\_IS\_XZERO}(p)) \{
+01537                 runlen = \hyperlink{hyperloglog_8c_a95fbeb27967ea46816fd354ddb59564e}{HLL\_SPARSE\_XZERO\_LEN}(p);
+01538                 p += 2;
+01539                 decoded = sdscatprintf(decoded,\textcolor{stringliteral}{"Z:%d "},runlen);
+01540             \} \textcolor{keywordflow}{else} \{
+01541                 runlen = \hyperlink{hyperloglog_8c_a5c74b3b50c822c01c1976a72b84db12f}{HLL\_SPARSE\_VAL\_LEN}(p);
+01542                 regval = \hyperlink{hyperloglog_8c_ad36de263468a9ce3b1409743b8da64d7}{HLL\_SPARSE\_VAL\_VALUE}(p);
+01543                 p++;
+01544                 decoded = sdscatprintf(decoded,\textcolor{stringliteral}{"v:%d,%d "},regval,runlen);
+01545             \}
+01546         \}
+01547         decoded = sdstrim(decoded,\textcolor{stringliteral}{" "});
+01548         addReplyBulkCBuffer(c,decoded,sdslen(decoded));
+01549         sdsfree(decoded);
+01550     \}
+01551     \textcolor{comment}{/* PFDEBUG ENCODING <key> */}
+01552     \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcasecmp(cmd,\textcolor{stringliteral}{"encoding"})) \{
+01553         \textcolor{keywordtype}{char} *encodingstr[2] = \{\textcolor{stringliteral}{"dense"},\textcolor{stringliteral}{"sparse"}\};
+01554         \textcolor{keywordflow}{if} (c->argc != 3) \textcolor{keywordflow}{goto} arityerr;
+01555 
+01556         addReplyStatus(c,encodingstr[hdr->encoding]);
+01557     \}
+01558     \textcolor{comment}{/* PFDEBUG TODENSE <key> */}
+01559     \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcasecmp(cmd,\textcolor{stringliteral}{"todense"})) \{
+01560         \textcolor{keywordtype}{int} conv = 0;
+01561         \textcolor{keywordflow}{if} (c->argc != 3) \textcolor{keywordflow}{goto} arityerr;
+01562 
+01563         \textcolor{keywordflow}{if} (hdr->encoding == \hyperlink{hyperloglog_8c_afe326d57dd3d7c27c8fe52dc2c19cecd}{HLL\_SPARSE}) \{
+01564             \textcolor{keywordflow}{if} (hllSparseToDense(o) == \hyperlink{server_8h_af98ac28d5f4d23d7ed5985188e6fb7d1}{C\_ERR}) \{
+01565                 addReplySds(c,sdsnew(invalid\_hll\_err));
+01566                 \textcolor{keywordflow}{return};
+01567             \}
+01568             conv = 1;
+01569             server.dirty++; \textcolor{comment}{/* Force propagation on encoding change. */}
+01570         \}
+01571         addReply(c,conv ? shared.cone : shared.czero);
+01572     \} \textcolor{keywordflow}{else} \{
+01573         addReplyErrorFormat(c,\textcolor{stringliteral}{"Unknown PFDEBUG subcommand '%s'"}, cmd);
+01574     \}
+01575     \textcolor{keywordflow}{return};
+01576 
+01577 arityerr:
+01578     addReplyErrorFormat(c,
+01579         \textcolor{stringliteral}{"Wrong number of arguments for the '%s' subcommand"},cmd);
+01580 \}
+\end{DoxyCode}

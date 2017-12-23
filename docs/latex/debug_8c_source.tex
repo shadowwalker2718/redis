@@ -1,0 +1,1235 @@
+\hypertarget{debug_8c_source}{}\section{debug.\+c}
+\label{debug_8c_source}\index{src/debug.\+c@{src/debug.\+c}}
+
+\begin{DoxyCode}
+00001 \textcolor{comment}{/*}
+00002 \textcolor{comment}{ * Copyright (c) 2009-2012, Salvatore Sanfilippo <antirez at gmail dot com>}
+00003 \textcolor{comment}{ * All rights reserved.}
+00004 \textcolor{comment}{ *}
+00005 \textcolor{comment}{ * Redistribution and use in source and binary forms, with or without}
+00006 \textcolor{comment}{ * modification, are permitted provided that the following conditions are met:}
+00007 \textcolor{comment}{ *}
+00008 \textcolor{comment}{ *   * Redistributions of source code must retain the above copyright notice,}
+00009 \textcolor{comment}{ *     this list of conditions and the following disclaimer.}
+00010 \textcolor{comment}{ *   * Redistributions in binary form must reproduce the above copyright}
+00011 \textcolor{comment}{ *     notice, this list of conditions and the following disclaimer in the}
+00012 \textcolor{comment}{ *     documentation and/or other materials provided with the distribution.}
+00013 \textcolor{comment}{ *   * Neither the name of Redis nor the names of its contributors may be used}
+00014 \textcolor{comment}{ *     to endorse or promote products derived from this software without}
+00015 \textcolor{comment}{ *     specific prior written permission.}
+00016 \textcolor{comment}{ *}
+00017 \textcolor{comment}{ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"}
+00018 \textcolor{comment}{ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE}
+00019 \textcolor{comment}{ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE}
+00020 \textcolor{comment}{ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE}
+00021 \textcolor{comment}{ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR}
+00022 \textcolor{comment}{ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF}
+00023 \textcolor{comment}{ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS}
+00024 \textcolor{comment}{ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN}
+00025 \textcolor{comment}{ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)}
+00026 \textcolor{comment}{ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE}
+00027 \textcolor{comment}{ * POSSIBILITY OF SUCH DAMAGE.}
+00028 \textcolor{comment}{ */}
+00029 
+00030 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \hyperlink{server_8h}{"server.h"}
+00031 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \hyperlink{sha1_8h}{"sha1.h"}           \textcolor{comment}{/* SHA1 is used for DEBUG DIGEST */}
+00032 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \hyperlink{crc64_8h}{"crc64.h"}
+00033 
+00034 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{arpa}\textcolor{preprocessor}{/}\textcolor{preprocessor}{inet}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00035 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{signal}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00036 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{dlfcn}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00037 
+00038 \textcolor{preprocessor}{#}\textcolor{preprocessor}{ifdef} HAVE\_BACKTRACE
+00039 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{execinfo}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00040 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{ucontext}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00041 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{fcntl}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00042 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{"bio.h"}
+00043 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{unistd}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00044 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif} \textcolor{comment}{/* HAVE\_BACKTRACE */}
+00045 
+00046 \textcolor{preprocessor}{#}\textcolor{preprocessor}{ifdef} \textcolor{preprocessor}{\_\_CYGWIN\_\_}
+00047 \textcolor{preprocessor}{#}\textcolor{preprocessor}{ifndef} \textcolor{preprocessor}{SA\_ONSTACK}
+00048 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{SA\_ONSTACK} 0x08000000
+00049 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00050 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00051 
+00052 \textcolor{comment}{/* ================================= Debugging ============================== */}
+00053 
+00054 \textcolor{comment}{/* Compute the sha1 of string at 's' with 'len' bytes long.}
+00055 \textcolor{comment}{ * The SHA1 is then xored against the string pointed by digest.}
+00056 \textcolor{comment}{ * Since xor is commutative, this operation is used in order to}
+00057 \textcolor{comment}{ * "add" digests relative to unordered elements.}
+00058 \textcolor{comment}{ *}
+00059 \textcolor{comment}{ * So digest(a,b,c,d) will be the same of digest(b,a,c,d) */}
+00060 \textcolor{keywordtype}{void} xorDigest(\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *digest, \textcolor{keywordtype}{void} *ptr, size\_t len) \{
+00061     SHA1\_CTX ctx;
+00062     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} hash[20], *s = ptr;
+00063     \textcolor{keywordtype}{int} j;
+00064 
+00065     SHA1Init(&ctx);
+00066     SHA1Update(&ctx,s,len);
+00067     SHA1Final(hash,&ctx);
+00068 
+00069     \textcolor{keywordflow}{for} (j = 0; j < 20; j++)
+00070         digest[j] ^= hash[j];
+00071 \}
+00072 
+00073 \textcolor{keywordtype}{void} xorObjectDigest(\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *digest, robj *o) \{
+00074     o = getDecodedObject(o);
+00075     xorDigest(digest,o->ptr,sdslen(o->ptr));
+00076     decrRefCount(o);
+00077 \}
+00078 
+00079 \textcolor{comment}{/* This function instead of just computing the SHA1 and xoring it}
+00080 \textcolor{comment}{ * against digest, also perform the digest of "digest" itself and}
+00081 \textcolor{comment}{ * replace the old value with the new one.}
+00082 \textcolor{comment}{ *}
+00083 \textcolor{comment}{ * So the final digest will be:}
+00084 \textcolor{comment}{ *}
+00085 \textcolor{comment}{ * digest = SHA1(digest xor SHA1(data))}
+00086 \textcolor{comment}{ *}
+00087 \textcolor{comment}{ * This function is used every time we want to preserve the order so}
+00088 \textcolor{comment}{ * that digest(a,b,c,d) will be different than digest(b,c,d,a)}
+00089 \textcolor{comment}{ *}
+00090 \textcolor{comment}{ * Also note that mixdigest("foo") followed by mixdigest("bar")}
+00091 \textcolor{comment}{ * will lead to a different digest compared to "fo", "obar".}
+00092 \textcolor{comment}{ */}
+00093 \textcolor{keywordtype}{void} mixDigest(\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *digest, \textcolor{keywordtype}{void} *ptr, size\_t len) \{
+00094     SHA1\_CTX ctx;
+00095     \textcolor{keywordtype}{char} *s = ptr;
+00096 
+00097     xorDigest(digest,s,len);
+00098     SHA1Init(&ctx);
+00099     SHA1Update(&ctx,digest,20);
+00100     SHA1Final(digest,&ctx);
+00101 \}
+00102 
+00103 \textcolor{keywordtype}{void} mixObjectDigest(\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *digest, robj *o) \{
+00104     o = getDecodedObject(o);
+00105     mixDigest(digest,o->ptr,sdslen(o->ptr));
+00106     decrRefCount(o);
+00107 \}
+00108 
+00109 \textcolor{comment}{/* Compute the dataset digest. Since keys, sets elements, hashes elements}
+00110 \textcolor{comment}{ * are not ordered, we use a trick: every aggregate digest is the xor}
+00111 \textcolor{comment}{ * of the digests of their elements. This way the order will not change}
+00112 \textcolor{comment}{ * the result. For list instead we use a feedback entering the output digest}
+00113 \textcolor{comment}{ * as input in order to ensure that a different ordered list will result in}
+00114 \textcolor{comment}{ * a different digest. */}
+00115 \textcolor{keywordtype}{void} computeDatasetDigest(\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *final) \{
+00116     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} digest[20];
+00117     \textcolor{keywordtype}{char} buf[128];
+00118     dictIterator *di = NULL;
+00119     dictEntry *de;
+00120     \textcolor{keywordtype}{int} j;
+00121     uint32\_t aux;
+00122 
+00123     memset(final,0,20); \textcolor{comment}{/* Start with a clean result */}
+00124 
+00125     \textcolor{keywordflow}{for} (j = 0; j < server.dbnum; j++) \{
+00126         redisDb *db = server.db+j;
+00127 
+00128         \textcolor{keywordflow}{if} (\hyperlink{dict_8h_af193430dd3d5579a52b194512f72c1f0}{dictSize}(db->dict) == 0) \textcolor{keywordflow}{continue};
+00129         di = dictGetSafeIterator(db->dict);
+00130 
+00131         \textcolor{comment}{/* hash the DB id, so the same dataset moved in a different}
+00132 \textcolor{comment}{         * DB will lead to a different digest */}
+00133         aux = htonl(j);
+00134         mixDigest(final,&aux,\textcolor{keyword}{sizeof}(aux));
+00135 
+00136         \textcolor{comment}{/* Iterate this DB writing every entry */}
+00137         \textcolor{keywordflow}{while}((de = dictNext(di)) != NULL) \{
+00138             sds key;
+00139             robj *keyobj, *o;
+00140             \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} expiretime;
+00141 
+00142             memset(digest,0,20); \textcolor{comment}{/* This key-val digest */}
+00143             key = \hyperlink{dict_8h_a3271c334309904a3086deca94f96e46e}{dictGetKey}(de);
+00144             keyobj = createStringObject(key,sdslen(key));
+00145 
+00146             mixDigest(digest,key,sdslen(key));
+00147 
+00148             o = \hyperlink{dict_8h_ae8d2cc391873b2bea2b87c4f80f43120}{dictGetVal}(de);
+00149 
+00150             aux = htonl(o->type);
+00151             mixDigest(digest,&aux,\textcolor{keyword}{sizeof}(aux));
+00152             expiretime = getExpire(db,keyobj);
+00153 
+00154             \textcolor{comment}{/* Save the key and associated value */}
+00155             \textcolor{keywordflow}{if} (o->type == \hyperlink{server_8h_a65236ea160f69cdef33ec942092af88f}{OBJ\_STRING}) \{
+00156                 mixObjectDigest(digest,o);
+00157             \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (o->type == \hyperlink{server_8h_a4a5f22a280949c97a0cb0d4213275126}{OBJ\_LIST}) \{
+00158                 listTypeIterator *li = listTypeInitIterator(o,0,\hyperlink{server_8h_a745de98bef5b645df56479181803235b}{LIST\_TAIL});
+00159                 listTypeEntry entry;
+00160                 \textcolor{keywordflow}{while}(listTypeNext(li,&entry)) \{
+00161                     robj *eleobj = listTypeGet(&entry);
+00162                     mixObjectDigest(digest,eleobj);
+00163                     decrRefCount(eleobj);
+00164                 \}
+00165                 listTypeReleaseIterator(li);
+00166             \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (o->type == \hyperlink{server_8h_a8d179375a4aac33d3fa7aa80c8ccc75f}{OBJ\_SET}) \{
+00167                 setTypeIterator *si = setTypeInitIterator(o);
+00168                 sds sdsele;
+00169                 \textcolor{keywordflow}{while}((sdsele = setTypeNextObject(si)) != NULL) \{
+00170                     xorDigest(digest,sdsele,sdslen(sdsele));
+00171                     sdsfree(sdsele);
+00172                 \}
+00173                 setTypeReleaseIterator(si);
+00174             \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (o->type == \hyperlink{server_8h_a8c356422ddbc03bd77694880a30a1953}{OBJ\_ZSET}) \{
+00175                 \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} eledigest[20];
+00176 
+00177                 \textcolor{keywordflow}{if} (o->encoding == \hyperlink{server_8h_aabf064ede983103f1fd0df2086e84eee}{OBJ\_ENCODING\_ZIPLIST}) \{
+00178                     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *zl = o->ptr;
+00179                     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *eptr, *sptr;
+00180                     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *vstr;
+00181                     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{int} vlen;
+00182                     \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} vll;
+00183                     \textcolor{keywordtype}{double} score;
+00184 
+00185                     eptr = ziplistIndex(zl,0);
+00186                     \hyperlink{server_8h_a88114b5169b4c382df6b56506285e56a}{serverAssert}(eptr != NULL);
+00187                     sptr = ziplistNext(zl,eptr);
+00188                     \hyperlink{server_8h_a88114b5169b4c382df6b56506285e56a}{serverAssert}(sptr != NULL);
+00189 
+00190                     \textcolor{keywordflow}{while} (eptr != NULL) \{
+00191                         \hyperlink{server_8h_a88114b5169b4c382df6b56506285e56a}{serverAssert}(ziplistGet(eptr,&vstr,&vlen,&vll));
+00192                         score = zzlGetScore(sptr);
+00193 
+00194                         memset(eledigest,0,20);
+00195                         \textcolor{keywordflow}{if} (vstr != NULL) \{
+00196                             mixDigest(eledigest,vstr,vlen);
+00197                         \} \textcolor{keywordflow}{else} \{
+00198                             ll2string(buf,\textcolor{keyword}{sizeof}(buf),vll);
+00199                             mixDigest(eledigest,buf,strlen(buf));
+00200                         \}
+00201 
+00202                         snprintf(buf,\textcolor{keyword}{sizeof}(buf),\textcolor{stringliteral}{"%.17g"},score);
+00203                         mixDigest(eledigest,buf,strlen(buf));
+00204                         xorDigest(digest,eledigest,20);
+00205                         zzlNext(zl,&eptr,&sptr);
+00206                     \}
+00207                 \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (o->encoding == \hyperlink{server_8h_acfb35db5cb30ed113ed23aeb1a224c4c}{OBJ\_ENCODING\_SKIPLIST}) \{
+00208                     zset *zs = o->ptr;
+00209                     dictIterator *di = dictGetIterator(zs->dict);
+00210                     dictEntry *de;
+00211 
+00212                     \textcolor{keywordflow}{while}((de = dictNext(di)) != NULL) \{
+00213                         sds sdsele = \hyperlink{dict_8h_a3271c334309904a3086deca94f96e46e}{dictGetKey}(de);
+00214                         \textcolor{keywordtype}{double} *score = \hyperlink{dict_8h_ae8d2cc391873b2bea2b87c4f80f43120}{dictGetVal}(de);
+00215 
+00216                         snprintf(buf,\textcolor{keyword}{sizeof}(buf),\textcolor{stringliteral}{"%.17g"},*score);
+00217                         memset(eledigest,0,20);
+00218                         mixDigest(eledigest,sdsele,sdslen(sdsele));
+00219                         mixDigest(eledigest,buf,strlen(buf));
+00220                         xorDigest(digest,eledigest,20);
+00221                     \}
+00222                     dictReleaseIterator(di);
+00223                 \} \textcolor{keywordflow}{else} \{
+00224                     \hyperlink{server_8h_a11cc378e7778a830b41240578de3b204}{serverPanic}(\textcolor{stringliteral}{"Unknown sorted set encoding"});
+00225                 \}
+00226             \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (o->type == \hyperlink{server_8h_a87c05ba4f7f36741864277f02a4423fb}{OBJ\_HASH}) \{
+00227                 hashTypeIterator *hi = hashTypeInitIterator(o);
+00228                 \textcolor{keywordflow}{while} (hashTypeNext(hi) != \hyperlink{server_8h_af98ac28d5f4d23d7ed5985188e6fb7d1}{C\_ERR}) \{
+00229                     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} eledigest[20];
+00230                     sds sdsele;
+00231 
+00232                     memset(eledigest,0,20);
+00233                     sdsele = hashTypeCurrentObjectNewSds(hi,\hyperlink{server_8h_aede46b2a96d6f19aff38ccdac76598ac}{OBJ\_HASH\_KEY});
+00234                     mixDigest(eledigest,sdsele,sdslen(sdsele));
+00235                     sdsfree(sdsele);
+00236                     sdsele = hashTypeCurrentObjectNewSds(hi,\hyperlink{server_8h_a1f87a280688b29cd45aa3aa0dceac7c7}{OBJ\_HASH\_VALUE});
+00237                     mixDigest(eledigest,sdsele,sdslen(sdsele));
+00238                     sdsfree(sdsele);
+00239                     xorDigest(digest,eledigest,20);
+00240                 \}
+00241                 hashTypeReleaseIterator(hi);
+00242             \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (o->type == \hyperlink{server_8h_a2c2cc41300ca6b9daca7ea8a6d66edc6}{OBJ\_STREAM}) \{
+00243                 \hyperlink{structstreamIterator}{streamIterator} si;
+00244                 streamIteratorStart(&si,o->ptr,NULL,NULL,0);
+00245                 streamID id;
+00246                 int64\_t numfields;
+00247 
+00248                 \textcolor{keywordflow}{while}(streamIteratorGetID(&si,&id,&numfields)) \{
+00249                     sds itemid = sdscatfmt(sdsempty(),\textcolor{stringliteral}{"%U.%U"},id.ms,id.seq);
+00250                     mixDigest(digest,itemid,sdslen(itemid));
+00251                     sdsfree(itemid);
+00252 
+00253                     \textcolor{keywordflow}{while}(numfields--) \{
+00254                         \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *field, *value;
+00255                         int64\_t field\_len, value\_len;
+00256                         streamIteratorGetField(&si,&field,&value,
+00257                                                    &field\_len,&value\_len);
+00258                         mixDigest(digest,field,field\_len);
+00259                         mixDigest(digest,value,value\_len);
+00260                     \}
+00261                 \}
+00262                 streamIteratorStop(&si);
+00263             \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (o->type == \hyperlink{server_8h_a92c1fed85f709180fda0ff10d37d649b}{OBJ\_MODULE}) \{
+00264                 RedisModuleDigest md;
+00265                 moduleValue *mv = o->ptr;
+00266                 moduleType *mt = mv->type;
+00267                 \hyperlink{server_8h_ad35ec85f132a5decb20a3c5b73722ef5}{moduleInitDigestContext}(md);
+00268                 \textcolor{keywordflow}{if} (mt->digest) \{
+00269                     mt->digest(&md,mv->value);
+00270                     xorDigest(digest,md.x,\textcolor{keyword}{sizeof}(md.x));
+00271                 \}
+00272             \} \textcolor{keywordflow}{else} \{
+00273                 \hyperlink{server_8h_a11cc378e7778a830b41240578de3b204}{serverPanic}(\textcolor{stringliteral}{"Unknown object type"});
+00274             \}
+00275             \textcolor{comment}{/* If the key has an expire, add it to the mix */}
+00276             \textcolor{keywordflow}{if} (expiretime != -1) xorDigest(digest,\textcolor{stringliteral}{"!!expire!!"},10);
+00277             \textcolor{comment}{/* We can finally xor the key-val digest to the final digest */}
+00278             xorDigest(final,digest,20);
+00279             decrRefCount(keyobj);
+00280         \}
+00281         dictReleaseIterator(di);
+00282     \}
+00283 \}
+00284 
+00285 \textcolor{keywordtype}{void} debugCommand(\hyperlink{structclient}{client} *c) \{
+00286     \textcolor{keywordflow}{if} (c->argc == 2 && !strcasecmp(c->argv[1]->ptr,\textcolor{stringliteral}{"help"})) \{
+00287         \textcolor{keyword}{const} \textcolor{keywordtype}{char} *help[] = \{
+00288 \textcolor{stringliteral}{"assert -- Crash by assertion failed."},
+00289 \textcolor{stringliteral}{"change-repl-id -- Change the replication IDs of the instance. Dangerous, should be used only for
+       testing the replication subsystem."},
+00290 \textcolor{stringliteral}{"crash-and-recovery <milliseconds> -- Hard crash and restart after <milliseconds> delay."},
+00291 \textcolor{stringliteral}{"digest -- Outputs an hex signature representing the current DB content."},
+00292 \textcolor{stringliteral}{"htstats <dbid> -- Return hash table statistics of the specified Redis database."},
+00293 \textcolor{stringliteral}{"loadaof -- Flush the AOF buffers on disk and reload the AOF in memory."},
+00294 \textcolor{stringliteral}{"lua-always-replicate-commands (0|1) -- Setting it to 1 makes Lua replication defaulting to
+       replicating single commands, without the script having to enable effects replication."},
+00295 \textcolor{stringliteral}{"object <key> -- Show low level info about key and associated value."},
+00296 \textcolor{stringliteral}{"panic -- Crash the server simulating a panic."},
+00297 \textcolor{stringliteral}{"populate <count> [prefix] [size] -- Create <count> string keys named key:<num>. If a prefix is
+       specified is used instead of the 'key' prefix."},
+00298 \textcolor{stringliteral}{"reload -- Save the RDB on disk and reload it back in memory."},
+00299 \textcolor{stringliteral}{"restart -- Graceful restart: save config, db, restart."},
+00300 \textcolor{stringliteral}{"sdslen <key> -- Show low level SDS string info representing key and value."},
+00301 \textcolor{stringliteral}{"segfault -- Crash the server with sigsegv."},
+00302 \textcolor{stringliteral}{"set-active-expire (0|1) -- Setting it to 0 disables expiring keys in background when they are not
+       accessed (otherwise the Redis behavior). Setting it to 1 reenables back the default."},
+00303 \textcolor{stringliteral}{"sleep <seconds> -- Stop the server for <seconds>. Decimals allowed."},
+00304 \textcolor{stringliteral}{"structsize -- Return the size of different Redis core C structures."},
+00305 \textcolor{stringliteral}{"ziplist <key> -- Show low level info about the ziplist encoding."},
+00306 \textcolor{stringliteral}{"error <string> -- Return a Redis protocol error with <string> as message. Useful for clients unit
+       tests to simulate Redis errors."},
+00307 NULL
+00308         \};
+00309         addReplyHelp(c, help);
+00310     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcasecmp(c->argv[1]->ptr,\textcolor{stringliteral}{"segfault"})) \{
+00311         *((\textcolor{keywordtype}{char}*)-1) = \textcolor{stringliteral}{'x'};
+00312     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcasecmp(c->argv[1]->ptr,\textcolor{stringliteral}{"panic"})) \{
+00313         \hyperlink{server_8h_a11cc378e7778a830b41240578de3b204}{serverPanic}(\textcolor{stringliteral}{"DEBUG PANIC called at Unix time %ld"}, time(NULL));
+00314     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcasecmp(c->argv[1]->ptr,\textcolor{stringliteral}{"restart"}) ||
+00315                !strcasecmp(c->argv[1]->ptr,\textcolor{stringliteral}{"crash-and-recover"}))
+00316     \{
+00317         \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} delay = 0;
+00318         \textcolor{keywordflow}{if} (c->argc >= 3) \{
+00319             \textcolor{keywordflow}{if} (getLongLongFromObjectOrReply(c, c->argv[2], &delay, NULL)
+00320                 != \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK}) \textcolor{keywordflow}{return};
+00321             \textcolor{keywordflow}{if} (delay < 0) delay = 0;
+00322         \}
+00323         \textcolor{keywordtype}{int} flags = !strcasecmp(c->argv[1]->ptr,\textcolor{stringliteral}{"restart"}) ?
+00324             (\hyperlink{server_8h_af951fdb3aa8efbce7cde83e8a31fff6a}{RESTART\_SERVER\_GRACEFULLY}|
+      \hyperlink{server_8h_a57b24bdd0dc4a156941789096e9e1f44}{RESTART\_SERVER\_CONFIG\_REWRITE}) :
+00325              \hyperlink{server_8h_ace2d8a1393b982e49efd5a23adb305b1}{RESTART\_SERVER\_NONE};
+00326         restartServer(flags,delay);
+00327         addReplyError(c,\textcolor{stringliteral}{"failed to restart the server. Check server logs."});
+00328     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcasecmp(c->argv[1]->ptr,\textcolor{stringliteral}{"oom"})) \{
+00329         \textcolor{keywordtype}{void} *ptr = zmalloc(ULONG\_MAX); \textcolor{comment}{/* Should trigger an out of memory. */}
+00330         zfree(ptr);
+00331         addReply(c,shared.ok);
+00332     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcasecmp(c->argv[1]->ptr,\textcolor{stringliteral}{"assert"})) \{
+00333         \textcolor{keywordflow}{if} (c->argc >= 3) c->argv[2] = tryObjectEncoding(c->argv[2]);
+00334         \hyperlink{server_8h_a7308f76cbff9a8d3797fe78190b91282}{serverAssertWithInfo}(c,c->argv[0],1 == 2);
+00335     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcasecmp(c->argv[1]->ptr,\textcolor{stringliteral}{"reload"})) \{
+00336         rdbSaveInfo rsi, *rsiptr;
+00337         rsiptr = rdbPopulateSaveInfo(&rsi);
+00338         \textcolor{keywordflow}{if} (rdbSave(server.rdb\_filename,rsiptr) != \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK}) \{
+00339             addReply(c,shared.err);
+00340             \textcolor{keywordflow}{return};
+00341         \}
+00342         emptyDb(-1,\hyperlink{server_8h_a83a0ecde3a9f1f6bbcae9f4b966a509b}{EMPTYDB\_NO\_FLAGS},NULL);
+00343         \textcolor{keywordflow}{if} (rdbLoad(server.rdb\_filename,NULL) != \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK}) \{
+00344             addReplyError(c,\textcolor{stringliteral}{"Error trying to load the RDB dump"});
+00345             \textcolor{keywordflow}{return};
+00346         \}
+00347         serverLog(\hyperlink{server_8h_a31229b9334bba7d6be2a72970967a14b}{LL\_WARNING},\textcolor{stringliteral}{"DB reloaded by DEBUG RELOAD"});
+00348         addReply(c,shared.ok);
+00349     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcasecmp(c->argv[1]->ptr,\textcolor{stringliteral}{"loadaof"})) \{
+00350         \textcolor{keywordflow}{if} (server.aof\_state == \hyperlink{server_8h_af6b151c9dced28e94c19479197113a83}{AOF\_ON}) flushAppendOnlyFile(1);
+00351         emptyDb(-1,\hyperlink{server_8h_a83a0ecde3a9f1f6bbcae9f4b966a509b}{EMPTYDB\_NO\_FLAGS},NULL);
+00352         \textcolor{keywordflow}{if} (loadAppendOnlyFile(server.aof\_filename) != \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK}) \{
+00353             addReply(c,shared.err);
+00354             \textcolor{keywordflow}{return};
+00355         \}
+00356         server.dirty = 0; \textcolor{comment}{/* Prevent AOF / replication */}
+00357         serverLog(\hyperlink{server_8h_a31229b9334bba7d6be2a72970967a14b}{LL\_WARNING},\textcolor{stringliteral}{"Append Only File loaded by DEBUG LOADAOF"});
+00358         addReply(c,shared.ok);
+00359     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcasecmp(c->argv[1]->ptr,\textcolor{stringliteral}{"object"}) && c->argc == 3) \{
+00360         dictEntry *de;
+00361         robj *val;
+00362         \textcolor{keywordtype}{char} *strenc;
+00363 
+00364         \textcolor{keywordflow}{if} ((de = dictFind(c->db->dict,c->argv[2]->ptr)) == NULL) \{
+00365             addReply(c,shared.nokeyerr);
+00366             \textcolor{keywordflow}{return};
+00367         \}
+00368         val = \hyperlink{dict_8h_ae8d2cc391873b2bea2b87c4f80f43120}{dictGetVal}(de);
+00369         strenc = strEncoding(val->encoding);
+00370 
+00371         \textcolor{keywordtype}{char} extra[138] = \{0\};
+00372         \textcolor{keywordflow}{if} (val->encoding == \hyperlink{server_8h_aec792aeed6d4bf83966672e6a23043b8}{OBJ\_ENCODING\_QUICKLIST}) \{
+00373             \textcolor{keywordtype}{char} *nextra = extra;
+00374             \textcolor{keywordtype}{int} remaining = \textcolor{keyword}{sizeof}(extra);
+00375             quicklist *ql = val->ptr;
+00376             \textcolor{comment}{/* Add number of quicklist nodes */}
+00377             \textcolor{keywordtype}{int} used = snprintf(nextra, remaining, \textcolor{stringliteral}{" ql\_nodes:%lu"}, ql->len);
+00378             nextra += used;
+00379             remaining -= used;
+00380             \textcolor{comment}{/* Add average quicklist fill factor */}
+00381             \textcolor{keywordtype}{double} avg = (\textcolor{keywordtype}{double})ql->count/ql->len;
+00382             used = snprintf(nextra, remaining, \textcolor{stringliteral}{" ql\_avg\_node:%.2f"}, avg);
+00383             nextra += used;
+00384             remaining -= used;
+00385             \textcolor{comment}{/* Add quicklist fill level / max ziplist size */}
+00386             used = snprintf(nextra, remaining, \textcolor{stringliteral}{" ql\_ziplist\_max:%d"}, ql->fill);
+00387             nextra += used;
+00388             remaining -= used;
+00389             \textcolor{comment}{/* Add isCompressed? */}
+00390             \textcolor{keywordtype}{int} compressed = ql->compress != 0;
+00391             used = snprintf(nextra, remaining, \textcolor{stringliteral}{" ql\_compressed:%d"}, compressed);
+00392             nextra += used;
+00393             remaining -= used;
+00394             \textcolor{comment}{/* Add total uncompressed size */}
+00395             \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} sz = 0;
+00396             \textcolor{keywordflow}{for} (quicklistNode *node = ql->head; node; node = node->next) \{
+00397                 sz += node->sz;
+00398             \}
+00399             used = snprintf(nextra, remaining, \textcolor{stringliteral}{" ql\_uncompressed\_size:%lu"}, sz);
+00400             nextra += used;
+00401             remaining -= used;
+00402         \}
+00403 
+00404         addReplyStatusFormat(c,
+00405             \textcolor{stringliteral}{"Value at:%p refcount:%d "}
+00406             \textcolor{stringliteral}{"encoding:%s serializedlength:%zu "}
+00407             \textcolor{stringliteral}{"lru:%d lru\_seconds\_idle:%llu%s"},
+00408             (\textcolor{keywordtype}{void}*)val, val->refcount,
+00409             strenc, rdbSavedObjectLen(val),
+00410             val->lru, estimateObjectIdleTime(val)/1000, extra);
+00411     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcasecmp(c->argv[1]->ptr,\textcolor{stringliteral}{"sdslen"}) && c->argc == 3) \{
+00412         dictEntry *de;
+00413         robj *val;
+00414         sds key;
+00415 
+00416         \textcolor{keywordflow}{if} ((de = dictFind(c->db->dict,c->argv[2]->ptr)) == NULL) \{
+00417             addReply(c,shared.nokeyerr);
+00418             \textcolor{keywordflow}{return};
+00419         \}
+00420         val = \hyperlink{dict_8h_ae8d2cc391873b2bea2b87c4f80f43120}{dictGetVal}(de);
+00421         key = \hyperlink{dict_8h_a3271c334309904a3086deca94f96e46e}{dictGetKey}(de);
+00422 
+00423         \textcolor{keywordflow}{if} (val->type != \hyperlink{server_8h_a65236ea160f69cdef33ec942092af88f}{OBJ\_STRING} || !\hyperlink{server_8h_afcfb5bd97af52d1dbce331745cae030c}{sdsEncodedObject}(val)) \{
+00424             addReplyError(c,\textcolor{stringliteral}{"Not an sds encoded string."});
+00425         \} \textcolor{keywordflow}{else} \{
+00426             addReplyStatusFormat(c,
+00427                 \textcolor{stringliteral}{"key\_sds\_len:%lld, key\_sds\_avail:%lld, key\_zmalloc: %lld, "}
+00428                 \textcolor{stringliteral}{"val\_sds\_len:%lld, val\_sds\_avail:%lld, val\_zmalloc: %lld"},
+00429                 (\textcolor{keywordtype}{long} \textcolor{keywordtype}{long}) sdslen(key),
+00430                 (\textcolor{keywordtype}{long} \textcolor{keywordtype}{long}) sdsavail(key),
+00431                 (\textcolor{keywordtype}{long} \textcolor{keywordtype}{long}) sdsZmallocSize(key),
+00432                 (\textcolor{keywordtype}{long} \textcolor{keywordtype}{long}) sdslen(val->ptr),
+00433                 (\textcolor{keywordtype}{long} \textcolor{keywordtype}{long}) sdsavail(val->ptr),
+00434                 (\textcolor{keywordtype}{long} \textcolor{keywordtype}{long}) getStringObjectSdsUsedMemory(val));
+00435         \}
+00436     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcasecmp(c->argv[1]->ptr,\textcolor{stringliteral}{"ziplist"}) && c->argc == 3) \{
+00437         robj *o;
+00438 
+00439         \textcolor{keywordflow}{if} ((o = objectCommandLookupOrReply(c,c->argv[2],shared.nokeyerr))
+00440                 == NULL) \textcolor{keywordflow}{return};
+00441 
+00442         \textcolor{keywordflow}{if} (o->encoding != \hyperlink{server_8h_aabf064ede983103f1fd0df2086e84eee}{OBJ\_ENCODING\_ZIPLIST}) \{
+00443             addReplyError(c,\textcolor{stringliteral}{"Not an sds encoded string."});
+00444         \} \textcolor{keywordflow}{else} \{
+00445             ziplistRepr(o->ptr);
+00446             addReplyStatus(c,\textcolor{stringliteral}{"Ziplist structure printed on stdout"});
+00447         \}
+00448     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcasecmp(c->argv[1]->ptr,\textcolor{stringliteral}{"populate"}) &&
+00449                c->argc >= 3 && c->argc <= 5) \{
+00450         \textcolor{keywordtype}{long} keys, j;
+00451         robj *key, *val;
+00452         \textcolor{keywordtype}{char} buf[128];
+00453 
+00454         \textcolor{keywordflow}{if} (getLongFromObjectOrReply(c, c->argv[2], &keys, NULL) != \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK})
+00455             \textcolor{keywordflow}{return};
+00456         dictExpand(c->db->dict,keys);
+00457         \textcolor{keywordflow}{for} (j = 0; j < keys; j++) \{
+00458             \textcolor{keywordtype}{long} valsize = 0;
+00459             snprintf(buf,\textcolor{keyword}{sizeof}(buf),\textcolor{stringliteral}{"%s:%lu"},
+00460                 (c->argc == 3) ? \textcolor{stringliteral}{"key"} : (\textcolor{keywordtype}{char}*)c->argv[3]->ptr, j);
+00461             key = createStringObject(buf,strlen(buf));
+00462             \textcolor{keywordflow}{if} (c->argc == 5)
+00463                 \textcolor{keywordflow}{if} (getLongFromObjectOrReply(c, c->argv[4], &valsize, NULL) != 
+      \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK})
+00464                     \textcolor{keywordflow}{return};
+00465             \textcolor{keywordflow}{if} (lookupKeyWrite(c->db,key) != NULL) \{
+00466                 decrRefCount(key);
+00467                 \textcolor{keywordflow}{continue};
+00468             \}
+00469             snprintf(buf,\textcolor{keyword}{sizeof}(buf),\textcolor{stringliteral}{"value:%lu"},j);
+00470             \textcolor{keywordflow}{if} (valsize==0)
+00471                 val = createStringObject(buf,strlen(buf));
+00472             \textcolor{keywordflow}{else} \{
+00473                 \textcolor{keywordtype}{int} buflen = strlen(buf);
+00474                 val = createStringObject(NULL,valsize);
+00475                 memcpy(val->ptr, buf, valsize<=buflen? valsize: buflen);
+00476             \}
+00477             dbAdd(c->db,key,val);
+00478             signalModifiedKey(c->db,key);
+00479             decrRefCount(key);
+00480         \}
+00481         addReply(c,shared.ok);
+00482     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcasecmp(c->argv[1]->ptr,\textcolor{stringliteral}{"digest"}) && c->argc == 2) \{
+00483         \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} digest[20];
+00484         sds d = sdsempty();
+00485         \textcolor{keywordtype}{int} j;
+00486 
+00487         computeDatasetDigest(digest);
+00488         \textcolor{keywordflow}{for} (j = 0; j < 20; j++)
+00489             d = sdscatprintf(d, \textcolor{stringliteral}{"%02x"},digest[j]);
+00490         addReplyStatus(c,d);
+00491         sdsfree(d);
+00492     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcasecmp(c->argv[1]->ptr,\textcolor{stringliteral}{"sleep"}) && c->argc == 3) \{
+00493         \textcolor{keywordtype}{double} dtime = strtod(c->argv[2]->ptr,NULL);
+00494         \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} utime = dtime*1000000;
+00495         \textcolor{keyword}{struct} timespec tv;
+00496 
+00497         tv.tv\_sec = utime / 1000000;
+00498         tv.tv\_nsec = (utime % 1000000) * 1000;
+00499         nanosleep(&tv, NULL);
+00500         addReply(c,shared.ok);
+00501     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcasecmp(c->argv[1]->ptr,\textcolor{stringliteral}{"set-active-expire"}) &&
+00502                c->argc == 3)
+00503     \{
+00504         server.active\_expire\_enabled = atoi(c->argv[2]->ptr);
+00505         addReply(c,shared.ok);
+00506     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcasecmp(c->argv[1]->ptr,\textcolor{stringliteral}{"lua-always-replicate-commands"}) &&
+00507                c->argc == 3)
+00508     \{
+00509         server.lua\_always\_replicate\_commands = atoi(c->argv[2]->ptr);
+00510         addReply(c,shared.ok);
+00511     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcasecmp(c->argv[1]->ptr,\textcolor{stringliteral}{"error"}) && c->argc == 3) \{
+00512         sds errstr = sdsnewlen(\textcolor{stringliteral}{"-"},1);
+00513 
+00514         errstr = sdscatsds(errstr,c->argv[2]->ptr);
+00515         errstr = sdsmapchars(errstr,\textcolor{stringliteral}{"\(\backslash\)n\(\backslash\)r"},\textcolor{stringliteral}{"  "},2); \textcolor{comment}{/* no newlines in errors. */}
+00516         errstr = sdscatlen(errstr,\textcolor{stringliteral}{"\(\backslash\)r\(\backslash\)n"},2);
+00517         addReplySds(c,errstr);
+00518     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcasecmp(c->argv[1]->ptr,\textcolor{stringliteral}{"structsize"}) && c->argc == 2) \{
+00519         sds sizes = sdsempty();
+00520         sizes = sdscatprintf(sizes,\textcolor{stringliteral}{"bits:%d "},(\textcolor{keyword}{sizeof}(\textcolor{keywordtype}{void}*) == 8)?64:32);
+00521         sizes = sdscatprintf(sizes,\textcolor{stringliteral}{"robj:%d "},(\textcolor{keywordtype}{int})\textcolor{keyword}{sizeof}(robj));
+00522         sizes = sdscatprintf(sizes,\textcolor{stringliteral}{"dictentry:%d "},(\textcolor{keywordtype}{int})\textcolor{keyword}{sizeof}(dictEntry));
+00523         sizes = sdscatprintf(sizes,\textcolor{stringliteral}{"sdshdr5:%d "},(\textcolor{keywordtype}{int})\textcolor{keyword}{sizeof}(\textcolor{keyword}{struct} sdshdr5));
+00524         sizes = sdscatprintf(sizes,\textcolor{stringliteral}{"sdshdr8:%d "},(\textcolor{keywordtype}{int})\textcolor{keyword}{sizeof}(\textcolor{keyword}{struct} sdshdr8));
+00525         sizes = sdscatprintf(sizes,\textcolor{stringliteral}{"sdshdr16:%d "},(\textcolor{keywordtype}{int})\textcolor{keyword}{sizeof}(\textcolor{keyword}{struct} sdshdr16));
+00526         sizes = sdscatprintf(sizes,\textcolor{stringliteral}{"sdshdr32:%d "},(\textcolor{keywordtype}{int})\textcolor{keyword}{sizeof}(\textcolor{keyword}{struct} sdshdr32));
+00527         sizes = sdscatprintf(sizes,\textcolor{stringliteral}{"sdshdr64:%d "},(\textcolor{keywordtype}{int})\textcolor{keyword}{sizeof}(\textcolor{keyword}{struct} sdshdr64));
+00528         addReplyBulkSds(c,sizes);
+00529     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcasecmp(c->argv[1]->ptr,\textcolor{stringliteral}{"htstats"}) && c->argc == 3) \{
+00530         \textcolor{keywordtype}{long} dbid;
+00531         sds stats = sdsempty();
+00532         \textcolor{keywordtype}{char} buf[4096];
+00533 
+00534         \textcolor{keywordflow}{if} (getLongFromObjectOrReply(c, c->argv[2], &dbid, NULL) != \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK})
+00535             \textcolor{keywordflow}{return};
+00536         \textcolor{keywordflow}{if} (dbid < 0 || dbid >= server.dbnum) \{
+00537             addReplyError(c,\textcolor{stringliteral}{"Out of range database"});
+00538             \textcolor{keywordflow}{return};
+00539         \}
+00540 
+00541         stats = sdscatprintf(stats,\textcolor{stringliteral}{"[Dictionary HT]\(\backslash\)n"});
+00542         dictGetStats(buf,\textcolor{keyword}{sizeof}(buf),server.db[dbid].dict);
+00543         stats = sdscat(stats,buf);
+00544 
+00545         stats = sdscatprintf(stats,\textcolor{stringliteral}{"[Expires HT]\(\backslash\)n"});
+00546         dictGetStats(buf,\textcolor{keyword}{sizeof}(buf),server.db[dbid].expires);
+00547         stats = sdscat(stats,buf);
+00548 
+00549         addReplyBulkSds(c,stats);
+00550     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcasecmp(c->argv[1]->ptr,\textcolor{stringliteral}{"change-repl-id"}) && c->argc == 2) \{
+00551         serverLog(\hyperlink{server_8h_a31229b9334bba7d6be2a72970967a14b}{LL\_WARNING},\textcolor{stringliteral}{"Changing replication IDs after receiving DEBUG change-repl-id"}
+      );
+00552         changeReplicationId();
+00553         clearReplicationId2();
+00554         addReply(c,shared.ok);
+00555     \} \textcolor{keywordflow}{else} \{
+00556         addReplyErrorFormat(c, \textcolor{stringliteral}{"Unknown subcommand or wrong number of arguments for '%s'. Try DEBUG
+       HELP"},
+00557             (\textcolor{keywordtype}{char}*)c->argv[1]->ptr);
+00558         \textcolor{keywordflow}{return};
+00559     \}
+00560 \}
+00561 
+00562 \textcolor{comment}{/* =========================== Crash handling  ============================== */}
+00563 
+00564 \textcolor{keywordtype}{void} \_serverAssert(\textcolor{keyword}{const} \textcolor{keywordtype}{char} *estr, \textcolor{keyword}{const} \textcolor{keywordtype}{char} *file, \textcolor{keywordtype}{int} line) \{
+00565     bugReportStart();
+00566     serverLog(\hyperlink{server_8h_a31229b9334bba7d6be2a72970967a14b}{LL\_WARNING},\textcolor{stringliteral}{"=== ASSERTION FAILED ==="});
+00567     serverLog(\hyperlink{server_8h_a31229b9334bba7d6be2a72970967a14b}{LL\_WARNING},\textcolor{stringliteral}{"==> %s:%d '%s' is not true"},file,line,estr);
+00568 \textcolor{preprocessor}{#}\textcolor{preprocessor}{ifdef} HAVE\_BACKTRACE
+00569     server.assert\_failed = estr;
+00570     server.assert\_file = file;
+00571     server.assert\_line = line;
+00572     serverLog(\hyperlink{server_8h_a31229b9334bba7d6be2a72970967a14b}{LL\_WARNING},\textcolor{stringliteral}{"(forcing SIGSEGV to print the bug report.)"});
+00573 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00574     *((\textcolor{keywordtype}{char}*)-1) = \textcolor{stringliteral}{'x'};
+00575 \}
+00576 
+00577 \textcolor{keywordtype}{void} \_serverAssertPrintClientInfo(\textcolor{keyword}{const} \hyperlink{structclient}{client} *c) \{
+00578     \textcolor{keywordtype}{int} j;
+00579 
+00580     bugReportStart();
+00581     serverLog(\hyperlink{server_8h_a31229b9334bba7d6be2a72970967a14b}{LL\_WARNING},\textcolor{stringliteral}{"=== ASSERTION FAILED CLIENT CONTEXT ==="});
+00582     serverLog(\hyperlink{server_8h_a31229b9334bba7d6be2a72970967a14b}{LL\_WARNING},\textcolor{stringliteral}{"client->flags = %d"}, c->flags);
+00583     serverLog(\hyperlink{server_8h_a31229b9334bba7d6be2a72970967a14b}{LL\_WARNING},\textcolor{stringliteral}{"client->fd = %d"}, c->fd);
+00584     serverLog(\hyperlink{server_8h_a31229b9334bba7d6be2a72970967a14b}{LL\_WARNING},\textcolor{stringliteral}{"client->argc = %d"}, c->argc);
+00585     \textcolor{keywordflow}{for} (j=0; j < c->argc; j++) \{
+00586         \textcolor{keywordtype}{char} buf[128];
+00587         \textcolor{keywordtype}{char} *arg;
+00588 
+00589         \textcolor{keywordflow}{if} (c->argv[j]->type == \hyperlink{server_8h_a65236ea160f69cdef33ec942092af88f}{OBJ\_STRING} && \hyperlink{server_8h_afcfb5bd97af52d1dbce331745cae030c}{sdsEncodedObject}(c->argv[j])) 
+      \{
+00590             arg = (\textcolor{keywordtype}{char}*) c->argv[j]->ptr;
+00591         \} \textcolor{keywordflow}{else} \{
+00592             snprintf(buf,\textcolor{keyword}{sizeof}(buf),\textcolor{stringliteral}{"Object type: %u, encoding: %u"},
+00593                 c->argv[j]->type, c->argv[j]->encoding);
+00594             arg = buf;
+00595         \}
+00596         serverLog(\hyperlink{server_8h_a31229b9334bba7d6be2a72970967a14b}{LL\_WARNING},\textcolor{stringliteral}{"client->argv[%d] = \(\backslash\)"%s\(\backslash\)" (refcount: %d)"},
+00597             j, arg, c->argv[j]->refcount);
+00598     \}
+00599 \}
+00600 
+00601 \textcolor{keywordtype}{void} serverLogObjectDebugInfo(\textcolor{keyword}{const} robj *o) \{
+00602     serverLog(\hyperlink{server_8h_a31229b9334bba7d6be2a72970967a14b}{LL\_WARNING},\textcolor{stringliteral}{"Object type: %d"}, o->type);
+00603     serverLog(\hyperlink{server_8h_a31229b9334bba7d6be2a72970967a14b}{LL\_WARNING},\textcolor{stringliteral}{"Object encoding: %d"}, o->encoding);
+00604     serverLog(\hyperlink{server_8h_a31229b9334bba7d6be2a72970967a14b}{LL\_WARNING},\textcolor{stringliteral}{"Object refcount: %d"}, o->refcount);
+00605     \textcolor{keywordflow}{if} (o->type == \hyperlink{server_8h_a65236ea160f69cdef33ec942092af88f}{OBJ\_STRING} && \hyperlink{server_8h_afcfb5bd97af52d1dbce331745cae030c}{sdsEncodedObject}(o)) \{
+00606         serverLog(\hyperlink{server_8h_a31229b9334bba7d6be2a72970967a14b}{LL\_WARNING},\textcolor{stringliteral}{"Object raw string len: %zu"}, sdslen(o->ptr));
+00607         \textcolor{keywordflow}{if} (sdslen(o->ptr) < 4096) \{
+00608             sds repr = sdscatrepr(sdsempty(),o->ptr,sdslen(o->ptr));
+00609             serverLog(\hyperlink{server_8h_a31229b9334bba7d6be2a72970967a14b}{LL\_WARNING},\textcolor{stringliteral}{"Object raw string content: %s"}, repr);
+00610             sdsfree(repr);
+00611         \}
+00612     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (o->type == \hyperlink{server_8h_a4a5f22a280949c97a0cb0d4213275126}{OBJ\_LIST}) \{
+00613         serverLog(\hyperlink{server_8h_a31229b9334bba7d6be2a72970967a14b}{LL\_WARNING},\textcolor{stringliteral}{"List length: %d"}, (\textcolor{keywordtype}{int}) listTypeLength(o));
+00614     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (o->type == \hyperlink{server_8h_a8d179375a4aac33d3fa7aa80c8ccc75f}{OBJ\_SET}) \{
+00615         serverLog(\hyperlink{server_8h_a31229b9334bba7d6be2a72970967a14b}{LL\_WARNING},\textcolor{stringliteral}{"Set size: %d"}, (\textcolor{keywordtype}{int}) setTypeSize(o));
+00616     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (o->type == \hyperlink{server_8h_a87c05ba4f7f36741864277f02a4423fb}{OBJ\_HASH}) \{
+00617         serverLog(\hyperlink{server_8h_a31229b9334bba7d6be2a72970967a14b}{LL\_WARNING},\textcolor{stringliteral}{"Hash size: %d"}, (\textcolor{keywordtype}{int}) hashTypeLength(o));
+00618     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (o->type == \hyperlink{server_8h_a8c356422ddbc03bd77694880a30a1953}{OBJ\_ZSET}) \{
+00619         serverLog(\hyperlink{server_8h_a31229b9334bba7d6be2a72970967a14b}{LL\_WARNING},\textcolor{stringliteral}{"Sorted set size: %d"}, (\textcolor{keywordtype}{int}) zsetLength(o));
+00620         \textcolor{keywordflow}{if} (o->encoding == \hyperlink{server_8h_acfb35db5cb30ed113ed23aeb1a224c4c}{OBJ\_ENCODING\_SKIPLIST})
+00621             serverLog(\hyperlink{server_8h_a31229b9334bba7d6be2a72970967a14b}{LL\_WARNING},\textcolor{stringliteral}{"Skiplist level: %d"}, (\textcolor{keywordtype}{int}) ((\textcolor{keyword}{const} zset*)o->ptr)->zsl->
+      level);
+00622     \}
+00623 \}
+00624 
+00625 \textcolor{keywordtype}{void} \_serverAssertPrintObject(\textcolor{keyword}{const} robj *o) \{
+00626     bugReportStart();
+00627     serverLog(\hyperlink{server_8h_a31229b9334bba7d6be2a72970967a14b}{LL\_WARNING},\textcolor{stringliteral}{"=== ASSERTION FAILED OBJECT CONTEXT ==="});
+00628     serverLogObjectDebugInfo(o);
+00629 \}
+00630 
+00631 \textcolor{keywordtype}{void} \_serverAssertWithInfo(\textcolor{keyword}{const} \hyperlink{structclient}{client} *c, \textcolor{keyword}{const} robj *o, \textcolor{keyword}{const} \textcolor{keywordtype}{char} *estr, \textcolor{keyword}{const} \textcolor{keywordtype}{char} *file, \textcolor{keywordtype}{
+      int} line) \{
+00632     \textcolor{keywordflow}{if} (c) \_serverAssertPrintClientInfo(c);
+00633     \textcolor{keywordflow}{if} (o) \_serverAssertPrintObject(o);
+00634     \_serverAssert(estr,file,line);
+00635 \}
+00636 
+00637 \textcolor{keywordtype}{void} \_serverPanic(\textcolor{keyword}{const} \textcolor{keywordtype}{char} *file, \textcolor{keywordtype}{int} line, \textcolor{keyword}{const} \textcolor{keywordtype}{char} *msg, ...) \{
+00638     va\_list ap;
+00639     va\_start(ap,msg);
+00640     \textcolor{keywordtype}{char} fmtmsg[256];
+00641     vsnprintf(fmtmsg,\textcolor{keyword}{sizeof}(fmtmsg),msg,ap);
+00642     va\_end(ap);
+00643 
+00644     bugReportStart();
+00645     serverLog(\hyperlink{server_8h_a31229b9334bba7d6be2a72970967a14b}{LL\_WARNING},\textcolor{stringliteral}{"------------------------------------------------"});
+00646     serverLog(\hyperlink{server_8h_a31229b9334bba7d6be2a72970967a14b}{LL\_WARNING},\textcolor{stringliteral}{"!!! Software Failure. Press left mouse button to continue"});
+00647     serverLog(\hyperlink{server_8h_a31229b9334bba7d6be2a72970967a14b}{LL\_WARNING},\textcolor{stringliteral}{"Guru Meditation: %s #%s:%d"},fmtmsg,file,line);
+00648 \textcolor{preprocessor}{#}\textcolor{preprocessor}{ifdef} HAVE\_BACKTRACE
+00649     serverLog(\hyperlink{server_8h_a31229b9334bba7d6be2a72970967a14b}{LL\_WARNING},\textcolor{stringliteral}{"(forcing SIGSEGV in order to print the stack trace)"});
+00650 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00651     serverLog(\hyperlink{server_8h_a31229b9334bba7d6be2a72970967a14b}{LL\_WARNING},\textcolor{stringliteral}{"------------------------------------------------"});
+00652     *((\textcolor{keywordtype}{char}*)-1) = \textcolor{stringliteral}{'x'};
+00653 \}
+00654 
+00655 \textcolor{keywordtype}{void} bugReportStart(\textcolor{keywordtype}{void}) \{
+00656     \textcolor{keywordflow}{if} (server.bug\_report\_start == 0) \{
+00657         serverLogRaw(\hyperlink{server_8h_a31229b9334bba7d6be2a72970967a14b}{LL\_WARNING}|\hyperlink{server_8h_a6b3768a4d2dfb3ac580b8d999baa9350}{LL\_RAW},
+00658         \textcolor{stringliteral}{"\(\backslash\)n\(\backslash\)n=== REDIS BUG REPORT START: Cut & paste starting from here ===\(\backslash\)n"});
+00659         server.bug\_report\_start = 1;
+00660     \}
+00661 \}
+00662 
+00663 \textcolor{preprocessor}{#}\textcolor{preprocessor}{ifdef} HAVE\_BACKTRACE
+00664 \textcolor{keyword}{static} \textcolor{keywordtype}{void} *getMcontextEip(ucontext\_t *uc) \{
+00665 \textcolor{preprocessor}{#}\textcolor{preprocessor}{if} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_\_APPLE\_\_}\textcolor{preprocessor}{)} \textcolor{preprocessor}{&&} \textcolor{preprocessor}{!}\textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{MAC\_OS\_X\_VERSION\_10\_6}\textcolor{preprocessor}{)}
+00666     \textcolor{comment}{/* OSX < 10.6 */}
+00667     \textcolor{preprocessor}{#}\textcolor{preprocessor}{if} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_\_x86\_64\_\_}\textcolor{preprocessor}{)}
+00668     \textcolor{keywordflow}{return} (\textcolor{keywordtype}{void}*) uc->uc\_mcontext->\_\_ss.\_\_rip;
+00669     \textcolor{preprocessor}{#}\textcolor{preprocessor}{elif} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_\_i386\_\_}\textcolor{preprocessor}{)}
+00670     \textcolor{keywordflow}{return} (\textcolor{keywordtype}{void}*) uc->uc\_mcontext->\_\_ss.\_\_eip;
+00671     \textcolor{preprocessor}{#}\textcolor{preprocessor}{else}
+00672     \textcolor{keywordflow}{return} (\textcolor{keywordtype}{void}*) uc->uc\_mcontext->\_\_ss.\_\_srr0;
+00673     \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00674 \textcolor{preprocessor}{#}\textcolor{preprocessor}{elif} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_\_APPLE\_\_}\textcolor{preprocessor}{)} \textcolor{preprocessor}{&&} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{MAC\_OS\_X\_VERSION\_10\_6}\textcolor{preprocessor}{)}
+00675     \textcolor{comment}{/* OSX >= 10.6 */}
+00676     \textcolor{preprocessor}{#}\textcolor{preprocessor}{if} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_STRUCT\_X86\_THREAD\_STATE64}\textcolor{preprocessor}{)} \textcolor{preprocessor}{&&} \textcolor{preprocessor}{!}\textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_\_i386\_\_}\textcolor{preprocessor}{)}
+00677     \textcolor{keywordflow}{return} (\textcolor{keywordtype}{void}*) uc->uc\_mcontext->\_\_ss.\_\_rip;
+00678     \textcolor{preprocessor}{#}\textcolor{preprocessor}{else}
+00679     \textcolor{keywordflow}{return} (\textcolor{keywordtype}{void}*) uc->uc\_mcontext->\_\_ss.\_\_eip;
+00680     \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00681 \textcolor{preprocessor}{#}\textcolor{preprocessor}{elif} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\_\_linux\_\_\textcolor{preprocessor}{)}
+00682     \textcolor{comment}{/* Linux */}
+00683     \textcolor{preprocessor}{#}\textcolor{preprocessor}{if} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_\_i386\_\_}\textcolor{preprocessor}{)}
+00684     \textcolor{keywordflow}{return} (\textcolor{keywordtype}{void}*) uc->uc\_mcontext.gregs[14]; \textcolor{comment}{/* Linux 32 */}
+00685     \textcolor{preprocessor}{#}\textcolor{preprocessor}{elif} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_\_X86\_64\_\_}\textcolor{preprocessor}{)} \textcolor{preprocessor}{||} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\_\_x86\_64\_\_\textcolor{preprocessor}{)}
+00686     \textcolor{keywordflow}{return} (\textcolor{keywordtype}{void}*) uc->uc\_mcontext.gregs[16]; \textcolor{comment}{/* Linux 64 */}
+00687     \textcolor{preprocessor}{#}\textcolor{preprocessor}{elif} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_\_ia64\_\_}\textcolor{preprocessor}{)} \textcolor{comment}{/* Linux IA64 */}
+00688     \textcolor{keywordflow}{return} (\textcolor{keywordtype}{void}*) uc->uc\_mcontext.sc\_ip;
+00689     \textcolor{preprocessor}{#}\textcolor{preprocessor}{elif} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_\_arm\_\_}\textcolor{preprocessor}{)} \textcolor{comment}{/* Linux ARM */}
+00690     \textcolor{keywordflow}{return} (\textcolor{keywordtype}{void}*) uc->uc\_mcontext.arm\_pc;
+00691     \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00692 \textcolor{preprocessor}{#}\textcolor{preprocessor}{else}
+00693     \textcolor{keywordflow}{return} NULL;
+00694 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00695 \}
+00696 
+00697 \textcolor{keywordtype}{void} logStackContent(\textcolor{keywordtype}{void} **sp) \{
+00698     \textcolor{keywordtype}{int} i;
+00699     \textcolor{keywordflow}{for} (i = 15; i >= 0; i--) \{
+00700         \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} addr = (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) sp+i;
+00701         \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} val = (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) sp[i];
+00702 
+00703         \textcolor{keywordflow}{if} (\textcolor{keyword}{sizeof}(\textcolor{keywordtype}{long}) == 4)
+00704             serverLog(\hyperlink{server_8h_a31229b9334bba7d6be2a72970967a14b}{LL\_WARNING}, \textcolor{stringliteral}{"(%08lx) -> %08lx"}, addr, val);
+00705         \textcolor{keywordflow}{else}
+00706             serverLog(\hyperlink{server_8h_a31229b9334bba7d6be2a72970967a14b}{LL\_WARNING}, \textcolor{stringliteral}{"(%016lx) -> %016lx"}, addr, val);
+00707     \}
+00708 \}
+00709 
+00710 \textcolor{keywordtype}{void} logRegisters(ucontext\_t *uc) \{
+00711     serverLog(\hyperlink{server_8h_a31229b9334bba7d6be2a72970967a14b}{LL\_WARNING}|\hyperlink{server_8h_a6b3768a4d2dfb3ac580b8d999baa9350}{LL\_RAW}, \textcolor{stringliteral}{"\(\backslash\)n------ REGISTERS ------\(\backslash\)n"});
+00712 
+00713 \textcolor{comment}{/* OSX */}
+00714 \textcolor{preprocessor}{#}\textcolor{preprocessor}{if} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_\_APPLE\_\_}\textcolor{preprocessor}{)} \textcolor{preprocessor}{&&} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{MAC\_OS\_X\_VERSION\_10\_6}\textcolor{preprocessor}{)}
+00715   \textcolor{comment}{/* OSX AMD64 */}
+00716     \textcolor{preprocessor}{#}\textcolor{preprocessor}{if} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_STRUCT\_X86\_THREAD\_STATE64}\textcolor{preprocessor}{)} \textcolor{preprocessor}{&&} \textcolor{preprocessor}{!}\textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_\_i386\_\_}\textcolor{preprocessor}{)}
+00717     serverLog(LL\_WARNING,
+00718     \textcolor{stringliteral}{"\(\backslash\)n"}
+00719     \textcolor{stringliteral}{"RAX:%016lx RBX:%016lx\(\backslash\)nRCX:%016lx RDX:%016lx\(\backslash\)n"}
+00720     \textcolor{stringliteral}{"RDI:%016lx RSI:%016lx\(\backslash\)nRBP:%016lx RSP:%016lx\(\backslash\)n"}
+00721     \textcolor{stringliteral}{"R8 :%016lx R9 :%016lx\(\backslash\)nR10:%016lx R11:%016lx\(\backslash\)n"}
+00722     \textcolor{stringliteral}{"R12:%016lx R13:%016lx\(\backslash\)nR14:%016lx R15:%016lx\(\backslash\)n"}
+00723     \textcolor{stringliteral}{"RIP:%016lx EFL:%016lx\(\backslash\)nCS :%016lx FS:%016lx  GS:%016lx"},
+00724         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext->\_\_ss.\_\_rax,
+00725         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext->\_\_ss.\_\_rbx,
+00726         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext->\_\_ss.\_\_rcx,
+00727         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext->\_\_ss.\_\_rdx,
+00728         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext->\_\_ss.\_\_rdi,
+00729         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext->\_\_ss.\_\_rsi,
+00730         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext->\_\_ss.\_\_rbp,
+00731         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext->\_\_ss.\_\_rsp,
+00732         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext->\_\_ss.\_\_r8,
+00733         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext->\_\_ss.\_\_r9,
+00734         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext->\_\_ss.\_\_r10,
+00735         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext->\_\_ss.\_\_r11,
+00736         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext->\_\_ss.\_\_r12,
+00737         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext->\_\_ss.\_\_r13,
+00738         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext->\_\_ss.\_\_r14,
+00739         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext->\_\_ss.\_\_r15,
+00740         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext->\_\_ss.\_\_rip,
+00741         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext->\_\_ss.\_\_rflags,
+00742         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext->\_\_ss.\_\_cs,
+00743         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext->\_\_ss.\_\_fs,
+00744         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext->\_\_ss.\_\_gs
+00745     );
+00746     logStackContent((\textcolor{keywordtype}{void}**)uc->uc\_mcontext->\_\_ss.\_\_rsp);
+00747     \textcolor{preprocessor}{#}\textcolor{preprocessor}{else}
+00748     \textcolor{comment}{/* OSX x86 */}
+00749     serverLog(LL\_WARNING,
+00750     \textcolor{stringliteral}{"\(\backslash\)n"}
+00751     \textcolor{stringliteral}{"EAX:%08lx EBX:%08lx ECX:%08lx EDX:%08lx\(\backslash\)n"}
+00752     \textcolor{stringliteral}{"EDI:%08lx ESI:%08lx EBP:%08lx ESP:%08lx\(\backslash\)n"}
+00753     \textcolor{stringliteral}{"SS:%08lx  EFL:%08lx EIP:%08lx CS :%08lx\(\backslash\)n"}
+00754     \textcolor{stringliteral}{"DS:%08lx  ES:%08lx  FS :%08lx GS :%08lx"},
+00755         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext->\_\_ss.\_\_eax,
+00756         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext->\_\_ss.\_\_ebx,
+00757         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext->\_\_ss.\_\_ecx,
+00758         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext->\_\_ss.\_\_edx,
+00759         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext->\_\_ss.\_\_edi,
+00760         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext->\_\_ss.\_\_esi,
+00761         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext->\_\_ss.\_\_ebp,
+00762         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext->\_\_ss.\_\_esp,
+00763         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext->\_\_ss.\_\_ss,
+00764         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext->\_\_ss.\_\_eflags,
+00765         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext->\_\_ss.\_\_eip,
+00766         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext->\_\_ss.\_\_cs,
+00767         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext->\_\_ss.\_\_ds,
+00768         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext->\_\_ss.\_\_es,
+00769         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext->\_\_ss.\_\_fs,
+00770         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext->\_\_ss.\_\_gs
+00771     );
+00772     logStackContent((\textcolor{keywordtype}{void}**)uc->uc\_mcontext->\_\_ss.\_\_esp);
+00773     \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00774 \textcolor{comment}{/* Linux */}
+00775 \textcolor{preprocessor}{#}\textcolor{preprocessor}{elif} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\_\_linux\_\_\textcolor{preprocessor}{)}
+00776     \textcolor{comment}{/* Linux x86 */}
+00777     \textcolor{preprocessor}{#}\textcolor{preprocessor}{if} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_\_i386\_\_}\textcolor{preprocessor}{)}
+00778     serverLog(LL\_WARNING,
+00779     \textcolor{stringliteral}{"\(\backslash\)n"}
+00780     \textcolor{stringliteral}{"EAX:%08lx EBX:%08lx ECX:%08lx EDX:%08lx\(\backslash\)n"}
+00781     \textcolor{stringliteral}{"EDI:%08lx ESI:%08lx EBP:%08lx ESP:%08lx\(\backslash\)n"}
+00782     \textcolor{stringliteral}{"SS :%08lx EFL:%08lx EIP:%08lx CS:%08lx\(\backslash\)n"}
+00783     \textcolor{stringliteral}{"DS :%08lx ES :%08lx FS :%08lx GS:%08lx"},
+00784         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext.gregs[11],
+00785         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext.gregs[8],
+00786         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext.gregs[10],
+00787         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext.gregs[9],
+00788         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext.gregs[4],
+00789         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext.gregs[5],
+00790         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext.gregs[6],
+00791         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext.gregs[7],
+00792         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext.gregs[18],
+00793         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext.gregs[17],
+00794         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext.gregs[14],
+00795         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext.gregs[15],
+00796         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext.gregs[3],
+00797         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext.gregs[2],
+00798         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext.gregs[1],
+00799         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext.gregs[0]
+00800     );
+00801     logStackContent((\textcolor{keywordtype}{void}**)uc->uc\_mcontext.gregs[7]);
+00802     \textcolor{preprocessor}{#}\textcolor{preprocessor}{elif} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_\_X86\_64\_\_}\textcolor{preprocessor}{)} \textcolor{preprocessor}{||} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\_\_x86\_64\_\_\textcolor{preprocessor}{)}
+00803     \textcolor{comment}{/* Linux AMD64 */}
+00804     serverLog(\hyperlink{server_8h_a31229b9334bba7d6be2a72970967a14b}{LL\_WARNING},
+00805     \textcolor{stringliteral}{"\(\backslash\)n"}
+00806     \textcolor{stringliteral}{"RAX:%016lx RBX:%016lx\(\backslash\)nRCX:%016lx RDX:%016lx\(\backslash\)n"}
+00807     \textcolor{stringliteral}{"RDI:%016lx RSI:%016lx\(\backslash\)nRBP:%016lx RSP:%016lx\(\backslash\)n"}
+00808     \textcolor{stringliteral}{"R8 :%016lx R9 :%016lx\(\backslash\)nR10:%016lx R11:%016lx\(\backslash\)n"}
+00809     \textcolor{stringliteral}{"R12:%016lx R13:%016lx\(\backslash\)nR14:%016lx R15:%016lx\(\backslash\)n"}
+00810     \textcolor{stringliteral}{"RIP:%016lx EFL:%016lx\(\backslash\)nCSGSFS:%016lx"},
+00811         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext.gregs[13],
+00812         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext.gregs[11],
+00813         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext.gregs[14],
+00814         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext.gregs[12],
+00815         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext.gregs[8],
+00816         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext.gregs[9],
+00817         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext.gregs[10],
+00818         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext.gregs[15],
+00819         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext.gregs[0],
+00820         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext.gregs[1],
+00821         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext.gregs[2],
+00822         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext.gregs[3],
+00823         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext.gregs[4],
+00824         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext.gregs[5],
+00825         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext.gregs[6],
+00826         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext.gregs[7],
+00827         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext.gregs[16],
+00828         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext.gregs[17],
+00829         (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) uc->uc\_mcontext.gregs[18]
+00830     );
+00831     logStackContent((\textcolor{keywordtype}{void}**)uc->uc\_mcontext.gregs[15]);
+00832     \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00833 \textcolor{preprocessor}{#}\textcolor{preprocessor}{else}
+00834     serverLog(LL\_WARNING,
+00835         \textcolor{stringliteral}{"  Dumping of registers not supported for this OS/arch"});
+00836 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00837 \}
+00838 
+00839 \textcolor{comment}{/* Return a file descriptor to write directly to the Redis log with the}
+00840 \textcolor{comment}{ * write(2) syscall, that can be used in critical sections of the code}
+00841 \textcolor{comment}{ * where the rest of Redis can't be trusted (for example during the memory}
+00842 \textcolor{comment}{ * test) or when an API call requires a raw fd.}
+00843 \textcolor{comment}{ *}
+00844 \textcolor{comment}{ * Close it with closeDirectLogFiledes(). */}
+00845 \textcolor{keywordtype}{int} openDirectLogFiledes(\textcolor{keywordtype}{void}) \{
+00846     \textcolor{keywordtype}{int} log\_to\_stdout = server.logfile[0] == \textcolor{stringliteral}{'\(\backslash\)0'};
+00847     \textcolor{keywordtype}{int} fd = log\_to\_stdout ?
+00848         STDOUT\_FILENO :
+00849         open(server.logfile, O\_APPEND|O\_CREAT|O\_WRONLY, 0644);
+00850     \textcolor{keywordflow}{return} fd;
+00851 \}
+00852 
+00853 \textcolor{comment}{/* Used to close what closeDirectLogFiledes() returns. */}
+00854 \textcolor{keywordtype}{void} closeDirectLogFiledes(\textcolor{keywordtype}{int} fd) \{
+00855     \textcolor{keywordtype}{int} log\_to\_stdout = server.logfile[0] == \textcolor{stringliteral}{'\(\backslash\)0'};
+00856     \textcolor{keywordflow}{if} (!log\_to\_stdout) close(fd);
+00857 \}
+00858 
+00859 \textcolor{comment}{/* Logs the stack trace using the backtrace() call. This function is designed}
+00860 \textcolor{comment}{ * to be called from signal handlers safely. */}
+00861 \textcolor{keywordtype}{void} logStackTrace(ucontext\_t *uc) \{
+00862     \textcolor{keywordtype}{void} *trace[101];
+00863     \textcolor{keywordtype}{int} trace\_size = 0, fd = openDirectLogFiledes();
+00864 
+00865     \textcolor{keywordflow}{if} (fd == -1) \textcolor{keywordflow}{return}; \textcolor{comment}{/* If we can't log there is anything to do. */}
+00866 
+00867     \textcolor{comment}{/* Generate the stack trace */}
+00868     trace\_size = backtrace(trace+1, 100);
+00869 
+00870     \textcolor{keywordflow}{if} (getMcontextEip(uc) != NULL) \{
+00871         \textcolor{keywordtype}{char} *msg1 = \textcolor{stringliteral}{"EIP:\(\backslash\)n"};
+00872         \textcolor{keywordtype}{char} *msg2 = \textcolor{stringliteral}{"\(\backslash\)nBacktrace:\(\backslash\)n"};
+00873         \textcolor{keywordflow}{if} (write(fd,msg1,strlen(msg1)) == -1) \{\textcolor{comment}{/* Avoid warning. */}\};
+00874         trace[0] = getMcontextEip(uc);
+00875         backtrace\_symbols\_fd(trace, 1, fd);
+00876         \textcolor{keywordflow}{if} (write(fd,msg2,strlen(msg2)) == -1) \{\textcolor{comment}{/* Avoid warning. */}\};
+00877     \}
+00878 
+00879     \textcolor{comment}{/* Write symbols to log file */}
+00880     backtrace\_symbols\_fd(trace+1, trace\_size, fd);
+00881 
+00882     \textcolor{comment}{/* Cleanup */}
+00883     closeDirectLogFiledes(fd);
+00884 \}
+00885 
+00886 \textcolor{comment}{/* Log information about the "current" client, that is, the client that is}
+00887 \textcolor{comment}{ * currently being served by Redis. May be NULL if Redis is not serving a}
+00888 \textcolor{comment}{ * client right now. */}
+00889 \textcolor{keywordtype}{void} logCurrentClient(\textcolor{keywordtype}{void}) \{
+00890     \textcolor{keywordflow}{if} (server.current\_client == NULL) \textcolor{keywordflow}{return};
+00891 
+00892     \hyperlink{structclient}{client} *cc = server.current\_client;
+00893     sds client;
+00894     \textcolor{keywordtype}{int} j;
+00895 
+00896     serverLogRaw(\hyperlink{server_8h_a31229b9334bba7d6be2a72970967a14b}{LL\_WARNING}|\hyperlink{server_8h_a6b3768a4d2dfb3ac580b8d999baa9350}{LL\_RAW}, \textcolor{stringliteral}{"\(\backslash\)n------ CURRENT CLIENT INFO ------\(\backslash\)n"});
+00897     client = catClientInfoString(sdsempty(),cc);
+00898     serverLog(\hyperlink{server_8h_a31229b9334bba7d6be2a72970967a14b}{LL\_WARNING}|\hyperlink{server_8h_a6b3768a4d2dfb3ac580b8d999baa9350}{LL\_RAW},\textcolor{stringliteral}{"%s\(\backslash\)n"}, client);
+00899     sdsfree(client);
+00900     \textcolor{keywordflow}{for} (j = 0; j < cc->argc; j++) \{
+00901         robj *decoded;
+00902 
+00903         decoded = getDecodedObject(cc->argv[j]);
+00904         serverLog(\hyperlink{server_8h_a31229b9334bba7d6be2a72970967a14b}{LL\_WARNING}|\hyperlink{server_8h_a6b3768a4d2dfb3ac580b8d999baa9350}{LL\_RAW},\textcolor{stringliteral}{"argv[%d]: '%s'\(\backslash\)n"}, j,
+00905             (\textcolor{keywordtype}{char}*)decoded->ptr);
+00906         decrRefCount(decoded);
+00907     \}
+00908     \textcolor{comment}{/* Check if the first argument, usually a key, is found inside the}
+00909 \textcolor{comment}{     * selected DB, and if so print info about the associated object. */}
+00910     \textcolor{keywordflow}{if} (cc->argc >= 1) \{
+00911         robj *val, *key;
+00912         dictEntry *de;
+00913 
+00914         key = getDecodedObject(cc->argv[1]);
+00915         de = dictFind(cc->db->dict, key->ptr);
+00916         \textcolor{keywordflow}{if} (de) \{
+00917             val = \hyperlink{dict_8h_ae8d2cc391873b2bea2b87c4f80f43120}{dictGetVal}(de);
+00918             serverLog(\hyperlink{server_8h_a31229b9334bba7d6be2a72970967a14b}{LL\_WARNING},\textcolor{stringliteral}{"key '%s' found in DB containing the following object:"}, (\textcolor{keywordtype}{
+      char}*)key->ptr);
+00919             serverLogObjectDebugInfo(val);
+00920         \}
+00921         decrRefCount(key);
+00922     \}
+00923 \}
+00924 
+00925 \textcolor{preprocessor}{#}\textcolor{preprocessor}{if} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}HAVE\_PROC\_MAPS\textcolor{preprocessor}{)}
+00926 
+00927 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{MEMTEST\_MAX\_REGIONS} 128
+00928 
+00929 \textcolor{comment}{/* A non destructive memory test executed during segfauls. */}
+00930 \textcolor{keywordtype}{int} memtest\_test\_linux\_anonymous\_maps(\textcolor{keywordtype}{void}) \{
+00931     FILE *fp;
+00932     \textcolor{keywordtype}{char} line[1024];
+00933     \textcolor{keywordtype}{char} logbuf[1024];
+00934     size\_t start\_addr, end\_addr, size;
+00935     size\_t start\_vect[MEMTEST\_MAX\_REGIONS];
+00936     size\_t size\_vect[MEMTEST\_MAX\_REGIONS];
+00937     \textcolor{keywordtype}{int} regions = 0, j;
+00938 
+00939     \textcolor{keywordtype}{int} fd = openDirectLogFiledes();
+00940     \textcolor{keywordflow}{if} (!fd) \textcolor{keywordflow}{return} 0;
+00941 
+00942     fp = fopen(\textcolor{stringliteral}{"/proc/self/maps"},\textcolor{stringliteral}{"r"});
+00943     \textcolor{keywordflow}{if} (!fp) \textcolor{keywordflow}{return} 0;
+00944     \textcolor{keywordflow}{while}(fgets(line,\textcolor{keyword}{sizeof}(line),fp) != NULL) \{
+00945         \textcolor{keywordtype}{char} *start, *end, *p = line;
+00946 
+00947         start = p;
+00948         p = strchr(p,\textcolor{stringliteral}{'-'});
+00949         \textcolor{keywordflow}{if} (!p) \textcolor{keywordflow}{continue};
+00950         *p++ = \textcolor{stringliteral}{'\(\backslash\)0'};
+00951         end = p;
+00952         p = strchr(p,\textcolor{stringliteral}{' '});
+00953         \textcolor{keywordflow}{if} (!p) \textcolor{keywordflow}{continue};
+00954         *p++ = \textcolor{stringliteral}{'\(\backslash\)0'};
+00955         \textcolor{keywordflow}{if} (strstr(p,\textcolor{stringliteral}{"stack"}) ||
+00956             strstr(p,\textcolor{stringliteral}{"vdso"}) ||
+00957             strstr(p,\textcolor{stringliteral}{"vsyscall"})) \textcolor{keywordflow}{continue};
+00958         \textcolor{keywordflow}{if} (!strstr(p,\textcolor{stringliteral}{"00:00"})) \textcolor{keywordflow}{continue};
+00959         \textcolor{keywordflow}{if} (!strstr(p,\textcolor{stringliteral}{"rw"})) \textcolor{keywordflow}{continue};
+00960 
+00961         start\_addr = strtoul(start,NULL,16);
+00962         end\_addr = strtoul(end,NULL,16);
+00963         size = end\_addr-start\_addr;
+00964 
+00965         start\_vect[regions] = start\_addr;
+00966         size\_vect[regions] = size;
+00967         snprintf(logbuf,\textcolor{keyword}{sizeof}(logbuf),
+00968             \textcolor{stringliteral}{"*** Preparing to test memory region %lx (%lu bytes)\(\backslash\)n"},
+00969                 (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) start\_vect[regions],
+00970                 (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long}) size\_vect[regions]);
+00971         \textcolor{keywordflow}{if} (write(fd,logbuf,strlen(logbuf)) == -1) \{ \textcolor{comment}{/* Nothing to do. */} \}
+00972         regions++;
+00973     \}
+00974 
+00975     \textcolor{keywordtype}{int} errors = 0;
+00976     \textcolor{keywordflow}{for} (j = 0; j < regions; j++) \{
+00977         \textcolor{keywordflow}{if} (write(fd,\textcolor{stringliteral}{"."},1) == -1) \{ \textcolor{comment}{/* Nothing to do. */} \}
+00978         errors += memtest\_preserving\_test((\textcolor{keywordtype}{void}*)start\_vect[j],size\_vect[j],1);
+00979         \textcolor{keywordflow}{if} (write(fd, errors ? \textcolor{stringliteral}{"E"} : \textcolor{stringliteral}{"O"},1) == -1) \{ \textcolor{comment}{/* Nothing to do. */} \}
+00980     \}
+00981     \textcolor{keywordflow}{if} (write(fd,\textcolor{stringliteral}{"\(\backslash\)n"},1) == -1) \{ \textcolor{comment}{/* Nothing to do. */} \}
+00982 
+00983     \textcolor{comment}{/* NOTE: It is very important to close the file descriptor only now}
+00984 \textcolor{comment}{     * because closing it before may result into unmapping of some memory}
+00985 \textcolor{comment}{     * region that we are testing. */}
+00986     fclose(fp);
+00987     closeDirectLogFiledes(fd);
+00988     \textcolor{keywordflow}{return} errors;
+00989 \}
+00990 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00991 
+00992 \textcolor{comment}{/* Scans the (assumed) x86 code starting at addr, for a max of `len`}
+00993 \textcolor{comment}{ * bytes, searching for E8 (callq) opcodes, and dumping the symbols}
+00994 \textcolor{comment}{ * and the call offset if they appear to be valid. */}
+00995 \textcolor{keywordtype}{void} dumpX86Calls(\textcolor{keywordtype}{void} *addr, size\_t len) \{
+00996     size\_t j;
+00997     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *p = addr;
+00998     Dl\_info info;
+00999     \textcolor{comment}{/* Hash table to best-effort avoid printing the same symbol}
+01000 \textcolor{comment}{     * multiple times. */}
+01001     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} ht[256] = \{0\};
+01002 
+01003     \textcolor{keywordflow}{if} (len < 5) \textcolor{keywordflow}{return};
+01004     \textcolor{keywordflow}{for} (j = 0; j < len-4; j++) \{
+01005         \textcolor{keywordflow}{if} (p[j] != 0xE8) \textcolor{keywordflow}{continue}; \textcolor{comment}{/* Not an E8 CALL opcode. */}
+01006         \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} target = (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long})addr+j+5;
+01007         target += *((int32\_t*)(p+j+1));
+01008         \textcolor{keywordflow}{if} (dladdr((\textcolor{keywordtype}{void}*)target, &info) != 0 && info.dli\_sname != NULL) \{
+01009             \textcolor{keywordflow}{if} (ht[target&0xff] != target) \{
+01010                 printf(\textcolor{stringliteral}{"Function at 0x%lx is %s\(\backslash\)n"},target,info.dli\_sname);
+01011                 ht[target&0xff] = target;
+01012             \}
+01013             j += 4; \textcolor{comment}{/* Skip the 32 bit immediate. */}
+01014         \}
+01015     \}
+01016 \}
+01017 
+01018 \textcolor{keywordtype}{void} sigsegvHandler(\textcolor{keywordtype}{int} sig, siginfo\_t *info, \textcolor{keywordtype}{void} *secret) \{
+01019     ucontext\_t *uc = (ucontext\_t*) secret;
+01020     \textcolor{keywordtype}{void} *eip = getMcontextEip(uc);
+01021     sds infostring, clients;
+01022     \textcolor{keyword}{struct} sigaction act;
+01023     \hyperlink{server_8h_ae7c9dc8f13568a9c856573751f1ee1ec}{UNUSED}(info);
+01024 
+01025     bugReportStart();
+01026     serverLog(\hyperlink{server_8h_a31229b9334bba7d6be2a72970967a14b}{LL\_WARNING},
+01027         \textcolor{stringliteral}{"Redis %s crashed by signal: %d"}, \hyperlink{version_8h_a357a0d302ef7fbb42bf2db0632b9f7fe}{REDIS\_VERSION}, sig);
+01028     \textcolor{keywordflow}{if} (eip != NULL) \{
+01029         serverLog(\hyperlink{server_8h_a31229b9334bba7d6be2a72970967a14b}{LL\_WARNING},
+01030         \textcolor{stringliteral}{"Crashed running the instuction at: %p"}, eip);
+01031     \}
+01032     \textcolor{keywordflow}{if} (sig == SIGSEGV || sig == SIGBUS) \{
+01033         serverLog(\hyperlink{server_8h_a31229b9334bba7d6be2a72970967a14b}{LL\_WARNING},
+01034         \textcolor{stringliteral}{"Accessing address: %p"}, (\textcolor{keywordtype}{void}*)info->si\_addr);
+01035     \}
+01036     serverLog(\hyperlink{server_8h_a31229b9334bba7d6be2a72970967a14b}{LL\_WARNING},
+01037         \textcolor{stringliteral}{"Failed assertion: %s (%s:%d)"}, server.assert\_failed,
+01038                         server.assert\_file, server.assert\_line);
+01039 
+01040     \textcolor{comment}{/* Log the stack trace */}
+01041     serverLogRaw(\hyperlink{server_8h_a31229b9334bba7d6be2a72970967a14b}{LL\_WARNING}|\hyperlink{server_8h_a6b3768a4d2dfb3ac580b8d999baa9350}{LL\_RAW}, \textcolor{stringliteral}{"\(\backslash\)n------ STACK TRACE ------\(\backslash\)n"});
+01042     logStackTrace(uc);
+01043 
+01044     \textcolor{comment}{/* Log INFO and CLIENT LIST */}
+01045     serverLogRaw(\hyperlink{server_8h_a31229b9334bba7d6be2a72970967a14b}{LL\_WARNING}|\hyperlink{server_8h_a6b3768a4d2dfb3ac580b8d999baa9350}{LL\_RAW}, \textcolor{stringliteral}{"\(\backslash\)n------ INFO OUTPUT ------\(\backslash\)n"});
+01046     infostring = genRedisInfoString(\textcolor{stringliteral}{"all"});
+01047     serverLogRaw(\hyperlink{server_8h_a31229b9334bba7d6be2a72970967a14b}{LL\_WARNING}|\hyperlink{server_8h_a6b3768a4d2dfb3ac580b8d999baa9350}{LL\_RAW}, infostring);
+01048     serverLogRaw(\hyperlink{server_8h_a31229b9334bba7d6be2a72970967a14b}{LL\_WARNING}|\hyperlink{server_8h_a6b3768a4d2dfb3ac580b8d999baa9350}{LL\_RAW}, \textcolor{stringliteral}{"\(\backslash\)n------ CLIENT LIST OUTPUT ------\(\backslash\)n"});
+01049     clients = getAllClientsInfoString();
+01050     serverLogRaw(\hyperlink{server_8h_a31229b9334bba7d6be2a72970967a14b}{LL\_WARNING}|\hyperlink{server_8h_a6b3768a4d2dfb3ac580b8d999baa9350}{LL\_RAW}, clients);
+01051     sdsfree(infostring);
+01052     sdsfree(clients);
+01053 
+01054     \textcolor{comment}{/* Log the current client */}
+01055     logCurrentClient();
+01056 
+01057     \textcolor{comment}{/* Log dump of processor registers */}
+01058     logRegisters(uc);
+01059 
+01060 \textcolor{preprocessor}{#}\textcolor{preprocessor}{if} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}HAVE\_PROC\_MAPS\textcolor{preprocessor}{)}
+01061     \textcolor{comment}{/* Test memory */}
+01062     serverLogRaw(\hyperlink{server_8h_a31229b9334bba7d6be2a72970967a14b}{LL\_WARNING}|\hyperlink{server_8h_a6b3768a4d2dfb3ac580b8d999baa9350}{LL\_RAW}, \textcolor{stringliteral}{"\(\backslash\)n------ FAST MEMORY TEST ------\(\backslash\)n"});
+01063     bioKillThreads();
+01064     \textcolor{keywordflow}{if} (memtest\_test\_linux\_anonymous\_maps()) \{
+01065         serverLogRaw(\hyperlink{server_8h_a31229b9334bba7d6be2a72970967a14b}{LL\_WARNING}|\hyperlink{server_8h_a6b3768a4d2dfb3ac580b8d999baa9350}{LL\_RAW},
+01066             \textcolor{stringliteral}{"!!! MEMORY ERROR DETECTED! Check your memory ASAP !!!\(\backslash\)n"});
+01067     \} \textcolor{keywordflow}{else} \{
+01068         serverLogRaw(\hyperlink{server_8h_a31229b9334bba7d6be2a72970967a14b}{LL\_WARNING}|\hyperlink{server_8h_a6b3768a4d2dfb3ac580b8d999baa9350}{LL\_RAW},
+01069             \textcolor{stringliteral}{"Fast memory test PASSED, however your memory can still be broken. Please run a memory
+       test for several hours if possible.\(\backslash\)n"});
+01070     \}
+01071 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+01072 
+01073     \textcolor{keywordflow}{if} (eip != NULL) \{
+01074         Dl\_info info;
+01075         \textcolor{keywordflow}{if} (dladdr(eip, &info) != 0) \{
+01076             serverLog(\hyperlink{server_8h_a31229b9334bba7d6be2a72970967a14b}{LL\_WARNING}|\hyperlink{server_8h_a6b3768a4d2dfb3ac580b8d999baa9350}{LL\_RAW},
+01077                 \textcolor{stringliteral}{"\(\backslash\)n------ DUMPING CODE AROUND EIP ------\(\backslash\)n"}
+01078                 \textcolor{stringliteral}{"Symbol: %s (base: %p)\(\backslash\)n"}
+01079                 \textcolor{stringliteral}{"Module: %s (base %p)\(\backslash\)n"}
+01080                 \textcolor{stringliteral}{"$ xxd -r -p /tmp/dump.hex /tmp/dump.bin\(\backslash\)n"}
+01081                 \textcolor{stringliteral}{"$ objdump --adjust-vma=%p -D -b binary -m i386:x86-64 /tmp/dump.bin\(\backslash\)n"}
+01082                 \textcolor{stringliteral}{"------\(\backslash\)n"},
+01083                 info.dli\_sname, info.dli\_saddr, info.dli\_fname, info.dli\_fbase,
+01084                 info.dli\_saddr);
+01085             size\_t len = (\textcolor{keywordtype}{long})eip - (\textcolor{keywordtype}{long})info.dli\_saddr;
+01086             \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} sz = sysconf(\_SC\_PAGESIZE);
+01087             \textcolor{keywordflow}{if} (len < 1<<13) \{ \textcolor{comment}{/* we don't have functions over 8k (verified) */}
+01088                 \textcolor{comment}{/* Find the address of the next page, which is our "safety"}
+01089 \textcolor{comment}{                 * limit when dumping. Then try to dump just 128 bytes more}
+01090 \textcolor{comment}{                 * than EIP if there is room, or stop sooner. */}
+01091                 \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} next = ((\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long})eip + sz) & ~(sz-1);
+01092                 \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} end = (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long})eip + 128;
+01093                 \textcolor{keywordflow}{if} (end > next) end = next;
+01094                 len = end - (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long})info.dli\_saddr;
+01095                 serverLogHexDump(\hyperlink{server_8h_a31229b9334bba7d6be2a72970967a14b}{LL\_WARNING}, \textcolor{stringliteral}{"dump of function"},
+01096                     info.dli\_saddr ,len);
+01097                 dumpX86Calls(info.dli\_saddr,len);
+01098             \}
+01099         \}
+01100     \}
+01101 
+01102     serverLogRaw(\hyperlink{server_8h_a31229b9334bba7d6be2a72970967a14b}{LL\_WARNING}|\hyperlink{server_8h_a6b3768a4d2dfb3ac580b8d999baa9350}{LL\_RAW},
+01103 \textcolor{stringliteral}{"\(\backslash\)n=== REDIS BUG REPORT END. Make sure to include from START to END. ===\(\backslash\)n\(\backslash\)n"}
+01104 \textcolor{stringliteral}{"       Please report the crash by opening an issue on github:\(\backslash\)n\(\backslash\)n"}
+01105 \textcolor{stringliteral}{"           http://github.com/antirez/redis/issues\(\backslash\)n\(\backslash\)n"}
+01106 \textcolor{stringliteral}{"  Suspect RAM error? Use redis-server --test-memory to verify it.\(\backslash\)n\(\backslash\)n"}
+01107 );
+01108 
+01109     \textcolor{comment}{/* free(messages); Don't call free() with possibly corrupted memory. */}
+01110     \textcolor{keywordflow}{if} (server.daemonize && server.supervised == 0) unlink(server.pidfile);
+01111 
+01112     \textcolor{comment}{/* Make sure we exit with the right signal at the end. So for instance}
+01113 \textcolor{comment}{     * the core will be dumped if enabled. */}
+01114     sigemptyset (&act.sa\_mask);
+01115     act.sa\_flags = SA\_NODEFER | SA\_ONSTACK | SA\_RESETHAND;
+01116     act.sa\_handler = SIG\_DFL;
+01117     sigaction (sig, &act, NULL);
+01118     kill(getpid(),sig);
+01119 \}
+01120 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif} \textcolor{comment}{/* HAVE\_BACKTRACE */}
+01121 
+01122 \textcolor{comment}{/* ==================== Logging functions for debugging ===================== */}
+01123 
+01124 \textcolor{keywordtype}{void} serverLogHexDump(\textcolor{keywordtype}{int} level, \textcolor{keywordtype}{char} *descr, \textcolor{keywordtype}{void} *value, size\_t len) \{
+01125     \textcolor{keywordtype}{char} buf[65], *b;
+01126     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *v = value;
+01127     \textcolor{keywordtype}{char} charset[] = \textcolor{stringliteral}{"0123456789abcdef"};
+01128 
+01129     serverLog(level,\textcolor{stringliteral}{"%s (hexdump of %zu bytes):"}, descr, len);
+01130     b = buf;
+01131     \textcolor{keywordflow}{while}(len) \{
+01132         b[0] = charset[(*v)>>4];
+01133         b[1] = charset[(*v)&0xf];
+01134         b[2] = \textcolor{stringliteral}{'\(\backslash\)0'};
+01135         b += 2;
+01136         len--;
+01137         v++;
+01138         \textcolor{keywordflow}{if} (b-buf == 64 || len == 0) \{
+01139             serverLogRaw(level|\hyperlink{server_8h_a6b3768a4d2dfb3ac580b8d999baa9350}{LL\_RAW},buf);
+01140             b = buf;
+01141         \}
+01142     \}
+01143     serverLogRaw(level|\hyperlink{server_8h_a6b3768a4d2dfb3ac580b8d999baa9350}{LL\_RAW},\textcolor{stringliteral}{"\(\backslash\)n"});
+01144 \}
+01145 
+01146 \textcolor{comment}{/* =========================== Software Watchdog ============================ */}
+01147 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{sys}\textcolor{preprocessor}{/}\textcolor{preprocessor}{time}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+01148 
+01149 \textcolor{keywordtype}{void} watchdogSignalHandler(\textcolor{keywordtype}{int} sig, siginfo\_t *info, \textcolor{keywordtype}{void} *secret) \{
+01150 \textcolor{preprocessor}{#}\textcolor{preprocessor}{ifdef} HAVE\_BACKTRACE
+01151     ucontext\_t *uc = (ucontext\_t*) secret;
+01152 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+01153     \hyperlink{server_8h_ae7c9dc8f13568a9c856573751f1ee1ec}{UNUSED}(info);
+01154     \hyperlink{server_8h_ae7c9dc8f13568a9c856573751f1ee1ec}{UNUSED}(sig);
+01155 
+01156     serverLogFromHandler(\hyperlink{server_8h_a31229b9334bba7d6be2a72970967a14b}{LL\_WARNING},\textcolor{stringliteral}{"\(\backslash\)n--- WATCHDOG TIMER EXPIRED ---"});
+01157 \textcolor{preprocessor}{#}\textcolor{preprocessor}{ifdef} HAVE\_BACKTRACE
+01158     logStackTrace(uc);
+01159 \textcolor{preprocessor}{#}\textcolor{preprocessor}{else}
+01160     serverLogFromHandler(LL\_WARNING,\textcolor{stringliteral}{"Sorry: no support for backtrace()."});
+01161 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+01162     serverLogFromHandler(\hyperlink{server_8h_a31229b9334bba7d6be2a72970967a14b}{LL\_WARNING},\textcolor{stringliteral}{"--------\(\backslash\)n"});
+01163 \}
+01164 
+01165 \textcolor{comment}{/* Schedule a SIGALRM delivery after the specified period in milliseconds.}
+01166 \textcolor{comment}{ * If a timer is already scheduled, this function will re-schedule it to the}
+01167 \textcolor{comment}{ * specified time. If period is 0 the current timer is disabled. */}
+01168 \textcolor{keywordtype}{void} watchdogScheduleSignal(\textcolor{keywordtype}{int} period) \{
+01169     \textcolor{keyword}{struct} itimerval it;
+01170 
+01171     \textcolor{comment}{/* Will stop the timer if period is 0. */}
+01172     it.it\_value.tv\_sec = period/1000;
+01173     it.it\_value.tv\_usec = (period%1000)*1000;
+01174     \textcolor{comment}{/* Don't automatically restart. */}
+01175     it.it\_interval.tv\_sec = 0;
+01176     it.it\_interval.tv\_usec = 0;
+01177     setitimer(ITIMER\_REAL, &it, NULL);
+01178 \}
+01179 
+01180 \textcolor{comment}{/* Enable the software watchdog with the specified period in milliseconds. */}
+01181 \textcolor{keywordtype}{void} enableWatchdog(\textcolor{keywordtype}{int} period) \{
+01182     \textcolor{keywordtype}{int} min\_period;
+01183 
+01184     \textcolor{keywordflow}{if} (server.watchdog\_period == 0) \{
+01185         \textcolor{keyword}{struct} sigaction act;
+01186 
+01187         \textcolor{comment}{/* Watchdog was actually disabled, so we have to setup the signal}
+01188 \textcolor{comment}{         * handler. */}
+01189         sigemptyset(&act.sa\_mask);
+01190         act.sa\_flags = SA\_ONSTACK | SA\_SIGINFO;
+01191         act.sa\_sigaction = watchdogSignalHandler;
+01192         sigaction(SIGALRM, &act, NULL);
+01193     \}
+01194     \textcolor{comment}{/* If the configured period is smaller than twice the timer period, it is}
+01195 \textcolor{comment}{     * too short for the software watchdog to work reliably. Fix it now}
+01196 \textcolor{comment}{     * if needed. */}
+01197     min\_period = (1000/server.hz)*2;
+01198     \textcolor{keywordflow}{if} (period < min\_period) period = min\_period;
+01199     watchdogScheduleSignal(period); \textcolor{comment}{/* Adjust the current timer. */}
+01200     server.watchdog\_period = period;
+01201 \}
+01202 
+01203 \textcolor{comment}{/* Disable the software watchdog. */}
+01204 \textcolor{keywordtype}{void} disableWatchdog(\textcolor{keywordtype}{void}) \{
+01205     \textcolor{keyword}{struct} sigaction act;
+01206     \textcolor{keywordflow}{if} (server.watchdog\_period == 0) \textcolor{keywordflow}{return}; \textcolor{comment}{/* Already disabled. */}
+01207     watchdogScheduleSignal(0); \textcolor{comment}{/* Stop the current timer. */}
+01208 
+01209     \textcolor{comment}{/* Set the signal handler to SIG\_IGN, this will also remove pending}
+01210 \textcolor{comment}{     * signals from the queue. */}
+01211     sigemptyset(&act.sa\_mask);
+01212     act.sa\_flags = 0;
+01213     act.sa\_handler = SIG\_IGN;
+01214     sigaction(SIGALRM, &act, NULL);
+01215     server.watchdog\_period = 0;
+01216 \}
+\end{DoxyCode}

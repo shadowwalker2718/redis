@@ -1,0 +1,15 @@
+<map id="pubsubPattern" name="pubsubPattern">
+<area shape="rect" id="node2" href="$structredisObject.html" title="{redisObject\n|+ type\l+ encoding\l+ lru\l+ refcount\l+ ptr\l|}" alt="" coords="77,204,165,340"/>
+<area shape="rect" id="node3" href="$structclient.html" title="{client\n|+ id\l+ fd\l+ querybuf\l+ pending_querybuf\l+ querybuf_peak\l+ argc\l+ reqtype\l+ multibulklen\l+ bulklen\l+ reply_bytes\land 26 more...\l|}" alt="" coords="461,932,597,1156"/>
+<area shape="rect" id="node10" href="$structblockingState.html" title="{blockingState\n|+ timeout\l+ xread_count\l+ xread_retry_time\l+ xread_retry_ttl\l+ numreplicas\l+ reploffset\l+ module_blocked_handle\l|}" alt="" coords="133,675,307,840"/>
+<area shape="rect" id="node13" href="$structmultiCmd.html" title="{multiCmd\n|+ argc\l|}" alt="" coords="626,461,705,539"/>
+<area shape="rect" id="node4" href="$structredisDb.html" title="{redisDb\n|+ id\l+ avg_ttl\l|}" alt="" coords="493,711,566,803"/>
+<area shape="rect" id="node5" href="$structdict.html" title="{dict\n|+ privdata\l+ rehashidx\l+ iterators\l|}" alt="" coords="309,447,400,553"/>
+<area shape="rect" id="node6" href="$structdictht.html" title="{dictht\n|+ size\l+ sizemask\l+ used\l|}" alt="" coords="215,219,305,325"/>
+<area shape="rect" id="node7" href="$structdictEntry.html" title="{dictEntry\n|+ key\l+ v\l|}" alt="" coords="223,5,297,97"/>
+<area shape="rect" id="node8" href="$structdictType.html" title="{dictType\n|+ hashFunction\l+ keyDup\l+ valDup\l+ keyCompare\l+ keyDestructor\l+ valDestructor\l|}" alt="" coords="330,197,446,347"/>
+<area shape="rect" id="node9" href="$structlistNode.html" title="{listNode\n|+ value\l|}" alt="" coords="805,461,875,539"/>
+<area shape="rect" id="node14" href="$structlist.html" title="{list\n|+ dup\l+ free\l+ match\l+ len\l|}" alt="" coords="917,697,987,818"/>
+<area shape="rect" id="node11" href="$structredisCommand.html" title="{redisCommand\n|+ name\l+ proc\l+ arity\l+ sflags\l+ flags\l+ getkeys_proc\l+ firstkey\l+ lastkey\l+ keystep\l+ microseconds\l+ calls\l|}" alt="" coords="788,160,903,384"/>
+<area shape="rect" id="node12" href="$structmultiState.html" title="{multiState\n|+ count\l+ minreplicas\l+ minreplicas_timeout\l|}" alt="" coords="590,704,741,811"/>
+</map>

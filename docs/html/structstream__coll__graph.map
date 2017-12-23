@@ -1,0 +1,5 @@
+<map id="stream" name="stream">
+<area shape="rect" id="node2" href="$structrax.html" title="{rax\n|+ numele\l+ numnodes\l|}" alt="" coords="5,204,100,296"/>
+<area shape="rect" id="node3" href="$structraxNode.html" title="{raxNode\n|+ iskey\l+ isnull\l+ iscompr\l+ size\l+ data\l|}" alt="" coords="13,5,93,141"/>
+<area shape="rect" id="node4" href="$structstreamID.html" title="{streamID\n|+ ms\l+ seq\l|}" alt="" coords="124,204,200,296"/>
+</map>

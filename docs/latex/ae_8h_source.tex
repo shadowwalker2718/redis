@@ -1,0 +1,131 @@
+\hypertarget{ae_8h_source}{}\section{ae.\+h}
+\label{ae_8h_source}\index{src/ae.\+h@{src/ae.\+h}}
+
+\begin{DoxyCode}
+00001 \textcolor{comment}{/* A simple event-driven programming library. Originally I wrote this code}
+00002 \textcolor{comment}{ * for the Jim's event-loop (Jim is a Tcl interpreter) but later translated}
+00003 \textcolor{comment}{ * it in form of a library for easy reuse.}
+00004 \textcolor{comment}{ *}
+00005 \textcolor{comment}{ * Copyright (c) 2006-2012, Salvatore Sanfilippo <antirez at gmail dot com>}
+00006 \textcolor{comment}{ * All rights reserved.}
+00007 \textcolor{comment}{ *}
+00008 \textcolor{comment}{ * Redistribution and use in source and binary forms, with or without}
+00009 \textcolor{comment}{ * modification, are permitted provided that the following conditions are met:}
+00010 \textcolor{comment}{ *}
+00011 \textcolor{comment}{ *   * Redistributions of source code must retain the above copyright notice,}
+00012 \textcolor{comment}{ *     this list of conditions and the following disclaimer.}
+00013 \textcolor{comment}{ *   * Redistributions in binary form must reproduce the above copyright}
+00014 \textcolor{comment}{ *     notice, this list of conditions and the following disclaimer in the}
+00015 \textcolor{comment}{ *     documentation and/or other materials provided with the distribution.}
+00016 \textcolor{comment}{ *   * Neither the name of Redis nor the names of its contributors may be used}
+00017 \textcolor{comment}{ *     to endorse or promote products derived from this software without}
+00018 \textcolor{comment}{ *     specific prior written permission.}
+00019 \textcolor{comment}{ *}
+00020 \textcolor{comment}{ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"}
+00021 \textcolor{comment}{ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE}
+00022 \textcolor{comment}{ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE}
+00023 \textcolor{comment}{ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE}
+00024 \textcolor{comment}{ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR}
+00025 \textcolor{comment}{ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF}
+00026 \textcolor{comment}{ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS}
+00027 \textcolor{comment}{ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN}
+00028 \textcolor{comment}{ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)}
+00029 \textcolor{comment}{ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE}
+00030 \textcolor{comment}{ * POSSIBILITY OF SUCH DAMAGE.}
+00031 \textcolor{comment}{ */}
+00032 
+00033 \textcolor{preprocessor}{#}\textcolor{preprocessor}{ifndef} \textcolor{preprocessor}{\_\_AE\_H\_\_}
+00034 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{\_\_AE\_H\_\_}
+00035 
+00036 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{time}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00037 
+00038 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{AE\_OK} 0
+00039 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{AE\_ERR} \textcolor{preprocessor}{-}1
+00040 
+00041 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{AE\_NONE} 0
+00042 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{AE\_READABLE} 1
+00043 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{AE\_WRITABLE} 2
+00044 
+00045 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{AE\_FILE\_EVENTS} 1
+00046 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{AE\_TIME\_EVENTS} 2
+00047 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{AE\_ALL\_EVENTS} \textcolor{preprocessor}{(}\hyperlink{ae_8h_ac3fe42c648aaa679f6bffaeb1f8f9ea8}{AE\_FILE\_EVENTS}\textcolor{preprocessor}{|}\hyperlink{ae_8h_acdc6c5c42302bc81959ed645b22800aa}{AE\_TIME\_EVENTS}\textcolor{preprocessor}{)}
+00048 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{AE\_DONT\_WAIT} 4
+00049 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{AE\_CALL\_AFTER\_SLEEP} 8
+00050 
+00051 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{AE\_NOMORE} \textcolor{preprocessor}{-}1
+00052 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{AE\_DELETED\_EVENT\_ID} \textcolor{preprocessor}{-}1
+00053 
+00054 \textcolor{comment}{/* Macros */}
+00055 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{AE\_NOTUSED}\textcolor{preprocessor}{(}\textcolor{preprocessor}{V}\textcolor{preprocessor}{)} \textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{keywordtype}{void}\textcolor{preprocessor}{)} \textcolor{preprocessor}{V}\textcolor{preprocessor}{)}
+00056 
+00057 \textcolor{keyword}{struct} \hyperlink{structaeEventLoop}{aeEventLoop};
+00058 
+00059 \textcolor{comment}{/* Types and data structures */}
+00060 \textcolor{keyword}{typedef} \textcolor{keywordtype}{void} aeFileProc(\textcolor{keyword}{struct} \hyperlink{structaeEventLoop}{aeEventLoop} *eventLoop, \textcolor{keywordtype}{int} fd, \textcolor{keywordtype}{void} *clientData, \textcolor{keywordtype}{int} mask);
+00061 \textcolor{keyword}{typedef} \textcolor{keywordtype}{int} aeTimeProc(\textcolor{keyword}{struct} \hyperlink{structaeEventLoop}{aeEventLoop} *eventLoop, \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} id, \textcolor{keywordtype}{void} *clientData);
+00062 \textcolor{keyword}{typedef} \textcolor{keywordtype}{void} aeEventFinalizerProc(\textcolor{keyword}{struct} \hyperlink{structaeEventLoop}{aeEventLoop} *eventLoop, \textcolor{keywordtype}{void} *clientData);
+00063 \textcolor{keyword}{typedef} \textcolor{keywordtype}{void} aeBeforeSleepProc(\textcolor{keyword}{struct} \hyperlink{structaeEventLoop}{aeEventLoop} *eventLoop);
+00064 
+00065 \textcolor{comment}{/* File event structure */}
+\Hypertarget{ae_8h_source_l00066}\hyperlink{structaeFileEvent}{00066} \textcolor{keyword}{typedef} \textcolor{keyword}{struct} \hyperlink{structaeFileEvent}{aeFileEvent} \{
+00067     \textcolor{keywordtype}{int} mask; \textcolor{comment}{/* one of AE\_(READABLE|WRITABLE) */}
+00068     aeFileProc *rfileProc;
+00069     aeFileProc *wfileProc;
+00070     \textcolor{keywordtype}{void} *clientData;
+00071 \} aeFileEvent;
+00072 
+00073 \textcolor{comment}{/* Time event structure */}
+\Hypertarget{ae_8h_source_l00074}\hyperlink{structaeTimeEvent}{00074} \textcolor{keyword}{typedef} \textcolor{keyword}{struct} \hyperlink{structaeTimeEvent}{aeTimeEvent} \{
+00075     \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} id; \textcolor{comment}{/* time event identifier. */}
+00076     \textcolor{keywordtype}{long} when\_sec; \textcolor{comment}{/* seconds */}
+00077     \textcolor{keywordtype}{long} when\_ms; \textcolor{comment}{/* milliseconds */}
+00078     aeTimeProc *timeProc;
+00079     aeEventFinalizerProc *finalizerProc;
+00080     \textcolor{keywordtype}{void} *clientData;
+00081     \textcolor{keyword}{struct} \hyperlink{structaeTimeEvent}{aeTimeEvent} *next;
+00082 \} aeTimeEvent;
+00083 
+00084 \textcolor{comment}{/* A fired event */}
+\Hypertarget{ae_8h_source_l00085}\hyperlink{structaeFiredEvent}{00085} \textcolor{keyword}{typedef} \textcolor{keyword}{struct} \hyperlink{structaeFiredEvent}{aeFiredEvent} \{
+00086     \textcolor{keywordtype}{int} fd;
+00087     \textcolor{keywordtype}{int} mask;
+00088 \} aeFiredEvent;
+00089 
+00090 \textcolor{comment}{/* State of an event based program */}
+\Hypertarget{ae_8h_source_l00091}\hyperlink{structaeEventLoop}{00091} \textcolor{keyword}{typedef} \textcolor{keyword}{struct} \hyperlink{structaeEventLoop}{aeEventLoop} \{
+00092     \textcolor{keywordtype}{int} maxfd;   \textcolor{comment}{/* highest file descriptor currently registered */}
+00093     \textcolor{keywordtype}{int} setsize; \textcolor{comment}{/* max number of file descriptors tracked */}
+00094     \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} timeEventNextId;
+00095     time\_t lastTime;     \textcolor{comment}{/* Used to detect system clock skew */}
+00096     aeFileEvent *events; \textcolor{comment}{/* Registered events */}
+00097     aeFiredEvent *fired; \textcolor{comment}{/* Fired events */}
+00098     aeTimeEvent *timeEventHead;
+00099     \textcolor{keywordtype}{int} stop;
+00100     \textcolor{keywordtype}{void} *apidata; \textcolor{comment}{/* This is used for polling API specific data */}
+00101     aeBeforeSleepProc *beforesleep;
+00102     aeBeforeSleepProc *aftersleep;
+00103 \} aeEventLoop;
+00104 
+00105 \textcolor{comment}{/* Prototypes */}
+00106 aeEventLoop *aeCreateEventLoop(\textcolor{keywordtype}{int} setsize);
+00107 \textcolor{keywordtype}{void} aeDeleteEventLoop(aeEventLoop *eventLoop);
+00108 \textcolor{keywordtype}{void} aeStop(aeEventLoop *eventLoop);
+00109 \textcolor{keywordtype}{int} aeCreateFileEvent(aeEventLoop *eventLoop, \textcolor{keywordtype}{int} fd, \textcolor{keywordtype}{int} mask,
+00110         aeFileProc *proc, \textcolor{keywordtype}{void} *clientData);
+00111 \textcolor{keywordtype}{void} aeDeleteFileEvent(aeEventLoop *eventLoop, \textcolor{keywordtype}{int} fd, \textcolor{keywordtype}{int} mask);
+00112 \textcolor{keywordtype}{int} aeGetFileEvents(aeEventLoop *eventLoop, \textcolor{keywordtype}{int} fd);
+00113 \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} aeCreateTimeEvent(aeEventLoop *eventLoop, \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} milliseconds,
+00114         aeTimeProc *proc, \textcolor{keywordtype}{void} *clientData,
+00115         aeEventFinalizerProc *finalizerProc);
+00116 \textcolor{keywordtype}{int} aeDeleteTimeEvent(aeEventLoop *eventLoop, \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} id);
+00117 \textcolor{keywordtype}{int} aeProcessEvents(aeEventLoop *eventLoop, \textcolor{keywordtype}{int} flags);
+00118 \textcolor{keywordtype}{int} aeWait(\textcolor{keywordtype}{int} fd, \textcolor{keywordtype}{int} mask, \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} milliseconds);
+00119 \textcolor{keywordtype}{void} aeMain(aeEventLoop *eventLoop);
+00120 \textcolor{keywordtype}{char} *aeGetApiName(\textcolor{keywordtype}{void});
+00121 \textcolor{keywordtype}{void} aeSetBeforeSleepProc(aeEventLoop *eventLoop, aeBeforeSleepProc *beforesleep);
+00122 \textcolor{keywordtype}{void} aeSetAfterSleepProc(aeEventLoop *eventLoop, aeBeforeSleepProc *aftersleep);
+00123 \textcolor{keywordtype}{int} aeGetSetSize(aeEventLoop *eventLoop);
+00124 \textcolor{keywordtype}{int} aeResizeSetSize(aeEventLoop *eventLoop, \textcolor{keywordtype}{int} setsize);
+00125 
+00126 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+\end{DoxyCode}

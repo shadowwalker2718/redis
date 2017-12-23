@@ -1,0 +1,639 @@
+\hypertarget{helloworld_8c_source}{}\section{helloworld.\+c}
+\label{helloworld_8c_source}\index{src/modules/helloworld.\+c@{src/modules/helloworld.\+c}}
+
+\begin{DoxyCode}
+00001 \textcolor{comment}{/* Helloworld module -- A few examples of the Redis Modules API in the form}
+00002 \textcolor{comment}{ * of commands showing how to accomplish common tasks.}
+00003 \textcolor{comment}{ *}
+00004 \textcolor{comment}{ * This module does not do anything useful, if not for a few commands. The}
+00005 \textcolor{comment}{ * examples are designed in order to show the API.}
+00006 \textcolor{comment}{ *}
+00007 \textcolor{comment}{ * -----------------------------------------------------------------------------}
+00008 \textcolor{comment}{ *}
+00009 \textcolor{comment}{ * Copyright (c) 2016, Salvatore Sanfilippo <antirez at gmail dot com>}
+00010 \textcolor{comment}{ * All rights reserved.}
+00011 \textcolor{comment}{ *}
+00012 \textcolor{comment}{ * Redistribution and use in source and binary forms, with or without}
+00013 \textcolor{comment}{ * modification, are permitted provided that the following conditions are met:}
+00014 \textcolor{comment}{ *}
+00015 \textcolor{comment}{ *   * Redistributions of source code must retain the above copyright notice,}
+00016 \textcolor{comment}{ *     this list of conditions and the following disclaimer.}
+00017 \textcolor{comment}{ *   * Redistributions in binary form must reproduce the above copyright}
+00018 \textcolor{comment}{ *     notice, this list of conditions and the following disclaimer in the}
+00019 \textcolor{comment}{ *     documentation and/or other materials provided with the distribution.}
+00020 \textcolor{comment}{ *   * Neither the name of Redis nor the names of its contributors may be used}
+00021 \textcolor{comment}{ *     to endorse or promote products derived from this software without}
+00022 \textcolor{comment}{ *     specific prior written permission.}
+00023 \textcolor{comment}{ *}
+00024 \textcolor{comment}{ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"}
+00025 \textcolor{comment}{ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE}
+00026 \textcolor{comment}{ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE}
+00027 \textcolor{comment}{ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE}
+00028 \textcolor{comment}{ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR}
+00029 \textcolor{comment}{ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF}
+00030 \textcolor{comment}{ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS}
+00031 \textcolor{comment}{ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN}
+00032 \textcolor{comment}{ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)}
+00033 \textcolor{comment}{ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE}
+00034 \textcolor{comment}{ * POSSIBILITY OF SUCH DAMAGE.}
+00035 \textcolor{comment}{ */}
+00036 
+00037 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{"../redismodule.h"}
+00038 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{stdio}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00039 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{stdlib}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00040 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{ctype}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00041 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{string}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00042 
+00043 \textcolor{comment}{/* HELLO.SIMPLE is among the simplest commands you can implement.}
+00044 \textcolor{comment}{ * It just returns the currently selected DB id, a functionality which is}
+00045 \textcolor{comment}{ * missing in Redis. The command uses two important API calls: one to}
+00046 \textcolor{comment}{ * fetch the currently selected DB, the other in order to send the client}
+00047 \textcolor{comment}{ * an integer reply as response. */}
+00048 \textcolor{keywordtype}{int} HelloSimple\_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, \textcolor{keywordtype}{int} argc) \{
+00049     \hyperlink{redismodule_8h_a46d75d81383a00bd6b941af6cadf64c2}{REDISMODULE\_NOT\_USED}(argv);
+00050     \hyperlink{redismodule_8h_a46d75d81383a00bd6b941af6cadf64c2}{REDISMODULE\_NOT\_USED}(argc);
+00051     RedisModule\_ReplyWithLongLong(ctx,RedisModule\_GetSelectedDb(ctx));
+00052     \textcolor{keywordflow}{return} \hyperlink{redismodule_8h_a1bc5bfd69abcd378ff52c640adc5418d}{REDISMODULE\_OK};
+00053 \}
+00054 
+00055 \textcolor{comment}{/* HELLO.PUSH.NATIVE re-implements RPUSH, and shows the low level modules API}
+00056 \textcolor{comment}{ * where you can "open" keys, make low level operations, create new keys by}
+00057 \textcolor{comment}{ * pushing elements into non-existing keys, and so forth.}
+00058 \textcolor{comment}{ *}
+00059 \textcolor{comment}{ * You'll find this command to be roughly as fast as the actual RPUSH}
+00060 \textcolor{comment}{ * command. */}
+00061 \textcolor{keywordtype}{int} HelloPushNative\_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, \textcolor{keywordtype}{int} argc)
+00062 \{
+00063     \textcolor{keywordflow}{if} (argc != 3) \textcolor{keywordflow}{return} RedisModule\_WrongArity(ctx);
+00064 
+00065     RedisModuleKey *key = RedisModule\_OpenKey(ctx,argv[1],
+00066         \hyperlink{redismodule_8h_a369d2ff4bca768b05f826a12dd694825}{REDISMODULE\_READ}|\hyperlink{redismodule_8h_a73b37117ef94cb4a904361afcc51b6b4}{REDISMODULE\_WRITE});
+00067 
+00068     RedisModule\_ListPush(key,\hyperlink{redismodule_8h_a15271c33eee2d766df968558d1e0357c}{REDISMODULE\_LIST\_TAIL},argv[2]);
+00069     size\_t newlen = RedisModule\_ValueLength(key);
+00070     RedisModule\_CloseKey(key);
+00071     RedisModule\_ReplyWithLongLong(ctx,newlen);
+00072     \textcolor{keywordflow}{return} \hyperlink{redismodule_8h_a1bc5bfd69abcd378ff52c640adc5418d}{REDISMODULE\_OK};
+00073 \}
+00074 
+00075 \textcolor{comment}{/* HELLO.PUSH.CALL implements RPUSH using an higher level approach, calling}
+00076 \textcolor{comment}{ * a Redis command instead of working with the key in a low level way. This}
+00077 \textcolor{comment}{ * approach is useful when you need to call Redis commands that are not}
+00078 \textcolor{comment}{ * available as low level APIs, or when you don't need the maximum speed}
+00079 \textcolor{comment}{ * possible but instead prefer implementation simplicity. */}
+00080 \textcolor{keywordtype}{int} HelloPushCall\_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, \textcolor{keywordtype}{int} argc)
+00081 \{
+00082     \textcolor{keywordflow}{if} (argc != 3) \textcolor{keywordflow}{return} RedisModule\_WrongArity(ctx);
+00083 
+00084     RedisModuleCallReply *reply;
+00085 
+00086     reply = RedisModule\_Call(ctx,\textcolor{stringliteral}{"RPUSH"},\textcolor{stringliteral}{"ss"},argv[1],argv[2]);
+00087     \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} len = RedisModule\_CallReplyInteger(reply);
+00088     RedisModule\_FreeCallReply(reply);
+00089     RedisModule\_ReplyWithLongLong(ctx,len);
+00090     \textcolor{keywordflow}{return} \hyperlink{redismodule_8h_a1bc5bfd69abcd378ff52c640adc5418d}{REDISMODULE\_OK};
+00091 \}
+00092 
+00093 \textcolor{comment}{/* HELLO.PUSH.CALL2}
+00094 \textcolor{comment}{ * This is exaxctly as HELLO.PUSH.CALL, but shows how we can reply to the}
+00095 \textcolor{comment}{ * client using directly a reply object that Call() returned. */}
+00096 \textcolor{keywordtype}{int} HelloPushCall2\_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, \textcolor{keywordtype}{int} argc)
+00097 \{
+00098     \textcolor{keywordflow}{if} (argc != 3) \textcolor{keywordflow}{return} RedisModule\_WrongArity(ctx);
+00099 
+00100     RedisModuleCallReply *reply;
+00101 
+00102     reply = RedisModule\_Call(ctx,\textcolor{stringliteral}{"RPUSH"},\textcolor{stringliteral}{"ss"},argv[1],argv[2]);
+00103     RedisModule\_ReplyWithCallReply(ctx,reply);
+00104     RedisModule\_FreeCallReply(reply);
+00105     \textcolor{keywordflow}{return} \hyperlink{redismodule_8h_a1bc5bfd69abcd378ff52c640adc5418d}{REDISMODULE\_OK};
+00106 \}
+00107 
+00108 \textcolor{comment}{/* HELLO.LIST.SUM.LEN returns the total length of all the items inside}
+00109 \textcolor{comment}{ * a Redis list, by using the high level Call() API.}
+00110 \textcolor{comment}{ * This command is an example of the array reply access. */}
+00111 \textcolor{keywordtype}{int} HelloListSumLen\_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, \textcolor{keywordtype}{int} argc)
+00112 \{
+00113     \textcolor{keywordflow}{if} (argc != 2) \textcolor{keywordflow}{return} RedisModule\_WrongArity(ctx);
+00114 
+00115     RedisModuleCallReply *reply;
+00116 
+00117     reply = RedisModule\_Call(ctx,\textcolor{stringliteral}{"LRANGE"},\textcolor{stringliteral}{"sll"},argv[1],(\textcolor{keywordtype}{long} \textcolor{keywordtype}{long})0,(\textcolor{keywordtype}{long} \textcolor{keywordtype}{long})-1);
+00118     size\_t strlen = 0;
+00119     size\_t items = RedisModule\_CallReplyLength(reply);
+00120     size\_t j;
+00121     \textcolor{keywordflow}{for} (j = 0; j < items; j++) \{
+00122         RedisModuleCallReply *ele = RedisModule\_CallReplyArrayElement(reply,j);
+00123         strlen += RedisModule\_CallReplyLength(ele);
+00124     \}
+00125     RedisModule\_FreeCallReply(reply);
+00126     RedisModule\_ReplyWithLongLong(ctx,strlen);
+00127     \textcolor{keywordflow}{return} \hyperlink{redismodule_8h_a1bc5bfd69abcd378ff52c640adc5418d}{REDISMODULE\_OK};
+00128 \}
+00129 
+00130 \textcolor{comment}{/* HELLO.LIST.SPLICE srclist dstlist count}
+00131 \textcolor{comment}{ * Moves 'count' elements from the tail of 'srclist' to the head of}
+00132 \textcolor{comment}{ * 'dstlist'. If less than count elements are available, it moves as much}
+00133 \textcolor{comment}{ * elements as possible. */}
+00134 \textcolor{keywordtype}{int} HelloListSplice\_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, \textcolor{keywordtype}{int} argc) \{
+00135     \textcolor{keywordflow}{if} (argc != 4) \textcolor{keywordflow}{return} RedisModule\_WrongArity(ctx);
+00136 
+00137     RedisModuleKey *srckey = RedisModule\_OpenKey(ctx,argv[1],
+00138         \hyperlink{redismodule_8h_a369d2ff4bca768b05f826a12dd694825}{REDISMODULE\_READ}|\hyperlink{redismodule_8h_a73b37117ef94cb4a904361afcc51b6b4}{REDISMODULE\_WRITE});
+00139     RedisModuleKey *dstkey = RedisModule\_OpenKey(ctx,argv[2],
+00140         \hyperlink{redismodule_8h_a369d2ff4bca768b05f826a12dd694825}{REDISMODULE\_READ}|\hyperlink{redismodule_8h_a73b37117ef94cb4a904361afcc51b6b4}{REDISMODULE\_WRITE});
+00141 
+00142     \textcolor{comment}{/* Src and dst key must be empty or lists. */}
+00143     \textcolor{keywordflow}{if} ((RedisModule\_KeyType(srckey) != \hyperlink{redismodule_8h_a4c01058971d9d8fe1cfa02071fa87fa6}{REDISMODULE\_KEYTYPE\_LIST} &&
+00144          RedisModule\_KeyType(srckey) != \hyperlink{redismodule_8h_adf2819748eb5e89c621d2c9c65c0b5f7}{REDISMODULE\_KEYTYPE\_EMPTY}) ||
+00145         (RedisModule\_KeyType(dstkey) != \hyperlink{redismodule_8h_a4c01058971d9d8fe1cfa02071fa87fa6}{REDISMODULE\_KEYTYPE\_LIST} &&
+00146          RedisModule\_KeyType(dstkey) != \hyperlink{redismodule_8h_adf2819748eb5e89c621d2c9c65c0b5f7}{REDISMODULE\_KEYTYPE\_EMPTY}))
+00147     \{
+00148         RedisModule\_CloseKey(srckey);
+00149         RedisModule\_CloseKey(dstkey);
+00150         \textcolor{keywordflow}{return} RedisModule\_ReplyWithError(ctx,
+      \hyperlink{redismodule_8h_ab897689b0673a1e4cbc097cb5bce04c1}{REDISMODULE\_ERRORMSG\_WRONGTYPE});
+00151     \}
+00152 
+00153     \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} count;
+00154     \textcolor{keywordflow}{if} ((RedisModule\_StringToLongLong(argv[3],&count) != \hyperlink{redismodule_8h_a1bc5bfd69abcd378ff52c640adc5418d}{REDISMODULE\_OK}) ||
+00155         (count < 0)) \{
+00156         RedisModule\_CloseKey(srckey);
+00157         RedisModule\_CloseKey(dstkey);
+00158         \textcolor{keywordflow}{return} RedisModule\_ReplyWithError(ctx,\textcolor{stringliteral}{"ERR invalid count"});
+00159     \}
+00160 
+00161     \textcolor{keywordflow}{while}(count-- > 0) \{
+00162         RedisModuleString *ele;
+00163 
+00164         ele = RedisModule\_ListPop(srckey,\hyperlink{redismodule_8h_a15271c33eee2d766df968558d1e0357c}{REDISMODULE\_LIST\_TAIL});
+00165         \textcolor{keywordflow}{if} (ele == NULL) \textcolor{keywordflow}{break};
+00166         RedisModule\_ListPush(dstkey,\hyperlink{redismodule_8h_a6ca6298fda4f019c7585d34b870fd5f1}{REDISMODULE\_LIST\_HEAD},ele);
+00167         RedisModule\_FreeString(ctx,ele);
+00168     \}
+00169 
+00170     size\_t len = RedisModule\_ValueLength(srckey);
+00171     RedisModule\_CloseKey(srckey);
+00172     RedisModule\_CloseKey(dstkey);
+00173     RedisModule\_ReplyWithLongLong(ctx,len);
+00174     \textcolor{keywordflow}{return} \hyperlink{redismodule_8h_a1bc5bfd69abcd378ff52c640adc5418d}{REDISMODULE\_OK};
+00175 \}
+00176 
+00177 \textcolor{comment}{/* Like the HELLO.LIST.SPLICE above, but uses automatic memory management}
+00178 \textcolor{comment}{ * in order to avoid freeing stuff. */}
+00179 \textcolor{keywordtype}{int} HelloListSpliceAuto\_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, \textcolor{keywordtype}{int} argc) \{
+00180     \textcolor{keywordflow}{if} (argc != 4) \textcolor{keywordflow}{return} RedisModule\_WrongArity(ctx);
+00181 
+00182     RedisModule\_AutoMemory(ctx);
+00183 
+00184     RedisModuleKey *srckey = RedisModule\_OpenKey(ctx,argv[1],
+00185         \hyperlink{redismodule_8h_a369d2ff4bca768b05f826a12dd694825}{REDISMODULE\_READ}|\hyperlink{redismodule_8h_a73b37117ef94cb4a904361afcc51b6b4}{REDISMODULE\_WRITE});
+00186     RedisModuleKey *dstkey = RedisModule\_OpenKey(ctx,argv[2],
+00187         \hyperlink{redismodule_8h_a369d2ff4bca768b05f826a12dd694825}{REDISMODULE\_READ}|\hyperlink{redismodule_8h_a73b37117ef94cb4a904361afcc51b6b4}{REDISMODULE\_WRITE});
+00188 
+00189     \textcolor{comment}{/* Src and dst key must be empty or lists. */}
+00190     \textcolor{keywordflow}{if} ((RedisModule\_KeyType(srckey) != \hyperlink{redismodule_8h_a4c01058971d9d8fe1cfa02071fa87fa6}{REDISMODULE\_KEYTYPE\_LIST} &&
+00191          RedisModule\_KeyType(srckey) != \hyperlink{redismodule_8h_adf2819748eb5e89c621d2c9c65c0b5f7}{REDISMODULE\_KEYTYPE\_EMPTY}) ||
+00192         (RedisModule\_KeyType(dstkey) != \hyperlink{redismodule_8h_a4c01058971d9d8fe1cfa02071fa87fa6}{REDISMODULE\_KEYTYPE\_LIST} &&
+00193          RedisModule\_KeyType(dstkey) != \hyperlink{redismodule_8h_adf2819748eb5e89c621d2c9c65c0b5f7}{REDISMODULE\_KEYTYPE\_EMPTY}))
+00194     \{
+00195         \textcolor{keywordflow}{return} RedisModule\_ReplyWithError(ctx,
+      \hyperlink{redismodule_8h_ab897689b0673a1e4cbc097cb5bce04c1}{REDISMODULE\_ERRORMSG\_WRONGTYPE});
+00196     \}
+00197 
+00198     \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} count;
+00199     \textcolor{keywordflow}{if} ((RedisModule\_StringToLongLong(argv[3],&count) != \hyperlink{redismodule_8h_a1bc5bfd69abcd378ff52c640adc5418d}{REDISMODULE\_OK}) ||
+00200         (count < 0))
+00201     \{
+00202         \textcolor{keywordflow}{return} RedisModule\_ReplyWithError(ctx,\textcolor{stringliteral}{"ERR invalid count"});
+00203     \}
+00204 
+00205     \textcolor{keywordflow}{while}(count-- > 0) \{
+00206         RedisModuleString *ele;
+00207 
+00208         ele = RedisModule\_ListPop(srckey,\hyperlink{redismodule_8h_a15271c33eee2d766df968558d1e0357c}{REDISMODULE\_LIST\_TAIL});
+00209         \textcolor{keywordflow}{if} (ele == NULL) \textcolor{keywordflow}{break};
+00210         RedisModule\_ListPush(dstkey,\hyperlink{redismodule_8h_a6ca6298fda4f019c7585d34b870fd5f1}{REDISMODULE\_LIST\_HEAD},ele);
+00211     \}
+00212 
+00213     size\_t len = RedisModule\_ValueLength(srckey);
+00214     RedisModule\_ReplyWithLongLong(ctx,len);
+00215     \textcolor{keywordflow}{return} \hyperlink{redismodule_8h_a1bc5bfd69abcd378ff52c640adc5418d}{REDISMODULE\_OK};
+00216 \}
+00217 
+00218 \textcolor{comment}{/* HELLO.RAND.ARRAY <count>}
+00219 \textcolor{comment}{ * Shows how to generate arrays as commands replies.}
+00220 \textcolor{comment}{ * It just outputs <count> random numbers. */}
+00221 \textcolor{keywordtype}{int} HelloRandArray\_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, \textcolor{keywordtype}{int} argc) \{
+00222     \textcolor{keywordflow}{if} (argc != 2) \textcolor{keywordflow}{return} RedisModule\_WrongArity(ctx);
+00223     \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} count;
+00224     \textcolor{keywordflow}{if} (RedisModule\_StringToLongLong(argv[1],&count) != \hyperlink{redismodule_8h_a1bc5bfd69abcd378ff52c640adc5418d}{REDISMODULE\_OK} ||
+00225         count < 0)
+00226         \textcolor{keywordflow}{return} RedisModule\_ReplyWithError(ctx,\textcolor{stringliteral}{"ERR invalid count"});
+00227 
+00228     \textcolor{comment}{/* To reply with an array, we call RedisModule\_ReplyWithArray() followed}
+00229 \textcolor{comment}{     * by other "count" calls to other reply functions in order to generate}
+00230 \textcolor{comment}{     * the elements of the array. */}
+00231     RedisModule\_ReplyWithArray(ctx,count);
+00232     \textcolor{keywordflow}{while}(count--) RedisModule\_ReplyWithLongLong(ctx,rand());
+00233     \textcolor{keywordflow}{return} \hyperlink{redismodule_8h_a1bc5bfd69abcd378ff52c640adc5418d}{REDISMODULE\_OK};
+00234 \}
+00235 
+00236 \textcolor{comment}{/* This is a simple command to test replication. Because of the "!" modified}
+00237 \textcolor{comment}{ * in the RedisModule\_Call() call, the two INCRs get replicated.}
+00238 \textcolor{comment}{ * Also note how the ECHO is replicated in an unexpected position (check}
+00239 \textcolor{comment}{ * comments the function implementation). */}
+00240 \textcolor{keywordtype}{int} HelloRepl1\_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, \textcolor{keywordtype}{int} argc)
+00241 \{
+00242     \hyperlink{redismodule_8h_a46d75d81383a00bd6b941af6cadf64c2}{REDISMODULE\_NOT\_USED}(argv);
+00243     \hyperlink{redismodule_8h_a46d75d81383a00bd6b941af6cadf64c2}{REDISMODULE\_NOT\_USED}(argc);
+00244     RedisModule\_AutoMemory(ctx);
+00245 
+00246     \textcolor{comment}{/* This will be replicated *after* the two INCR statements, since}
+00247 \textcolor{comment}{     * the Call() replication has precedence, so the actual replication}
+00248 \textcolor{comment}{     * stream will be:}
+00249 \textcolor{comment}{     *}
+00250 \textcolor{comment}{     * MULTI}
+00251 \textcolor{comment}{     * INCR foo}
+00252 \textcolor{comment}{     * INCR bar}
+00253 \textcolor{comment}{     * ECHO c foo}
+00254 \textcolor{comment}{     * EXEC}
+00255 \textcolor{comment}{     */}
+00256     RedisModule\_Replicate(ctx,\textcolor{stringliteral}{"ECHO"},\textcolor{stringliteral}{"c"},\textcolor{stringliteral}{"foo"});
+00257 
+00258     \textcolor{comment}{/* Using the "!" modifier we replicate the command if it}
+00259 \textcolor{comment}{     * modified the dataset in some way. */}
+00260     RedisModule\_Call(ctx,\textcolor{stringliteral}{"INCR"},\textcolor{stringliteral}{"c!"},\textcolor{stringliteral}{"foo"});
+00261     RedisModule\_Call(ctx,\textcolor{stringliteral}{"INCR"},\textcolor{stringliteral}{"c!"},\textcolor{stringliteral}{"bar"});
+00262 
+00263     RedisModule\_ReplyWithLongLong(ctx,0);
+00264 
+00265     \textcolor{keywordflow}{return} \hyperlink{redismodule_8h_a1bc5bfd69abcd378ff52c640adc5418d}{REDISMODULE\_OK};
+00266 \}
+00267 
+00268 \textcolor{comment}{/* Another command to show replication. In this case, we call}
+00269 \textcolor{comment}{ * RedisModule\_ReplicateVerbatim() to mean we want just the command to be}
+00270 \textcolor{comment}{ * propagated to slaves / AOF exactly as it was called by the user.}
+00271 \textcolor{comment}{ *}
+00272 \textcolor{comment}{ * This command also shows how to work with string objects.}
+00273 \textcolor{comment}{ * It takes a list, and increments all the elements (that must have}
+00274 \textcolor{comment}{ * a numerical value) by 1, returning the sum of all the elements}
+00275 \textcolor{comment}{ * as reply.}
+00276 \textcolor{comment}{ *}
+00277 \textcolor{comment}{ * Usage: HELLO.REPL2 <list-key> */}
+00278 \textcolor{keywordtype}{int} HelloRepl2\_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, \textcolor{keywordtype}{int} argc) \{
+00279     \textcolor{keywordflow}{if} (argc != 2) \textcolor{keywordflow}{return} RedisModule\_WrongArity(ctx);
+00280 
+00281     RedisModule\_AutoMemory(ctx); \textcolor{comment}{/* Use automatic memory management. */}
+00282     RedisModuleKey *key = RedisModule\_OpenKey(ctx,argv[1],
+00283         \hyperlink{redismodule_8h_a369d2ff4bca768b05f826a12dd694825}{REDISMODULE\_READ}|\hyperlink{redismodule_8h_a73b37117ef94cb4a904361afcc51b6b4}{REDISMODULE\_WRITE});
+00284 
+00285     \textcolor{keywordflow}{if} (RedisModule\_KeyType(key) != \hyperlink{redismodule_8h_a4c01058971d9d8fe1cfa02071fa87fa6}{REDISMODULE\_KEYTYPE\_LIST})
+00286         \textcolor{keywordflow}{return} RedisModule\_ReplyWithError(ctx,
+      \hyperlink{redismodule_8h_ab897689b0673a1e4cbc097cb5bce04c1}{REDISMODULE\_ERRORMSG\_WRONGTYPE});
+00287 
+00288     size\_t listlen = RedisModule\_ValueLength(key);
+00289     \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} sum = 0;
+00290 
+00291     \textcolor{comment}{/* Rotate and increment. */}
+00292     \textcolor{keywordflow}{while}(listlen--) \{
+00293         RedisModuleString *ele = RedisModule\_ListPop(key,
+      \hyperlink{redismodule_8h_a15271c33eee2d766df968558d1e0357c}{REDISMODULE\_LIST\_TAIL});
+00294         \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} val;
+00295         \textcolor{keywordflow}{if} (RedisModule\_StringToLongLong(ele,&val) != \hyperlink{redismodule_8h_a1bc5bfd69abcd378ff52c640adc5418d}{REDISMODULE\_OK}) val = 0;
+00296         val++;
+00297         sum += val;
+00298         RedisModuleString *newele = RedisModule\_CreateStringFromLongLong(ctx,val);
+00299         RedisModule\_ListPush(key,\hyperlink{redismodule_8h_a6ca6298fda4f019c7585d34b870fd5f1}{REDISMODULE\_LIST\_HEAD},newele);
+00300     \}
+00301     RedisModule\_ReplyWithLongLong(ctx,sum);
+00302     RedisModule\_ReplicateVerbatim(ctx);
+00303     \textcolor{keywordflow}{return} \hyperlink{redismodule_8h_a1bc5bfd69abcd378ff52c640adc5418d}{REDISMODULE\_OK};
+00304 \}
+00305 
+00306 \textcolor{comment}{/* This is an example of strings DMA access. Given a key containing a string}
+00307 \textcolor{comment}{ * it toggles the case of each character from lower to upper case or the}
+00308 \textcolor{comment}{ * other way around.}
+00309 \textcolor{comment}{ *}
+00310 \textcolor{comment}{ * No automatic memory management is used in this example (for the sake}
+00311 \textcolor{comment}{ * of variety).}
+00312 \textcolor{comment}{ *}
+00313 \textcolor{comment}{ * HELLO.TOGGLE.CASE key */}
+00314 \textcolor{keywordtype}{int} HelloToggleCase\_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, \textcolor{keywordtype}{int} argc) \{
+00315     \textcolor{keywordflow}{if} (argc != 2) \textcolor{keywordflow}{return} RedisModule\_WrongArity(ctx);
+00316 
+00317     RedisModuleKey *key = RedisModule\_OpenKey(ctx,argv[1],
+00318         \hyperlink{redismodule_8h_a369d2ff4bca768b05f826a12dd694825}{REDISMODULE\_READ}|\hyperlink{redismodule_8h_a73b37117ef94cb4a904361afcc51b6b4}{REDISMODULE\_WRITE});
+00319 
+00320     \textcolor{keywordtype}{int} keytype = RedisModule\_KeyType(key);
+00321     \textcolor{keywordflow}{if} (keytype != \hyperlink{redismodule_8h_aa95428eed7110a77736ddbe0584aebbf}{REDISMODULE\_KEYTYPE\_STRING} &&
+00322         keytype != \hyperlink{redismodule_8h_adf2819748eb5e89c621d2c9c65c0b5f7}{REDISMODULE\_KEYTYPE\_EMPTY})
+00323     \{
+00324         RedisModule\_CloseKey(key);
+00325         \textcolor{keywordflow}{return} RedisModule\_ReplyWithError(ctx,
+      \hyperlink{redismodule_8h_ab897689b0673a1e4cbc097cb5bce04c1}{REDISMODULE\_ERRORMSG\_WRONGTYPE});
+00326     \}
+00327 
+00328     \textcolor{keywordflow}{if} (keytype == \hyperlink{redismodule_8h_aa95428eed7110a77736ddbe0584aebbf}{REDISMODULE\_KEYTYPE\_STRING}) \{
+00329         size\_t len, j;
+00330         \textcolor{keywordtype}{char} *s = RedisModule\_StringDMA(key,&len,\hyperlink{redismodule_8h_a73b37117ef94cb4a904361afcc51b6b4}{REDISMODULE\_WRITE});
+00331         \textcolor{keywordflow}{for} (j = 0; j < len; j++) \{
+00332             \textcolor{keywordflow}{if} (isupper(s[j])) \{
+00333                 s[j] = tolower(s[j]);
+00334             \} \textcolor{keywordflow}{else} \{
+00335                 s[j] = toupper(s[j]);
+00336             \}
+00337         \}
+00338     \}
+00339 
+00340     RedisModule\_CloseKey(key);
+00341     RedisModule\_ReplyWithSimpleString(ctx,\textcolor{stringliteral}{"OK"});
+00342     RedisModule\_ReplicateVerbatim(ctx);
+00343     \textcolor{keywordflow}{return} \hyperlink{redismodule_8h_a1bc5bfd69abcd378ff52c640adc5418d}{REDISMODULE\_OK};
+00344 \}
+00345 
+00346 \textcolor{comment}{/* HELLO.MORE.EXPIRE key milliseconds.}
+00347 \textcolor{comment}{ *}
+00348 \textcolor{comment}{ * If they key has already an associated TTL, extends it by "milliseconds"}
+00349 \textcolor{comment}{ * milliseconds. Otherwise no operation is performed. */}
+00350 \textcolor{keywordtype}{int} HelloMoreExpire\_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, \textcolor{keywordtype}{int} argc) \{
+00351     RedisModule\_AutoMemory(ctx); \textcolor{comment}{/* Use automatic memory management. */}
+00352     \textcolor{keywordflow}{if} (argc != 3) \textcolor{keywordflow}{return} RedisModule\_WrongArity(ctx);
+00353 
+00354     mstime\_t addms, expire;
+00355 
+00356     \textcolor{keywordflow}{if} (RedisModule\_StringToLongLong(argv[2],&addms) != \hyperlink{redismodule_8h_a1bc5bfd69abcd378ff52c640adc5418d}{REDISMODULE\_OK})
+00357         \textcolor{keywordflow}{return} RedisModule\_ReplyWithError(ctx,\textcolor{stringliteral}{"ERR invalid expire time"});
+00358 
+00359     RedisModuleKey *key = RedisModule\_OpenKey(ctx,argv[1],
+00360         \hyperlink{redismodule_8h_a369d2ff4bca768b05f826a12dd694825}{REDISMODULE\_READ}|\hyperlink{redismodule_8h_a73b37117ef94cb4a904361afcc51b6b4}{REDISMODULE\_WRITE});
+00361     expire = RedisModule\_GetExpire(key);
+00362     \textcolor{keywordflow}{if} (expire != \hyperlink{redismodule_8h_aa3f706d438eca2eca600845f5ee2e9b3}{REDISMODULE\_NO\_EXPIRE}) \{
+00363         expire += addms;
+00364         RedisModule\_SetExpire(key,expire);
+00365     \}
+00366     \textcolor{keywordflow}{return} RedisModule\_ReplyWithSimpleString(ctx,\textcolor{stringliteral}{"OK"});
+00367 \}
+00368 
+00369 \textcolor{comment}{/* HELLO.ZSUMRANGE key startscore endscore}
+00370 \textcolor{comment}{ * Return the sum of all the scores elements between startscore and endscore.}
+00371 \textcolor{comment}{ *}
+00372 \textcolor{comment}{ * The computation is performed two times, one time from start to end and}
+00373 \textcolor{comment}{ * another time backward. The two scores, returned as a two element array,}
+00374 \textcolor{comment}{ * should match.*/}
+00375 \textcolor{keywordtype}{int} HelloZsumRange\_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, \textcolor{keywordtype}{int} argc) \{
+00376     \textcolor{keywordtype}{double} score\_start, score\_end;
+00377     \textcolor{keywordflow}{if} (argc != 4) \textcolor{keywordflow}{return} RedisModule\_WrongArity(ctx);
+00378 
+00379     \textcolor{keywordflow}{if} (RedisModule\_StringToDouble(argv[2],&score\_start) != \hyperlink{redismodule_8h_a1bc5bfd69abcd378ff52c640adc5418d}{REDISMODULE\_OK} ||
+00380         RedisModule\_StringToDouble(argv[3],&score\_end) != \hyperlink{redismodule_8h_a1bc5bfd69abcd378ff52c640adc5418d}{REDISMODULE\_OK})
+00381     \{
+00382         \textcolor{keywordflow}{return} RedisModule\_ReplyWithError(ctx,\textcolor{stringliteral}{"ERR invalid range"});
+00383     \}
+00384 
+00385     RedisModuleKey *key = RedisModule\_OpenKey(ctx,argv[1],
+00386         \hyperlink{redismodule_8h_a369d2ff4bca768b05f826a12dd694825}{REDISMODULE\_READ}|\hyperlink{redismodule_8h_a73b37117ef94cb4a904361afcc51b6b4}{REDISMODULE\_WRITE});
+00387     \textcolor{keywordflow}{if} (RedisModule\_KeyType(key) != \hyperlink{redismodule_8h_a93d1514d4c11cc65551b36cfd9a72cc2}{REDISMODULE\_KEYTYPE\_ZSET}) \{
+00388         \textcolor{keywordflow}{return} RedisModule\_ReplyWithError(ctx,
+      \hyperlink{redismodule_8h_ab897689b0673a1e4cbc097cb5bce04c1}{REDISMODULE\_ERRORMSG\_WRONGTYPE});
+00389     \}
+00390 
+00391     \textcolor{keywordtype}{double} scoresum\_a = 0;
+00392     \textcolor{keywordtype}{double} scoresum\_b = 0;
+00393 
+00394     RedisModule\_ZsetFirstInScoreRange(key,score\_start,score\_end,0,0);
+00395     \textcolor{keywordflow}{while}(!RedisModule\_ZsetRangeEndReached(key)) \{
+00396         \textcolor{keywordtype}{double} score;
+00397         RedisModuleString *ele = RedisModule\_ZsetRangeCurrentElement(key,&score);
+00398         RedisModule\_FreeString(ctx,ele);
+00399         scoresum\_a += score;
+00400         RedisModule\_ZsetRangeNext(key);
+00401     \}
+00402     RedisModule\_ZsetRangeStop(key);
+00403 
+00404     RedisModule\_ZsetLastInScoreRange(key,score\_start,score\_end,0,0);
+00405     \textcolor{keywordflow}{while}(!RedisModule\_ZsetRangeEndReached(key)) \{
+00406         \textcolor{keywordtype}{double} score;
+00407         RedisModuleString *ele = RedisModule\_ZsetRangeCurrentElement(key,&score);
+00408         RedisModule\_FreeString(ctx,ele);
+00409         scoresum\_b += score;
+00410         RedisModule\_ZsetRangePrev(key);
+00411     \}
+00412 
+00413     RedisModule\_ZsetRangeStop(key);
+00414 
+00415     RedisModule\_CloseKey(key);
+00416 
+00417     RedisModule\_ReplyWithArray(ctx,2);
+00418     RedisModule\_ReplyWithDouble(ctx,scoresum\_a);
+00419     RedisModule\_ReplyWithDouble(ctx,scoresum\_b);
+00420     \textcolor{keywordflow}{return} \hyperlink{redismodule_8h_a1bc5bfd69abcd378ff52c640adc5418d}{REDISMODULE\_OK};
+00421 \}
+00422 
+00423 \textcolor{comment}{/* HELLO.LEXRANGE key min\_lex max\_lex min\_age max\_age}
+00424 \textcolor{comment}{ * This command expects a sorted set stored at key in the following form:}
+00425 \textcolor{comment}{ * - All the elements have score 0.}
+00426 \textcolor{comment}{ * - Elements are pairs of "<name>:<age>", for example "Anna:52".}
+00427 \textcolor{comment}{ * The command will return all the sorted set items that are lexicographically}
+00428 \textcolor{comment}{ * between the specified range (using the same format as ZRANGEBYLEX)}
+00429 \textcolor{comment}{ * and having an age between min\_age and max\_age. */}
+00430 \textcolor{keywordtype}{int} HelloLexRange\_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, \textcolor{keywordtype}{int} argc) \{
+00431     RedisModule\_AutoMemory(ctx); \textcolor{comment}{/* Use automatic memory management. */}
+00432 
+00433     \textcolor{keywordflow}{if} (argc != 6) \textcolor{keywordflow}{return} RedisModule\_WrongArity(ctx);
+00434 
+00435     RedisModuleKey *key = RedisModule\_OpenKey(ctx,argv[1],
+00436         \hyperlink{redismodule_8h_a369d2ff4bca768b05f826a12dd694825}{REDISMODULE\_READ}|\hyperlink{redismodule_8h_a73b37117ef94cb4a904361afcc51b6b4}{REDISMODULE\_WRITE});
+00437     \textcolor{keywordflow}{if} (RedisModule\_KeyType(key) != \hyperlink{redismodule_8h_a93d1514d4c11cc65551b36cfd9a72cc2}{REDISMODULE\_KEYTYPE\_ZSET}) \{
+00438         \textcolor{keywordflow}{return} RedisModule\_ReplyWithError(ctx,
+      \hyperlink{redismodule_8h_ab897689b0673a1e4cbc097cb5bce04c1}{REDISMODULE\_ERRORMSG\_WRONGTYPE});
+00439     \}
+00440 
+00441     \textcolor{keywordflow}{if} (RedisModule\_ZsetFirstInLexRange(key,argv[2],argv[3]) != 
+      \hyperlink{redismodule_8h_a1bc5bfd69abcd378ff52c640adc5418d}{REDISMODULE\_OK}) \{
+00442         \textcolor{keywordflow}{return} RedisModule\_ReplyWithError(ctx,\textcolor{stringliteral}{"invalid range"});
+00443     \}
+00444 
+00445     \textcolor{keywordtype}{int} arraylen = 0;
+00446     RedisModule\_ReplyWithArray(ctx,\hyperlink{redismodule_8h_af07005134cbf107aad1c8e0ded8fcf2b}{REDISMODULE\_POSTPONED\_ARRAY\_LEN});
+00447     \textcolor{keywordflow}{while}(!RedisModule\_ZsetRangeEndReached(key)) \{
+00448         \textcolor{keywordtype}{double} score;
+00449         RedisModuleString *ele = RedisModule\_ZsetRangeCurrentElement(key,&score);
+00450         RedisModule\_ReplyWithString(ctx,ele);
+00451         RedisModule\_FreeString(ctx,ele);
+00452         RedisModule\_ZsetRangeNext(key);
+00453         arraylen++;
+00454     \}
+00455     RedisModule\_ZsetRangeStop(key);
+00456     RedisModule\_ReplySetArrayLength(ctx,arraylen);
+00457     RedisModule\_CloseKey(key);
+00458     \textcolor{keywordflow}{return} \hyperlink{redismodule_8h_a1bc5bfd69abcd378ff52c640adc5418d}{REDISMODULE\_OK};
+00459 \}
+00460 
+00461 \textcolor{comment}{/* HELLO.HCOPY key srcfield dstfield}
+00462 \textcolor{comment}{ * This is just an example command that sets the hash field dstfield to the}
+00463 \textcolor{comment}{ * same value of srcfield. If srcfield does not exist no operation is}
+00464 \textcolor{comment}{ * performed.}
+00465 \textcolor{comment}{ *}
+00466 \textcolor{comment}{ * The command returns 1 if the copy is performed (srcfield exists) otherwise}
+00467 \textcolor{comment}{ * 0 is returned. */}
+00468 \textcolor{keywordtype}{int} HelloHCopy\_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, \textcolor{keywordtype}{int} argc) \{
+00469     RedisModule\_AutoMemory(ctx); \textcolor{comment}{/* Use automatic memory management. */}
+00470 
+00471     \textcolor{keywordflow}{if} (argc != 4) \textcolor{keywordflow}{return} RedisModule\_WrongArity(ctx);
+00472     RedisModuleKey *key = RedisModule\_OpenKey(ctx,argv[1],
+00473         \hyperlink{redismodule_8h_a369d2ff4bca768b05f826a12dd694825}{REDISMODULE\_READ}|\hyperlink{redismodule_8h_a73b37117ef94cb4a904361afcc51b6b4}{REDISMODULE\_WRITE});
+00474     \textcolor{keywordtype}{int} type = RedisModule\_KeyType(key);
+00475     \textcolor{keywordflow}{if} (type != \hyperlink{redismodule_8h_ac019575ac57520c325597e2fb54c5b71}{REDISMODULE\_KEYTYPE\_HASH} &&
+00476         type != \hyperlink{redismodule_8h_adf2819748eb5e89c621d2c9c65c0b5f7}{REDISMODULE\_KEYTYPE\_EMPTY})
+00477     \{
+00478         \textcolor{keywordflow}{return} RedisModule\_ReplyWithError(ctx,
+      \hyperlink{redismodule_8h_ab897689b0673a1e4cbc097cb5bce04c1}{REDISMODULE\_ERRORMSG\_WRONGTYPE});
+00479     \}
+00480 
+00481     \textcolor{comment}{/* Get the old field value. */}
+00482     RedisModuleString *oldval;
+00483     RedisModule\_HashGet(key,\hyperlink{redismodule_8h_a991da3f59f9c0261d449957f71e2dbf8}{REDISMODULE\_HASH\_NONE},argv[2],&oldval,NULL);
+00484     \textcolor{keywordflow}{if} (oldval) \{
+00485         RedisModule\_HashSet(key,\hyperlink{redismodule_8h_a991da3f59f9c0261d449957f71e2dbf8}{REDISMODULE\_HASH\_NONE},argv[3],oldval,NULL);
+00486     \}
+00487     RedisModule\_ReplyWithLongLong(ctx,oldval != NULL);
+00488     \textcolor{keywordflow}{return} \hyperlink{redismodule_8h_a1bc5bfd69abcd378ff52c640adc5418d}{REDISMODULE\_OK};
+00489 \}
+00490 
+00491 \textcolor{comment}{/* HELLO.LEFTPAD str len ch}
+00492 \textcolor{comment}{ * This is an implementation of the infamous LEFTPAD function, that}
+00493 \textcolor{comment}{ * was at the center of an issue with the npm modules system in March 2016.}
+00494 \textcolor{comment}{ *}
+00495 \textcolor{comment}{ * LEFTPAD is a good example of using a Redis Modules API called}
+00496 \textcolor{comment}{ * "pool allocator", that was a famous way to allocate memory in yet another}
+00497 \textcolor{comment}{ * open source project, the Apache web server.}
+00498 \textcolor{comment}{ *}
+00499 \textcolor{comment}{ * The concept is very simple: there is memory that is useful to allocate}
+00500 \textcolor{comment}{ * only in the context of serving a request, and must be freed anyway when}
+00501 \textcolor{comment}{ * the callback implementing the command returns. So in that case the module}
+00502 \textcolor{comment}{ * does not need to retain a reference to these allocations, it is just}
+00503 \textcolor{comment}{ * required to free the memory before returning. When this is the case the}
+00504 \textcolor{comment}{ * module can call RedisModule\_PoolAlloc() instead, that works like malloc()}
+00505 \textcolor{comment}{ * but will automatically free the memory when the module callback returns.}
+00506 \textcolor{comment}{ *}
+00507 \textcolor{comment}{ * Note that PoolAlloc() does not necessarily require AutoMemory to be}
+00508 \textcolor{comment}{ * active. */}
+00509 \textcolor{keywordtype}{int} HelloLeftPad\_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, \textcolor{keywordtype}{int} argc) \{
+00510     RedisModule\_AutoMemory(ctx); \textcolor{comment}{/* Use automatic memory management. */}
+00511     \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} padlen;
+00512 
+00513     \textcolor{keywordflow}{if} (argc != 4) \textcolor{keywordflow}{return} RedisModule\_WrongArity(ctx);
+00514 
+00515     \textcolor{keywordflow}{if} ((RedisModule\_StringToLongLong(argv[2],&padlen) != \hyperlink{redismodule_8h_a1bc5bfd69abcd378ff52c640adc5418d}{REDISMODULE\_OK}) ||
+00516         (padlen< 0)) \{
+00517         \textcolor{keywordflow}{return} RedisModule\_ReplyWithError(ctx,\textcolor{stringliteral}{"ERR invalid padding length"});
+00518     \}
+00519     size\_t strlen, chlen;
+00520     \textcolor{keyword}{const} \textcolor{keywordtype}{char} *str = RedisModule\_StringPtrLen(argv[1], &strlen);
+00521     \textcolor{keyword}{const} \textcolor{keywordtype}{char} *ch = RedisModule\_StringPtrLen(argv[3], &chlen);
+00522 
+00523     \textcolor{comment}{/* If the string is already larger than the target len, just return}
+00524 \textcolor{comment}{     * the string itself. */}
+00525     \textcolor{keywordflow}{if} (strlen >= (size\_t)padlen)
+00526         \textcolor{keywordflow}{return} RedisModule\_ReplyWithString(ctx,argv[1]);
+00527 
+00528     \textcolor{comment}{/* Padding must be a single character in this simple implementation. */}
+00529     \textcolor{keywordflow}{if} (chlen != 1)
+00530         \textcolor{keywordflow}{return} RedisModule\_ReplyWithError(ctx,
+00531             \textcolor{stringliteral}{"ERR padding must be a single char"});
+00532 
+00533     \textcolor{comment}{/* Here we use our pool allocator, for our throw-away allocation. */}
+00534     padlen -= strlen;
+00535     \textcolor{keywordtype}{char} *buf = RedisModule\_PoolAlloc(ctx,padlen+strlen);
+00536     \textcolor{keywordflow}{for} (\textcolor{keywordtype}{long} \textcolor{keywordtype}{long} j = 0; j < padlen; j++) buf[j] = *ch;
+00537     memcpy(buf+padlen,str,strlen);
+00538 
+00539     RedisModule\_ReplyWithStringBuffer(ctx,buf,padlen+strlen);
+00540     \textcolor{keywordflow}{return} \hyperlink{redismodule_8h_a1bc5bfd69abcd378ff52c640adc5418d}{REDISMODULE\_OK};
+00541 \}
+00542 
+00543 \textcolor{comment}{/* This function must be present on each Redis module. It is used in order to}
+00544 \textcolor{comment}{ * register the commands into the Redis server. */}
+00545 \textcolor{keywordtype}{int} RedisModule\_OnLoad(RedisModuleCtx *ctx, RedisModuleString **argv, \textcolor{keywordtype}{int} argc) \{
+00546     \textcolor{keywordflow}{if} (RedisModule\_Init(ctx,\textcolor{stringliteral}{"helloworld"},1,\hyperlink{redismodule_8h_a1fc9be44e4cd6d60f7129d4393b6b580}{REDISMODULE\_APIVER\_1})
+00547         == \hyperlink{redismodule_8h_a3df6f5bd5247289e66f44437a7cddd49}{REDISMODULE\_ERR}) \textcolor{keywordflow}{return} \hyperlink{redismodule_8h_a3df6f5bd5247289e66f44437a7cddd49}{REDISMODULE\_ERR};
+00548 
+00549     \textcolor{comment}{/* Log the list of parameters passing loading the module. */}
+00550     \textcolor{keywordflow}{for} (\textcolor{keywordtype}{int} j = 0; j < argc; j++) \{
+00551         \textcolor{keyword}{const} \textcolor{keywordtype}{char} *s = RedisModule\_StringPtrLen(argv[j],NULL);
+00552         printf(\textcolor{stringliteral}{"Module loaded with ARGV[%d] = %s\(\backslash\)n"}, j, s);
+00553     \}
+00554 
+00555     \textcolor{keywordflow}{if} (RedisModule\_CreateCommand(ctx,\textcolor{stringliteral}{"hello.simple"},
+00556         HelloSimple\_RedisCommand,\textcolor{stringliteral}{"readonly"},0,0,0) == \hyperlink{redismodule_8h_a3df6f5bd5247289e66f44437a7cddd49}{REDISMODULE\_ERR})
+00557         \textcolor{keywordflow}{return} \hyperlink{redismodule_8h_a3df6f5bd5247289e66f44437a7cddd49}{REDISMODULE\_ERR};
+00558 
+00559     \textcolor{keywordflow}{if} (RedisModule\_CreateCommand(ctx,\textcolor{stringliteral}{"hello.push.native"},
+00560         HelloPushNative\_RedisCommand,\textcolor{stringliteral}{"write deny-oom"},1,1,1) == 
+      \hyperlink{redismodule_8h_a3df6f5bd5247289e66f44437a7cddd49}{REDISMODULE\_ERR})
+00561         \textcolor{keywordflow}{return} \hyperlink{redismodule_8h_a3df6f5bd5247289e66f44437a7cddd49}{REDISMODULE\_ERR};
+00562 
+00563     \textcolor{keywordflow}{if} (RedisModule\_CreateCommand(ctx,\textcolor{stringliteral}{"hello.push.call"},
+00564         HelloPushCall\_RedisCommand,\textcolor{stringliteral}{"write deny-oom"},1,1,1) == 
+      \hyperlink{redismodule_8h_a3df6f5bd5247289e66f44437a7cddd49}{REDISMODULE\_ERR})
+00565         \textcolor{keywordflow}{return} \hyperlink{redismodule_8h_a3df6f5bd5247289e66f44437a7cddd49}{REDISMODULE\_ERR};
+00566 
+00567     \textcolor{keywordflow}{if} (RedisModule\_CreateCommand(ctx,\textcolor{stringliteral}{"hello.push.call2"},
+00568         HelloPushCall2\_RedisCommand,\textcolor{stringliteral}{"write deny-oom"},1,1,1) == 
+      \hyperlink{redismodule_8h_a3df6f5bd5247289e66f44437a7cddd49}{REDISMODULE\_ERR})
+00569         \textcolor{keywordflow}{return} \hyperlink{redismodule_8h_a3df6f5bd5247289e66f44437a7cddd49}{REDISMODULE\_ERR};
+00570 
+00571     \textcolor{keywordflow}{if} (RedisModule\_CreateCommand(ctx,\textcolor{stringliteral}{"hello.list.sum.len"},
+00572         HelloListSumLen\_RedisCommand,\textcolor{stringliteral}{"readonly"},1,1,1) == \hyperlink{redismodule_8h_a3df6f5bd5247289e66f44437a7cddd49}{REDISMODULE\_ERR})
+00573         \textcolor{keywordflow}{return} \hyperlink{redismodule_8h_a3df6f5bd5247289e66f44437a7cddd49}{REDISMODULE\_ERR};
+00574 
+00575     \textcolor{keywordflow}{if} (RedisModule\_CreateCommand(ctx,\textcolor{stringliteral}{"hello.list.splice"},
+00576         HelloListSplice\_RedisCommand,\textcolor{stringliteral}{"write deny-oom"},1,2,1) == 
+      \hyperlink{redismodule_8h_a3df6f5bd5247289e66f44437a7cddd49}{REDISMODULE\_ERR})
+00577         \textcolor{keywordflow}{return} \hyperlink{redismodule_8h_a3df6f5bd5247289e66f44437a7cddd49}{REDISMODULE\_ERR};
+00578 
+00579     \textcolor{keywordflow}{if} (RedisModule\_CreateCommand(ctx,\textcolor{stringliteral}{"hello.list.splice.auto"},
+00580         HelloListSpliceAuto\_RedisCommand,
+00581         \textcolor{stringliteral}{"write deny-oom"},1,2,1) == \hyperlink{redismodule_8h_a3df6f5bd5247289e66f44437a7cddd49}{REDISMODULE\_ERR})
+00582         \textcolor{keywordflow}{return} \hyperlink{redismodule_8h_a3df6f5bd5247289e66f44437a7cddd49}{REDISMODULE\_ERR};
+00583 
+00584     \textcolor{keywordflow}{if} (RedisModule\_CreateCommand(ctx,\textcolor{stringliteral}{"hello.rand.array"},
+00585         HelloRandArray\_RedisCommand,\textcolor{stringliteral}{"readonly"},0,0,0) == \hyperlink{redismodule_8h_a3df6f5bd5247289e66f44437a7cddd49}{REDISMODULE\_ERR})
+00586         \textcolor{keywordflow}{return} \hyperlink{redismodule_8h_a3df6f5bd5247289e66f44437a7cddd49}{REDISMODULE\_ERR};
+00587 
+00588     \textcolor{keywordflow}{if} (RedisModule\_CreateCommand(ctx,\textcolor{stringliteral}{"hello.repl1"},
+00589         HelloRepl1\_RedisCommand,\textcolor{stringliteral}{"write"},0,0,0) == \hyperlink{redismodule_8h_a3df6f5bd5247289e66f44437a7cddd49}{REDISMODULE\_ERR})
+00590         \textcolor{keywordflow}{return} \hyperlink{redismodule_8h_a3df6f5bd5247289e66f44437a7cddd49}{REDISMODULE\_ERR};
+00591 
+00592     \textcolor{keywordflow}{if} (RedisModule\_CreateCommand(ctx,\textcolor{stringliteral}{"hello.repl2"},
+00593         HelloRepl2\_RedisCommand,\textcolor{stringliteral}{"write"},1,1,1) == \hyperlink{redismodule_8h_a3df6f5bd5247289e66f44437a7cddd49}{REDISMODULE\_ERR})
+00594         \textcolor{keywordflow}{return} \hyperlink{redismodule_8h_a3df6f5bd5247289e66f44437a7cddd49}{REDISMODULE\_ERR};
+00595 
+00596     \textcolor{keywordflow}{if} (RedisModule\_CreateCommand(ctx,\textcolor{stringliteral}{"hello.toggle.case"},
+00597         HelloToggleCase\_RedisCommand,\textcolor{stringliteral}{"write"},1,1,1) == \hyperlink{redismodule_8h_a3df6f5bd5247289e66f44437a7cddd49}{REDISMODULE\_ERR})
+00598         \textcolor{keywordflow}{return} \hyperlink{redismodule_8h_a3df6f5bd5247289e66f44437a7cddd49}{REDISMODULE\_ERR};
+00599 
+00600     \textcolor{keywordflow}{if} (RedisModule\_CreateCommand(ctx,\textcolor{stringliteral}{"hello.more.expire"},
+00601         HelloMoreExpire\_RedisCommand,\textcolor{stringliteral}{"write"},1,1,1) == \hyperlink{redismodule_8h_a3df6f5bd5247289e66f44437a7cddd49}{REDISMODULE\_ERR})
+00602         \textcolor{keywordflow}{return} \hyperlink{redismodule_8h_a3df6f5bd5247289e66f44437a7cddd49}{REDISMODULE\_ERR};
+00603 
+00604     \textcolor{keywordflow}{if} (RedisModule\_CreateCommand(ctx,\textcolor{stringliteral}{"hello.zsumrange"},
+00605         HelloZsumRange\_RedisCommand,\textcolor{stringliteral}{"readonly"},1,1,1) == \hyperlink{redismodule_8h_a3df6f5bd5247289e66f44437a7cddd49}{REDISMODULE\_ERR})
+00606         \textcolor{keywordflow}{return} \hyperlink{redismodule_8h_a3df6f5bd5247289e66f44437a7cddd49}{REDISMODULE\_ERR};
+00607 
+00608     \textcolor{keywordflow}{if} (RedisModule\_CreateCommand(ctx,\textcolor{stringliteral}{"hello.lexrange"},
+00609         HelloLexRange\_RedisCommand,\textcolor{stringliteral}{"readonly"},1,1,1) == \hyperlink{redismodule_8h_a3df6f5bd5247289e66f44437a7cddd49}{REDISMODULE\_ERR})
+00610         \textcolor{keywordflow}{return} \hyperlink{redismodule_8h_a3df6f5bd5247289e66f44437a7cddd49}{REDISMODULE\_ERR};
+00611 
+00612     \textcolor{keywordflow}{if} (RedisModule\_CreateCommand(ctx,\textcolor{stringliteral}{"hello.hcopy"},
+00613         HelloHCopy\_RedisCommand,\textcolor{stringliteral}{"write deny-oom"},1,1,1) == \hyperlink{redismodule_8h_a3df6f5bd5247289e66f44437a7cddd49}{REDISMODULE\_ERR})
+00614         \textcolor{keywordflow}{return} \hyperlink{redismodule_8h_a3df6f5bd5247289e66f44437a7cddd49}{REDISMODULE\_ERR};
+00615 
+00616     \textcolor{keywordflow}{if} (RedisModule\_CreateCommand(ctx,\textcolor{stringliteral}{"hello.leftpad"},
+00617         HelloLeftPad\_RedisCommand,\textcolor{stringliteral}{""},1,1,1) == \hyperlink{redismodule_8h_a3df6f5bd5247289e66f44437a7cddd49}{REDISMODULE\_ERR})
+00618         \textcolor{keywordflow}{return} \hyperlink{redismodule_8h_a3df6f5bd5247289e66f44437a7cddd49}{REDISMODULE\_ERR};
+00619 
+00620     \textcolor{keywordflow}{return} \hyperlink{redismodule_8h_a1bc5bfd69abcd378ff52c640adc5418d}{REDISMODULE\_OK};
+00621 \}
+\end{DoxyCode}

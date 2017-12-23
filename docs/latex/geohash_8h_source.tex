@@ -1,0 +1,123 @@
+\hypertarget{geohash_8h_source}{}\section{geohash.\+h}
+\label{geohash_8h_source}\index{src/geohash.\+h@{src/geohash.\+h}}
+
+\begin{DoxyCode}
+00001 \textcolor{comment}{/*}
+00002 \textcolor{comment}{ * Copyright (c) 2013-2014, yinqiwen <yinqiwen@gmail.com>}
+00003 \textcolor{comment}{ * Copyright (c) 2014, Matt Stancliff <matt@genges.com>.}
+00004 \textcolor{comment}{ * Copyright (c) 2015, Salvatore Sanfilippo <antirez@gmail.com>.}
+00005 \textcolor{comment}{ * All rights reserved.}
+00006 \textcolor{comment}{ *}
+00007 \textcolor{comment}{ * Redistribution and use in source and binary forms, with or without}
+00008 \textcolor{comment}{ * modification, are permitted provided that the following conditions are met:}
+00009 \textcolor{comment}{ *}
+00010 \textcolor{comment}{ *  * Redistributions of source code must retain the above copyright notice,}
+00011 \textcolor{comment}{ *    this list of conditions and the following disclaimer.}
+00012 \textcolor{comment}{ *  * Redistributions in binary form must reproduce the above copyright}
+00013 \textcolor{comment}{ *    notice, this list of conditions and the following disclaimer in the}
+00014 \textcolor{comment}{ *    documentation and/or other materials provided with the distribution.}
+00015 \textcolor{comment}{ *  * Neither the name of Redis nor the names of its contributors may be used}
+00016 \textcolor{comment}{ *    to endorse or promote products derived from this software without}
+00017 \textcolor{comment}{ *    specific prior written permission.}
+00018 \textcolor{comment}{ *}
+00019 \textcolor{comment}{ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"}
+00020 \textcolor{comment}{ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE}
+00021 \textcolor{comment}{ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE}
+00022 \textcolor{comment}{ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS}
+00023 \textcolor{comment}{ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR}
+00024 \textcolor{comment}{ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF}
+00025 \textcolor{comment}{ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS}
+00026 \textcolor{comment}{ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN}
+00027 \textcolor{comment}{ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)}
+00028 \textcolor{comment}{ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF}
+00029 \textcolor{comment}{ * THE POSSIBILITY OF SUCH DAMAGE.}
+00030 \textcolor{comment}{ */}
+00031 
+00032 \textcolor{preprocessor}{#}\textcolor{preprocessor}{ifndef} \textcolor{preprocessor}{GEOHASH\_H\_}
+00033 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{GEOHASH\_H\_}
+00034 
+00035 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{stddef}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00036 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{stdint}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00037 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{stdint}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00038 
+00039 \textcolor{preprocessor}{#}\textcolor{preprocessor}{if} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\_\_cplusplus\textcolor{preprocessor}{)}
+00040 \textcolor{keyword}{extern} \textcolor{stringliteral}{"C"} \{
+00041 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00042 
+00043 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{HASHISZERO}\textcolor{preprocessor}{(}\textcolor{preprocessor}{r}\textcolor{preprocessor}{)} \textcolor{preprocessor}{(}\textcolor{preprocessor}{!}\textcolor{preprocessor}{(}\textcolor{preprocessor}{r}\textcolor{preprocessor}{)}\textcolor{preprocessor}{.}\textcolor{preprocessor}{bits} \textcolor{preprocessor}{&&} \textcolor{preprocessor}{!}\textcolor{preprocessor}{(}\textcolor{preprocessor}{r}\textcolor{preprocessor}{)}\textcolor{preprocessor}{.}\textcolor{preprocessor}{step}\textcolor{preprocessor}{)}
+00044 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{RANGEISZERO}\textcolor{preprocessor}{(}\textcolor{preprocessor}{r}\textcolor{preprocessor}{)} \textcolor{preprocessor}{(}\textcolor{preprocessor}{!}\textcolor{preprocessor}{(}\textcolor{preprocessor}{r}\textcolor{preprocessor}{)}\textcolor{preprocessor}{.}\textcolor{preprocessor}{max} \textcolor{preprocessor}{&&} \textcolor{preprocessor}{!}\textcolor{preprocessor}{(}\textcolor{preprocessor}{r}\textcolor{preprocessor}{)}\textcolor{preprocessor}{.}\textcolor{preprocessor}{min}\textcolor{preprocessor}{)}
+00045 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{RANGEPISZERO}\textcolor{preprocessor}{(}\textcolor{preprocessor}{r}\textcolor{preprocessor}{)} \textcolor{preprocessor}{(}\textcolor{preprocessor}{r} \textcolor{preprocessor}{==} NULL \textcolor{preprocessor}{||} \hyperlink{geohash_8h_aa0025397de7ebbc5b0ee9bf2c1c64221}{RANGEISZERO}\textcolor{preprocessor}{(}\textcolor{preprocessor}{*}\textcolor{preprocessor}{r}\textcolor{preprocessor}{)}\textcolor{preprocessor}{)}
+00046 
+00047 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{GEO\_STEP\_MAX} 26 \textcolor{comment}{/* 26*2 = 52 bits. */}
+00048 
+00049 \textcolor{comment}{/* Limits from EPSG:900913 / EPSG:3785 / OSGEO:41001 */}
+00050 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{GEO\_LAT\_MIN} \textcolor{preprocessor}{-}85.05112878
+00051 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{GEO\_LAT\_MAX} 85.05112878
+00052 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{GEO\_LONG\_MIN} \textcolor{preprocessor}{-}180
+00053 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{GEO\_LONG\_MAX} 180
+00054 
+00055 \textcolor{keyword}{typedef} \textcolor{keyword}{enum} \{
+00056     GEOHASH\_NORTH = 0,
+00057     GEOHASH\_EAST,
+00058     GEOHASH\_WEST,
+00059     GEOHASH\_SOUTH,
+00060     GEOHASH\_SOUTH\_WEST,
+00061     GEOHASH\_SOUTH\_EAST,
+00062     GEOHASH\_NORT\_WEST,
+00063     GEOHASH\_NORT\_EAST
+00064 \} GeoDirection;
+00065 
+\Hypertarget{geohash_8h_source_l00066}\hyperlink{structGeoHashBits}{00066} \textcolor{keyword}{typedef} \textcolor{keyword}{struct} \{
+00067     uint64\_t bits;
+00068     uint8\_t step;
+00069 \} GeoHashBits;
+00070 
+\Hypertarget{geohash_8h_source_l00071}\hyperlink{structGeoHashRange}{00071} \textcolor{keyword}{typedef} \textcolor{keyword}{struct} \{
+00072     \textcolor{keywordtype}{double} min;
+00073     \textcolor{keywordtype}{double} max;
+00074 \} GeoHashRange;
+00075 
+\Hypertarget{geohash_8h_source_l00076}\hyperlink{structGeoHashArea}{00076} \textcolor{keyword}{typedef} \textcolor{keyword}{struct} \{
+00077     GeoHashBits hash;
+00078     GeoHashRange longitude;
+00079     GeoHashRange latitude;
+00080 \} GeoHashArea;
+00081 
+\Hypertarget{geohash_8h_source_l00082}\hyperlink{structGeoHashNeighbors}{00082} \textcolor{keyword}{typedef} \textcolor{keyword}{struct} \{
+00083     GeoHashBits north;
+00084     GeoHashBits east;
+00085     GeoHashBits west;
+00086     GeoHashBits south;
+00087     GeoHashBits north\_east;
+00088     GeoHashBits south\_east;
+00089     GeoHashBits north\_west;
+00090     GeoHashBits south\_west;
+00091 \} GeoHashNeighbors;
+00092 
+00093 \textcolor{comment}{/*}
+00094 \textcolor{comment}{ * 0:success}
+00095 \textcolor{comment}{ * -1:failed}
+00096 \textcolor{comment}{ */}
+00097 \textcolor{keywordtype}{void} geohashGetCoordRange(GeoHashRange *long\_range, GeoHashRange *lat\_range);
+00098 \textcolor{keywordtype}{int} geohashEncode(\textcolor{keyword}{const} GeoHashRange *long\_range, \textcolor{keyword}{const} GeoHashRange *lat\_range,
+00099                   \textcolor{keywordtype}{double} longitude, \textcolor{keywordtype}{double} latitude, uint8\_t step,
+00100                   GeoHashBits *hash);
+00101 \textcolor{keywordtype}{int} geohashEncodeType(\textcolor{keywordtype}{double} longitude, \textcolor{keywordtype}{double} latitude,
+00102                       uint8\_t step, GeoHashBits *hash);
+00103 \textcolor{keywordtype}{int} geohashEncodeWGS84(\textcolor{keywordtype}{double} longitude, \textcolor{keywordtype}{double} latitude, uint8\_t step,
+00104                        GeoHashBits *hash);
+00105 \textcolor{keywordtype}{int} geohashDecode(\textcolor{keyword}{const} GeoHashRange long\_range, \textcolor{keyword}{const} GeoHashRange lat\_range,
+00106                   \textcolor{keyword}{const} GeoHashBits hash, GeoHashArea *area);
+00107 \textcolor{keywordtype}{int} geohashDecodeType(\textcolor{keyword}{const} GeoHashBits hash, GeoHashArea *area);
+00108 \textcolor{keywordtype}{int} geohashDecodeWGS84(\textcolor{keyword}{const} GeoHashBits hash, GeoHashArea *area);
+00109 \textcolor{keywordtype}{int} geohashDecodeAreaToLongLat(\textcolor{keyword}{const} GeoHashArea *area, \textcolor{keywordtype}{double} *xy);
+00110 \textcolor{keywordtype}{int} geohashDecodeToLongLatType(\textcolor{keyword}{const} GeoHashBits hash, \textcolor{keywordtype}{double} *xy);
+00111 \textcolor{keywordtype}{int} geohashDecodeToLongLatWGS84(\textcolor{keyword}{const} GeoHashBits hash, \textcolor{keywordtype}{double} *xy);
+00112 \textcolor{keywordtype}{int} geohashDecodeToLongLatMercator(\textcolor{keyword}{const} GeoHashBits hash, \textcolor{keywordtype}{double} *xy);
+00113 \textcolor{keywordtype}{void} geohashNeighbors(\textcolor{keyword}{const} GeoHashBits *hash, GeoHashNeighbors *neighbors);
+00114 
+00115 \textcolor{preprocessor}{#}\textcolor{preprocessor}{if} \textcolor{preprocessor}{defined}\textcolor{preprocessor}{(}\_\_cplusplus\textcolor{preprocessor}{)}
+00116 \}
+00117 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00118 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif} \textcolor{comment}{/* GEOHASH\_H\_ */}
+\end{DoxyCode}

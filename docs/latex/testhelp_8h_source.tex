@@ -1,0 +1,62 @@
+\hypertarget{testhelp_8h_source}{}\section{testhelp.\+h}
+\label{testhelp_8h_source}\index{src/testhelp.\+h@{src/testhelp.\+h}}
+
+\begin{DoxyCode}
+00001 \textcolor{comment}{/* This is a really minimal testing framework for C.}
+00002 \textcolor{comment}{ *}
+00003 \textcolor{comment}{ * Example:}
+00004 \textcolor{comment}{ *}
+00005 \textcolor{comment}{ * test\_cond("Check if 1 == 1", 1==1)}
+00006 \textcolor{comment}{ * test\_cond("Check if 5 > 10", 5 > 10)}
+00007 \textcolor{comment}{ * test\_report()}
+00008 \textcolor{comment}{ *}
+00009 \textcolor{comment}{ * ----------------------------------------------------------------------------}
+00010 \textcolor{comment}{ *}
+00011 \textcolor{comment}{ * Copyright (c) 2010-2012, Salvatore Sanfilippo <antirez at gmail dot com>}
+00012 \textcolor{comment}{ * All rights reserved.}
+00013 \textcolor{comment}{ *}
+00014 \textcolor{comment}{ * Redistribution and use in source and binary forms, with or without}
+00015 \textcolor{comment}{ * modification, are permitted provided that the following conditions are met:}
+00016 \textcolor{comment}{ *}
+00017 \textcolor{comment}{ *   * Redistributions of source code must retain the above copyright notice,}
+00018 \textcolor{comment}{ *     this list of conditions and the following disclaimer.}
+00019 \textcolor{comment}{ *   * Redistributions in binary form must reproduce the above copyright}
+00020 \textcolor{comment}{ *     notice, this list of conditions and the following disclaimer in the}
+00021 \textcolor{comment}{ *     documentation and/or other materials provided with the distribution.}
+00022 \textcolor{comment}{ *   * Neither the name of Redis nor the names of its contributors may be used}
+00023 \textcolor{comment}{ *     to endorse or promote products derived from this software without}
+00024 \textcolor{comment}{ *     specific prior written permission.}
+00025 \textcolor{comment}{ *}
+00026 \textcolor{comment}{ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"}
+00027 \textcolor{comment}{ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE}
+00028 \textcolor{comment}{ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE}
+00029 \textcolor{comment}{ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE}
+00030 \textcolor{comment}{ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR}
+00031 \textcolor{comment}{ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF}
+00032 \textcolor{comment}{ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS}
+00033 \textcolor{comment}{ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN}
+00034 \textcolor{comment}{ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)}
+00035 \textcolor{comment}{ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE}
+00036 \textcolor{comment}{ * POSSIBILITY OF SUCH DAMAGE.}
+00037 \textcolor{comment}{ */}
+00038 
+00039 \textcolor{preprocessor}{#}\textcolor{preprocessor}{ifndef} \textcolor{preprocessor}{\_\_TESTHELP\_H}
+00040 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{\_\_TESTHELP\_H}
+00041 
+00042 \textcolor{keywordtype}{int} \_\_failed\_tests = 0;
+00043 \textcolor{keywordtype}{int} \_\_test\_num = 0;
+00044 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{test\_cond}\textcolor{preprocessor}{(}\textcolor{preprocessor}{descr}\textcolor{preprocessor}{,}\textcolor{preprocessor}{\_c}\textcolor{preprocessor}{)} \textcolor{keywordflow}{do} \textcolor{preprocessor}{\{}
+00045     \textcolor{preprocessor}{\_\_test\_num}\textcolor{preprocessor}{++}\textcolor{preprocessor}{;} \textcolor{preprocessor}{printf}\textcolor{preprocessor}{(}\textcolor{stringliteral}{"%d - %s: "}\textcolor{preprocessor}{,} \textcolor{preprocessor}{\_\_test\_num}\textcolor{preprocessor}{,} \textcolor{preprocessor}{descr}\textcolor{preprocessor}{)}\textcolor{preprocessor}{;}
+00046     \textcolor{keywordflow}{if}\textcolor{preprocessor}{(}\textcolor{preprocessor}{\_c}\textcolor{preprocessor}{)} \textcolor{preprocessor}{printf}\textcolor{preprocessor}{(}\textcolor{stringliteral}{"PASSED\(\backslash\)n"}\textcolor{preprocessor}{)}\textcolor{preprocessor}{;} \textcolor{keywordflow}{else} \textcolor{preprocessor}{\{}\textcolor{preprocessor}{printf}\textcolor{preprocessor}{(}\textcolor{stringliteral}{"FAILED\(\backslash\)n"}\textcolor{preprocessor}{)}\textcolor{preprocessor}{;} \textcolor{preprocessor}{\_\_failed\_tests}\textcolor{preprocessor}{++}\textcolor{preprocessor}{;}\textcolor{preprocessor}{\}} \textcolor{preprocessor}{\(\backslash\)}
+00047 \textcolor{preprocessor}{\}}\textcolor{keywordflow}{while}\textcolor{preprocessor}{(}0\textcolor{preprocessor}{)}\textcolor{preprocessor}{;}
+00048 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{test\_report}\textcolor{preprocessor}{(}\textcolor{preprocessor}{)} \textcolor{keywordflow}{do} \textcolor{preprocessor}{\{}
+00049     \textcolor{preprocessor}{printf}\textcolor{preprocessor}{(}\textcolor{stringliteral}{"%d tests, %d passed, %d failed\(\backslash\)n"}\textcolor{preprocessor}{,} \textcolor{preprocessor}{\_\_test\_num}\textcolor{preprocessor}{,}
+00050                     \textcolor{preprocessor}{\_\_test\_num}\textcolor{preprocessor}{-}\textcolor{preprocessor}{\_\_failed\_tests}\textcolor{preprocessor}{,} \textcolor{preprocessor}{\_\_failed\_tests}\textcolor{preprocessor}{)}\textcolor{preprocessor}{;}
+00051     \textcolor{keywordflow}{if} \textcolor{preprocessor}{(}\textcolor{preprocessor}{\_\_failed\_tests}\textcolor{preprocessor}{)} \textcolor{preprocessor}{\{}
+00052         \textcolor{preprocessor}{printf}\textcolor{preprocessor}{(}\textcolor{stringliteral}{"=== WARNING === We have failed tests here...\(\backslash\)n"}\textcolor{preprocessor}{)}\textcolor{preprocessor}{;}
+00053         \textcolor{preprocessor}{exit}\textcolor{preprocessor}{(}1\textcolor{preprocessor}{)}\textcolor{preprocessor}{;}
+00054     \textcolor{preprocessor}{\}} \textcolor{preprocessor}{\(\backslash\)}
+00055 \textcolor{preprocessor}{\}}\textcolor{keywordflow}{while}\textcolor{preprocessor}{(}0\textcolor{preprocessor}{)}\textcolor{preprocessor}{;}
+00056 
+00057 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+\end{DoxyCode}

@@ -1,0 +1,296 @@
+\hypertarget{lzf__c_8c_source}{}\section{lzf\+\_\+c.\+c}
+\label{lzf__c_8c_source}\index{src/lzf\+\_\+c.\+c@{src/lzf\+\_\+c.\+c}}
+
+\begin{DoxyCode}
+00001 \textcolor{comment}{/*}
+00002 \textcolor{comment}{ * Copyright (c) 2000-2010 Marc Alexander Lehmann <schmorp@schmorp.de>}
+00003 \textcolor{comment}{ *}
+00004 \textcolor{comment}{ * Redistribution and use in source and binary forms, with or without modifica-}
+00005 \textcolor{comment}{ * tion, are permitted provided that the following conditions are met:}
+00006 \textcolor{comment}{ *}
+00007 \textcolor{comment}{ *   1.  Redistributions of source code must retain the above copyright notice,}
+00008 \textcolor{comment}{ *       this list of conditions and the following disclaimer.}
+00009 \textcolor{comment}{ *}
+00010 \textcolor{comment}{ *   2.  Redistributions in binary form must reproduce the above copyright}
+00011 \textcolor{comment}{ *       notice, this list of conditions and the following disclaimer in the}
+00012 \textcolor{comment}{ *       documentation and/or other materials provided with the distribution.}
+00013 \textcolor{comment}{ *}
+00014 \textcolor{comment}{ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR IMPLIED}
+00015 \textcolor{comment}{ * WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MER-}
+00016 \textcolor{comment}{ * CHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO}
+00017 \textcolor{comment}{ * EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPE-}
+00018 \textcolor{comment}{ * CIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,}
+00019 \textcolor{comment}{ * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;}
+00020 \textcolor{comment}{ * OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,}
+00021 \textcolor{comment}{ * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTH-}
+00022 \textcolor{comment}{ * ERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED}
+00023 \textcolor{comment}{ * OF THE POSSIBILITY OF SUCH DAMAGE.}
+00024 \textcolor{comment}{ *}
+00025 \textcolor{comment}{ * Alternatively, the contents of this file may be used under the terms of}
+00026 \textcolor{comment}{ * the GNU General Public License ("GPL") version 2 or any later version,}
+00027 \textcolor{comment}{ * in which case the provisions of the GPL are applicable instead of}
+00028 \textcolor{comment}{ * the above. If you wish to allow the use of your version of this file}
+00029 \textcolor{comment}{ * only under the terms of the GPL and not to allow others to use your}
+00030 \textcolor{comment}{ * version of this file under the BSD license, indicate your decision}
+00031 \textcolor{comment}{ * by deleting the provisions above and replace them with the notice}
+00032 \textcolor{comment}{ * and other provisions required by the GPL. If you do not delete the}
+00033 \textcolor{comment}{ * provisions above, a recipient may use your version of this file under}
+00034 \textcolor{comment}{ * either the BSD or the GPL.}
+00035 \textcolor{comment}{ */}
+00036 
+00037 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \hyperlink{lzfP_8h}{"lzfP.h"}
+00038 
+00039 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{HSIZE} \textcolor{preprocessor}{(}1 \textcolor{preprocessor}{<<} \textcolor{preprocessor}{(}\hyperlink{lzfP_8h_aaa67275c53290bd99d516d4b9a5d7d76}{HLOG}\textcolor{preprocessor}{)}\textcolor{preprocessor}{)}
+00040 
+00041 \textcolor{comment}{/*}
+00042 \textcolor{comment}{ * don't play with this unless you benchmark!}
+00043 \textcolor{comment}{ * the data format is not dependent on the hash function.}
+00044 \textcolor{comment}{ * the hash function might seem strange, just believe me,}
+00045 \textcolor{comment}{ * it works ;)}
+00046 \textcolor{comment}{ */}
+00047 \textcolor{preprocessor}{#}\textcolor{preprocessor}{ifndef} \textcolor{preprocessor}{FRST}
+00048 \textcolor{preprocessor}{#} \textcolor{preprocessor}{define} \textcolor{preprocessor}{FRST}\textcolor{preprocessor}{(}\textcolor{preprocessor}{p}\textcolor{preprocessor}{)} \textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{p}\textcolor{preprocessor}{[}0\textcolor{preprocessor}{]}\textcolor{preprocessor}{)} \textcolor{preprocessor}{<<} 8\textcolor{preprocessor}{)} \textcolor{preprocessor}{|} \textcolor{preprocessor}{p}\textcolor{preprocessor}{[}1\textcolor{preprocessor}{]}\textcolor{preprocessor}{)}
+00049 \textcolor{preprocessor}{#} \textcolor{preprocessor}{define} \textcolor{preprocessor}{NEXT}\textcolor{preprocessor}{(}\textcolor{preprocessor}{v}\textcolor{preprocessor}{,}\textcolor{preprocessor}{p}\textcolor{preprocessor}{)} \textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{v}\textcolor{preprocessor}{)} \textcolor{preprocessor}{<<} 8\textcolor{preprocessor}{)} \textcolor{preprocessor}{|} \textcolor{preprocessor}{p}\textcolor{preprocessor}{[}2\textcolor{preprocessor}{]}\textcolor{preprocessor}{)}
+00050 \textcolor{preprocessor}{#} \textcolor{preprocessor}{if} \hyperlink{lzfP_8h_a35a67224caa202606b05b24f286bcb9e}{ULTRA\_FAST}
+00051 \textcolor{preprocessor}{#}  \textcolor{preprocessor}{define} \textcolor{preprocessor}{IDX}\textcolor{preprocessor}{(}\textcolor{preprocessor}{h}\textcolor{preprocessor}{)} \textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{(} \textcolor{preprocessor}{h}             \textcolor{preprocessor}{>>} \textcolor{preprocessor}{(}3\textcolor{preprocessor}{*}8 \textcolor{preprocessor}{-} \textcolor{preprocessor}{HLOG}\textcolor{preprocessor}{)}\textcolor{preprocessor}{)} \textcolor{preprocessor}{-} \textcolor{preprocessor}{h}  \textcolor{preprocessor}{)} \textcolor{preprocessor}{&} \textcolor{preprocessor}{(}\textcolor{preprocessor}{HSIZE} \textcolor{preprocessor}{-} 1\textcolor{preprocessor}{)}\textcolor{preprocessor}{)}
+00052 \textcolor{preprocessor}{#} \textcolor{preprocessor}{elif} \hyperlink{lzfP_8h_a48a08aed5b9070297732293c1429ad88}{VERY\_FAST}
+00053 \textcolor{preprocessor}{#}  \textcolor{preprocessor}{define} \textcolor{preprocessor}{IDX}\textcolor{preprocessor}{(}\textcolor{preprocessor}{h}\textcolor{preprocessor}{)} \textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{(} \textcolor{preprocessor}{h}             \textcolor{preprocessor}{>>} \textcolor{preprocessor}{(}3\textcolor{preprocessor}{*}8 \textcolor{preprocessor}{-} \hyperlink{lzfP_8h_aaa67275c53290bd99d516d4b9a5d7d76}{HLOG}\textcolor{preprocessor}{)}\textcolor{preprocessor}{)} \textcolor{preprocessor}{-} \textcolor{preprocessor}{h}\textcolor{preprocessor}{*}5\textcolor{preprocessor}{)} \textcolor{preprocessor}{&} \textcolor{preprocessor}{(}\hyperlink{lzf__c_8c_accbc671b9a49dadd822cddd2ef6af38f}{HSIZE} \textcolor{preprocessor}{-} 1\textcolor{preprocessor}{)}\textcolor{preprocessor}{)}
+00054 \textcolor{preprocessor}{#} \textcolor{preprocessor}{else}
+00055 \textcolor{preprocessor}{#}  \textcolor{preprocessor}{define} \textcolor{preprocessor}{IDX}\textcolor{preprocessor}{(}\textcolor{preprocessor}{h}\textcolor{preprocessor}{)} \textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{h} \textcolor{preprocessor}{^} \textcolor{preprocessor}{(}\textcolor{preprocessor}{h} \textcolor{preprocessor}{<<} 5\textcolor{preprocessor}{)}\textcolor{preprocessor}{)} \textcolor{preprocessor}{>>} \textcolor{preprocessor}{(}3\textcolor{preprocessor}{*}8 \textcolor{preprocessor}{-} \textcolor{preprocessor}{HLOG}\textcolor{preprocessor}{)}\textcolor{preprocessor}{)} \textcolor{preprocessor}{-} \textcolor{preprocessor}{h}\textcolor{preprocessor}{*}5\textcolor{preprocessor}{)} \textcolor{preprocessor}{&} \textcolor{preprocessor}{(}\textcolor{preprocessor}{HSIZE} \textcolor{preprocessor}{-} 1\textcolor{preprocessor}{)}\textcolor{preprocessor}{)}
+00056 \textcolor{preprocessor}{#} \textcolor{preprocessor}{endif}
+00057 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00058 \textcolor{comment}{/*}
+00059 \textcolor{comment}{ * IDX works because it is very similar to a multiplicative hash, e.g.}
+00060 \textcolor{comment}{ * ((h * 57321 >> (3*8 - HLOG)) & (HSIZE - 1))}
+00061 \textcolor{comment}{ * the latter is also quite fast on newer CPUs, and compresses similarly.}
+00062 \textcolor{comment}{ *}
+00063 \textcolor{comment}{ * the next one is also quite good, albeit slow ;)}
+00064 \textcolor{comment}{ * (int)(cos(h & 0xffffff) * 1e6)}
+00065 \textcolor{comment}{ */}
+00066 
+00067 \textcolor{preprocessor}{#}\textcolor{preprocessor}{if} 0
+00068 \textcolor{comment}{/* original lzv-like hash function, much worse and thus slower */}
+00069 \textcolor{preprocessor}{#} \textcolor{preprocessor}{define} \textcolor{preprocessor}{FRST}\textcolor{preprocessor}{(}\textcolor{preprocessor}{p}\textcolor{preprocessor}{)} \textcolor{preprocessor}{(}\textcolor{preprocessor}{p}\textcolor{preprocessor}{[}0\textcolor{preprocessor}{]} \textcolor{preprocessor}{<<} 5\textcolor{preprocessor}{)} \textcolor{preprocessor}{^} \textcolor{preprocessor}{p}\textcolor{preprocessor}{[}1\textcolor{preprocessor}{]}
+00070 \textcolor{preprocessor}{#} \textcolor{preprocessor}{define} \textcolor{preprocessor}{NEXT}\textcolor{preprocessor}{(}\textcolor{preprocessor}{v}\textcolor{preprocessor}{,}\textcolor{preprocessor}{p}\textcolor{preprocessor}{)} \textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{v}\textcolor{preprocessor}{)} \textcolor{preprocessor}{<<} 5\textcolor{preprocessor}{)} \textcolor{preprocessor}{^} \textcolor{preprocessor}{p}\textcolor{preprocessor}{[}2\textcolor{preprocessor}{]}
+00071 \textcolor{preprocessor}{#} \textcolor{preprocessor}{define} \textcolor{preprocessor}{IDX}\textcolor{preprocessor}{(}\textcolor{preprocessor}{h}\textcolor{preprocessor}{)} \textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{h}\textcolor{preprocessor}{)} \textcolor{preprocessor}{&} \textcolor{preprocessor}{(}\textcolor{preprocessor}{HSIZE} \textcolor{preprocessor}{-} 1\textcolor{preprocessor}{)}\textcolor{preprocessor}{)}
+00072 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00073 
+00074 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define}        \textcolor{preprocessor}{MAX\_LIT}        \textcolor{preprocessor}{(}1 \textcolor{preprocessor}{<<}  5\textcolor{preprocessor}{)}
+00075 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define}        \textcolor{preprocessor}{MAX\_OFF}        \textcolor{preprocessor}{(}1 \textcolor{preprocessor}{<<} 13\textcolor{preprocessor}{)}
+00076 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define}        \textcolor{preprocessor}{MAX\_REF}        \textcolor{preprocessor}{(}\textcolor{preprocessor}{(}1 \textcolor{preprocessor}{<<} 8\textcolor{preprocessor}{)} \textcolor{preprocessor}{+} \textcolor{preprocessor}{(}1 \textcolor{preprocessor}{<<} 3\textcolor{preprocessor}{)}\textcolor{preprocessor}{)}
+00077 
+00078 \textcolor{preprocessor}{#}\textcolor{preprocessor}{if} \_\_GNUC\_\_ \textcolor{preprocessor}{>=} 3
+00079 \textcolor{preprocessor}{#} \textcolor{preprocessor}{define} \textcolor{preprocessor}{expect}\textcolor{preprocessor}{(}\textcolor{preprocessor}{expr}\textcolor{preprocessor}{,}\textcolor{preprocessor}{value}\textcolor{preprocessor}{)}         \textcolor{preprocessor}{\_\_builtin\_expect} \textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{expr}\textcolor{preprocessor}{)}\textcolor{preprocessor}{,}\textcolor{preprocessor}{(}\textcolor{preprocessor}{value}\textcolor{preprocessor}{)}\textcolor{preprocessor}{)}
+00080 \textcolor{preprocessor}{#} \textcolor{preprocessor}{define} \textcolor{keyword}{inline}                     \textcolor{keyword}{inline}
+00081 \textcolor{preprocessor}{#}\textcolor{preprocessor}{else}
+00082 \textcolor{preprocessor}{#} \textcolor{preprocessor}{define} \textcolor{preprocessor}{expect}\textcolor{preprocessor}{(}\textcolor{preprocessor}{expr}\textcolor{preprocessor}{,}\textcolor{preprocessor}{value}\textcolor{preprocessor}{)}         \textcolor{preprocessor}{(}\textcolor{preprocessor}{expr}\textcolor{preprocessor}{)}
+00083 \textcolor{preprocessor}{#} \textcolor{preprocessor}{define} \textcolor{preprocessor}{inline}                     \textcolor{preprocessor}{static}
+00084 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00085 
+00086 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{expect\_false}\textcolor{preprocessor}{(}\textcolor{preprocessor}{expr}\textcolor{preprocessor}{)} \hyperlink{lzf__c_8c_a7d26a1c40d6107cf2f19558492591e67}{expect} \textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{expr}\textcolor{preprocessor}{)} \textcolor{preprocessor}{!=} 0\textcolor{preprocessor}{,} 0\textcolor{preprocessor}{)}
+00087 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{expect\_true}\textcolor{preprocessor}{(}\textcolor{preprocessor}{expr}\textcolor{preprocessor}{)}  \hyperlink{lzf__c_8c_a7d26a1c40d6107cf2f19558492591e67}{expect} \textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{expr}\textcolor{preprocessor}{)} \textcolor{preprocessor}{!=} 0\textcolor{preprocessor}{,} 1\textcolor{preprocessor}{)}
+00088 
+00089 \textcolor{comment}{/*}
+00090 \textcolor{comment}{ * compressed format}
+00091 \textcolor{comment}{ *}
+00092 \textcolor{comment}{ * 000LLLLL <L+1>    ; literal, L+1=1..33 octets}
+00093 \textcolor{comment}{ * LLLooooo oooooooo ; backref L+1=1..7 octets, o+1=1..4096 offset}
+00094 \textcolor{comment}{ * 111ooooo LLLLLLLL oooooooo ; backref L+8 octets, o+1=1..4096 offset}
+00095 \textcolor{comment}{ *}
+00096 \textcolor{comment}{ */}
+00097 
+00098 \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{int}
+00099 lzf\_compress (\textcolor{keyword}{const} \textcolor{keywordtype}{void} *\textcolor{keyword}{const} in\_data, \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{int} in\_len,
+00100           \textcolor{keywordtype}{void} *out\_data, \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{int} out\_len
+00101 \textcolor{preprocessor}{#}\textcolor{preprocessor}{if} \hyperlink{lzfP_8h_a2bf88c8c88ba8168003f54ea1970367a}{LZF\_STATE\_ARG}
+00102               , LZF\_STATE htab
+00103 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00104               )
+00105 \{
+00106 \textcolor{preprocessor}{#}\textcolor{preprocessor}{if} \textcolor{preprocessor}{!}\hyperlink{lzfP_8h_a2bf88c8c88ba8168003f54ea1970367a}{LZF\_STATE\_ARG}
+00107   LZF\_STATE htab;
+00108 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00109   \textcolor{keyword}{const} u8 *ip = (\textcolor{keyword}{const} u8 *)in\_data;
+00110         u8 *op = (u8 *)out\_data;
+00111   \textcolor{keyword}{const} u8 *in\_end  = ip + in\_len;
+00112         u8 *out\_end = op + out\_len;
+00113   \textcolor{keyword}{const} u8 *ref;
+00114 
+00115   \textcolor{comment}{/* off requires a type wide enough to hold a general pointer difference.}
+00116 \textcolor{comment}{   * ISO C doesn't have that (size\_t might not be enough and ptrdiff\_t only}
+00117 \textcolor{comment}{   * works for differences within a single object). We also assume that no}
+00118 \textcolor{comment}{   * no bit pattern traps. Since the only platform that is both non-POSIX}
+00119 \textcolor{comment}{   * and fails to support both assumptions is windows 64 bit, we make a}
+00120 \textcolor{comment}{   * special workaround for it.}
+00121 \textcolor{comment}{   */}
+00122 \textcolor{preprocessor}{#}\textcolor{preprocessor}{if} \textcolor{preprocessor}{defined} \textcolor{preprocessor}{(}\textcolor{preprocessor}{WIN32}\textcolor{preprocessor}{)} \textcolor{preprocessor}{&&} \textcolor{preprocessor}{defined} \textcolor{preprocessor}{(}\textcolor{preprocessor}{\_M\_X64}\textcolor{preprocessor}{)}
+00123   \textcolor{keywordtype}{unsigned} \_int64 off; \textcolor{comment}{/* workaround for missing POSIX compliance */}
+00124 \textcolor{preprocessor}{#}\textcolor{preprocessor}{else}
+00125   \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} off;
+00126 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00127   \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{int} hval;
+00128   \textcolor{keywordtype}{int} lit;
+00129 
+00130   \textcolor{keywordflow}{if} (!in\_len || !out\_len)
+00131     \textcolor{keywordflow}{return} 0;
+00132 
+00133 \textcolor{preprocessor}{#}\textcolor{preprocessor}{if} \hyperlink{lzfP_8h_a4c39dab09d3f4c2e0ab1e1d63799af37}{INIT\_HTAB}
+00134   memset (htab, 0, \textcolor{keyword}{sizeof} (htab));
+00135 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00136 
+00137   lit = 0; op++; \textcolor{comment}{/* start run */}
+00138 
+00139   hval = \hyperlink{lzf__c_8c_a61be8c5e877134668e5eb72181722432}{FRST} (ip);
+00140   \textcolor{keywordflow}{while} (ip < in\_end - 2)
+00141     \{
+00142       LZF\_HSLOT *hslot;
+00143 
+00144       hval = \hyperlink{lzf__c_8c_a7690f0d6b9709b87bb8bf162b6bd32e2}{NEXT} (hval, ip);
+00145       hslot = htab + \hyperlink{lzf__c_8c_afbc4dc0e5192c430576d8e81647d0ae8}{IDX} (hval);
+00146       ref = *hslot + \hyperlink{lzfP_8h_a980629f2ad88980e35ca8519e53abac8}{LZF\_HSLOT\_BIAS}; *hslot = ip - 
+      \hyperlink{lzfP_8h_a980629f2ad88980e35ca8519e53abac8}{LZF\_HSLOT\_BIAS};
+00147 
+00148       \textcolor{keywordflow}{if} (1
+00149 \textcolor{preprocessor}{#}\textcolor{preprocessor}{if} \hyperlink{lzfP_8h_a4c39dab09d3f4c2e0ab1e1d63799af37}{INIT\_HTAB}
+00150           && ref < ip \textcolor{comment}{/* the next test will actually take care of this, but this is faster */}
+00151 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00152           && (off = ip - ref - 1) < \hyperlink{lzf__c_8c_a836ed43c144629d6e1666999ed3b25f4}{MAX\_OFF}
+00153           && ref > (u8 *)in\_data
+00154           && ref[2] == ip[2]
+00155 \textcolor{preprocessor}{#}\textcolor{preprocessor}{if} \hyperlink{lzfP_8h_a34203552492ece577af0130f4bc3afe5}{STRICT\_ALIGN}
+00156           && ((ref[1] << 8) | ref[0]) == ((ip[1] << 8) | ip[0])
+00157 \textcolor{preprocessor}{#}\textcolor{preprocessor}{else}
+00158           && *(u16 *)ref == *(u16 *)ip
+00159 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00160         )
+00161         \{
+00162           \textcolor{comment}{/* match found at *ref++ */}
+00163           \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{int} len = 2;
+00164           \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{int} maxlen = in\_end - ip - len;
+00165           maxlen = maxlen > \hyperlink{lzf__c_8c_a6f931885fb233742f38eff99d953475b}{MAX\_REF} ? \hyperlink{lzf__c_8c_a6f931885fb233742f38eff99d953475b}{MAX\_REF} : maxlen;
+00166 
+00167           \textcolor{keywordflow}{if} (\hyperlink{lzf__c_8c_afc5fc140e1c36b6f0d3fc1699b038792}{expect\_false} (op + 3 + 1 >= out\_end)) \textcolor{comment}{/* first a faster conservative test */}
+00168             \textcolor{keywordflow}{if} (op - !lit + 3 + 1 >= out\_end) \textcolor{comment}{/* second the exact but rare test */}
+00169               \textcolor{keywordflow}{return} 0;
+00170 
+00171           op [- lit - 1] = lit - 1; \textcolor{comment}{/* stop run */}
+00172           op -= !lit; \textcolor{comment}{/* undo run if length is zero */}
+00173 
+00174           \textcolor{keywordflow}{for} (;;)
+00175             \{
+00176               \textcolor{keywordflow}{if} (\hyperlink{lzf__c_8c_a6a6f76fb42528022b1fc8f9a1862e450}{expect\_true} (maxlen > 16))
+00177                 \{
+00178                   len++; \textcolor{keywordflow}{if} (ref [len] != ip [len]) \textcolor{keywordflow}{break};
+00179                   len++; \textcolor{keywordflow}{if} (ref [len] != ip [len]) \textcolor{keywordflow}{break};
+00180                   len++; \textcolor{keywordflow}{if} (ref [len] != ip [len]) \textcolor{keywordflow}{break};
+00181                   len++; \textcolor{keywordflow}{if} (ref [len] != ip [len]) \textcolor{keywordflow}{break};
+00182 
+00183                   len++; \textcolor{keywordflow}{if} (ref [len] != ip [len]) \textcolor{keywordflow}{break};
+00184                   len++; \textcolor{keywordflow}{if} (ref [len] != ip [len]) \textcolor{keywordflow}{break};
+00185                   len++; \textcolor{keywordflow}{if} (ref [len] != ip [len]) \textcolor{keywordflow}{break};
+00186                   len++; \textcolor{keywordflow}{if} (ref [len] != ip [len]) \textcolor{keywordflow}{break};
+00187 
+00188                   len++; \textcolor{keywordflow}{if} (ref [len] != ip [len]) \textcolor{keywordflow}{break};
+00189                   len++; \textcolor{keywordflow}{if} (ref [len] != ip [len]) \textcolor{keywordflow}{break};
+00190                   len++; \textcolor{keywordflow}{if} (ref [len] != ip [len]) \textcolor{keywordflow}{break};
+00191                   len++; \textcolor{keywordflow}{if} (ref [len] != ip [len]) \textcolor{keywordflow}{break};
+00192 
+00193                   len++; \textcolor{keywordflow}{if} (ref [len] != ip [len]) \textcolor{keywordflow}{break};
+00194                   len++; \textcolor{keywordflow}{if} (ref [len] != ip [len]) \textcolor{keywordflow}{break};
+00195                   len++; \textcolor{keywordflow}{if} (ref [len] != ip [len]) \textcolor{keywordflow}{break};
+00196                   len++; \textcolor{keywordflow}{if} (ref [len] != ip [len]) \textcolor{keywordflow}{break};
+00197                 \}
+00198 
+00199               \textcolor{keywordflow}{do}
+00200                 len++;
+00201               \textcolor{keywordflow}{while} (len < maxlen && ref[len] == ip[len]);
+00202 
+00203               \textcolor{keywordflow}{break};
+00204             \}
+00205 
+00206           len -= 2; \textcolor{comment}{/* len is now #octets - 1 */}
+00207           ip++;
+00208 
+00209           \textcolor{keywordflow}{if} (len < 7)
+00210             \{
+00211               *op++ = (off >> 8) + (len << 5);
+00212             \}
+00213           \textcolor{keywordflow}{else}
+00214             \{
+00215               *op++ = (off >> 8) + (  7 << 5);
+00216               *op++ = len - 7;
+00217             \}
+00218 
+00219           *op++ = off;
+00220 
+00221           lit = 0; op++; \textcolor{comment}{/* start run */}
+00222 
+00223           ip += len + 1;
+00224 
+00225           \textcolor{keywordflow}{if} (\hyperlink{lzf__c_8c_afc5fc140e1c36b6f0d3fc1699b038792}{expect\_false} (ip >= in\_end - 2))
+00226             \textcolor{keywordflow}{break};
+00227 
+00228 \textcolor{preprocessor}{#}\textcolor{preprocessor}{if} \hyperlink{lzfP_8h_a35a67224caa202606b05b24f286bcb9e}{ULTRA\_FAST} \textcolor{preprocessor}{||} \hyperlink{lzfP_8h_a48a08aed5b9070297732293c1429ad88}{VERY\_FAST}
+00229           --ip;
+00230 \textcolor{preprocessor}{#} \textcolor{preprocessor}{if} \hyperlink{lzfP_8h_a48a08aed5b9070297732293c1429ad88}{VERY\_FAST} \textcolor{preprocessor}{&&} \textcolor{preprocessor}{!}\hyperlink{lzfP_8h_a35a67224caa202606b05b24f286bcb9e}{ULTRA\_FAST}
+00231           --ip;
+00232 \textcolor{preprocessor}{#} \textcolor{preprocessor}{endif}
+00233           hval = \hyperlink{lzf__c_8c_a61be8c5e877134668e5eb72181722432}{FRST} (ip);
+00234 
+00235           hval = \hyperlink{lzf__c_8c_a7690f0d6b9709b87bb8bf162b6bd32e2}{NEXT} (hval, ip);
+00236           htab[\hyperlink{lzf__c_8c_afbc4dc0e5192c430576d8e81647d0ae8}{IDX} (hval)] = ip - \hyperlink{lzfP_8h_a980629f2ad88980e35ca8519e53abac8}{LZF\_HSLOT\_BIAS};
+00237           ip++;
+00238 
+00239 \textcolor{preprocessor}{#} \textcolor{preprocessor}{if} \hyperlink{lzfP_8h_a48a08aed5b9070297732293c1429ad88}{VERY\_FAST} \textcolor{preprocessor}{&&} \textcolor{preprocessor}{!}\hyperlink{lzfP_8h_a35a67224caa202606b05b24f286bcb9e}{ULTRA\_FAST}
+00240           hval = \hyperlink{lzf__c_8c_a7690f0d6b9709b87bb8bf162b6bd32e2}{NEXT} (hval, ip);
+00241           htab[\hyperlink{lzf__c_8c_afbc4dc0e5192c430576d8e81647d0ae8}{IDX} (hval)] = ip - \hyperlink{lzfP_8h_a980629f2ad88980e35ca8519e53abac8}{LZF\_HSLOT\_BIAS};
+00242           ip++;
+00243 \textcolor{preprocessor}{#} \textcolor{preprocessor}{endif}
+00244 \textcolor{preprocessor}{#}\textcolor{preprocessor}{else}
+00245           ip -= len + 1;
+00246 
+00247           \textcolor{keywordflow}{do}
+00248             \{
+00249               hval = NEXT (hval, ip);
+00250               htab[IDX (hval)] = ip - LZF\_HSLOT\_BIAS;
+00251               ip++;
+00252             \}
+00253           \textcolor{keywordflow}{while} (len--);
+00254 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00255         \}
+00256       \textcolor{keywordflow}{else}
+00257         \{
+00258           \textcolor{comment}{/* one more literal byte we must copy */}
+00259           \textcolor{keywordflow}{if} (\hyperlink{lzf__c_8c_afc5fc140e1c36b6f0d3fc1699b038792}{expect\_false} (op >= out\_end))
+00260             \textcolor{keywordflow}{return} 0;
+00261 
+00262           lit++; *op++ = *ip++;
+00263 
+00264           \textcolor{keywordflow}{if} (\hyperlink{lzf__c_8c_afc5fc140e1c36b6f0d3fc1699b038792}{expect\_false} (lit == \hyperlink{lzf__c_8c_a8ff610436e92b6fdcefdc820c25760b2}{MAX\_LIT}))
+00265             \{
+00266               op [- lit - 1] = lit - 1; \textcolor{comment}{/* stop run */}
+00267               lit = 0; op++; \textcolor{comment}{/* start run */}
+00268             \}
+00269         \}
+00270     \}
+00271 
+00272   \textcolor{keywordflow}{if} (op + 3 > out\_end) \textcolor{comment}{/* at most 3 bytes can be missing here */}
+00273     \textcolor{keywordflow}{return} 0;
+00274 
+00275   \textcolor{keywordflow}{while} (ip < in\_end)
+00276     \{
+00277       lit++; *op++ = *ip++;
+00278 
+00279       \textcolor{keywordflow}{if} (\hyperlink{lzf__c_8c_afc5fc140e1c36b6f0d3fc1699b038792}{expect\_false} (lit == \hyperlink{lzf__c_8c_a8ff610436e92b6fdcefdc820c25760b2}{MAX\_LIT}))
+00280         \{
+00281           op [- lit - 1] = lit - 1; \textcolor{comment}{/* stop run */}
+00282           lit = 0; op++; \textcolor{comment}{/* start run */}
+00283         \}
+00284     \}
+00285 
+00286   op [- lit - 1] = lit - 1; \textcolor{comment}{/* end run */}
+00287   op -= !lit; \textcolor{comment}{/* undo run if length is zero */}
+00288 
+00289   \textcolor{keywordflow}{return} op - (u8 *)out\_data;
+00290 \}
+\end{DoxyCode}

@@ -1,0 +1,8 @@
+<map id="listTypeEntry" name="listTypeEntry">
+<area shape="rect" id="node2" href="$structquicklistEntry.html" title="{quicklistEntry\n|+ zi\l+ value\l+ longval\l+ sz\l+ offset\l|}" alt="" coords="5,447,107,583"/>
+<area shape="rect" id="node3" href="$structquicklistNode.html" title="{quicklistNode\n|+ zl\l+ sz\l+ count\l+ encoding\l+ container\l+ recompress\l+ attempted_compress\l+ extra\l|}" alt="" coords="66,5,222,185"/>
+<area shape="rect" id="node4" href="$structquicklist.html" title="{quicklist\n|+ count\l+ len\l+ fill\l+ compress\l|}" alt="" coords="99,263,189,384"/>
+<area shape="rect" id="node6" href="$structquicklistIter.html" title="{quicklistIter\n|+ zi\l+ offset\l+ direction\l|}" alt="" coords="131,461,221,568"/>
+<area shape="rect" id="node5" href="$structlistTypeIterator.html" title="{listTypeIterator\n|+ encoding\l+ direction\l|}" alt="" coords="121,645,231,737"/>
+<area shape="rect" id="node7" href="$structredisObject.html" title="{redisObject\n|+ type\l+ encoding\l+ lru\l+ refcount\l+ ptr\l|}" alt="" coords="245,447,333,583"/>
+</map>

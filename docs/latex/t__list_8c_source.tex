@@ -1,0 +1,779 @@
+\hypertarget{t__list_8c_source}{}\section{t\+\_\+list.\+c}
+\label{t__list_8c_source}\index{src/t\+\_\+list.\+c@{src/t\+\_\+list.\+c}}
+
+\begin{DoxyCode}
+00001 \textcolor{comment}{/*}
+00002 \textcolor{comment}{ * Copyright (c) 2009-2012, Salvatore Sanfilippo <antirez at gmail dot com>}
+00003 \textcolor{comment}{ * All rights reserved.}
+00004 \textcolor{comment}{ *}
+00005 \textcolor{comment}{ * Redistribution and use in source and binary forms, with or without}
+00006 \textcolor{comment}{ * modification, are permitted provided that the following conditions are met:}
+00007 \textcolor{comment}{ *}
+00008 \textcolor{comment}{ *   * Redistributions of source code must retain the above copyright notice,}
+00009 \textcolor{comment}{ *     this list of conditions and the following disclaimer.}
+00010 \textcolor{comment}{ *   * Redistributions in binary form must reproduce the above copyright}
+00011 \textcolor{comment}{ *     notice, this list of conditions and the following disclaimer in the}
+00012 \textcolor{comment}{ *     documentation and/or other materials provided with the distribution.}
+00013 \textcolor{comment}{ *   * Neither the name of Redis nor the names of its contributors may be used}
+00014 \textcolor{comment}{ *     to endorse or promote products derived from this software without}
+00015 \textcolor{comment}{ *     specific prior written permission.}
+00016 \textcolor{comment}{ *}
+00017 \textcolor{comment}{ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"}
+00018 \textcolor{comment}{ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE}
+00019 \textcolor{comment}{ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE}
+00020 \textcolor{comment}{ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE}
+00021 \textcolor{comment}{ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR}
+00022 \textcolor{comment}{ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF}
+00023 \textcolor{comment}{ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS}
+00024 \textcolor{comment}{ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN}
+00025 \textcolor{comment}{ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)}
+00026 \textcolor{comment}{ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE}
+00027 \textcolor{comment}{ * POSSIBILITY OF SUCH DAMAGE.}
+00028 \textcolor{comment}{ */}
+00029 
+00030 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \hyperlink{server_8h}{"server.h"}
+00031 
+00032 \textcolor{comment}{/*-----------------------------------------------------------------------------}
+00033 \textcolor{comment}{ * List API}
+00034 \textcolor{comment}{ *----------------------------------------------------------------------------*/}
+00035 
+00036 \textcolor{comment}{/* The function pushes an element to the specified list object 'subject',}
+00037 \textcolor{comment}{ * at head or tail position as specified by 'where'.}
+00038 \textcolor{comment}{ *}
+00039 \textcolor{comment}{ * There is no need for the caller to increment the refcount of 'value' as}
+00040 \textcolor{comment}{ * the function takes care of it if needed. */}
+00041 \textcolor{keywordtype}{void} listTypePush(robj *subject, robj *value, \textcolor{keywordtype}{int} where) \{
+00042     \textcolor{keywordflow}{if} (subject->encoding == \hyperlink{server_8h_aec792aeed6d4bf83966672e6a23043b8}{OBJ\_ENCODING\_QUICKLIST}) \{
+00043         \textcolor{keywordtype}{int} pos = (where == \hyperlink{server_8h_a5fc6a15ca26c6208f66ad2768a3108ef}{LIST\_HEAD}) ? \hyperlink{quicklist_8h_a4cbe05838d62e8d1c8bfa46c9f1b083a}{QUICKLIST\_HEAD} : 
+      \hyperlink{quicklist_8h_a602bad1be3a6abb2a66ef87387cb7698}{QUICKLIST\_TAIL};
+00044         value = getDecodedObject(value);
+00045         size\_t len = sdslen(value->ptr);
+00046         quicklistPush(subject->ptr, value->ptr, len, pos);
+00047         decrRefCount(value);
+00048     \} \textcolor{keywordflow}{else} \{
+00049         \hyperlink{server_8h_a11cc378e7778a830b41240578de3b204}{serverPanic}(\textcolor{stringliteral}{"Unknown list encoding"});
+00050     \}
+00051 \}
+00052 
+00053 \textcolor{keywordtype}{void} *listPopSaver(\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *data, \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{int} sz) \{
+00054     \textcolor{keywordflow}{return} createStringObject((\textcolor{keywordtype}{char}*)data,sz);
+00055 \}
+00056 
+00057 robj *listTypePop(robj *subject, \textcolor{keywordtype}{int} where) \{
+00058     \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} vlong;
+00059     robj *value = NULL;
+00060 
+00061     \textcolor{keywordtype}{int} ql\_where = where == \hyperlink{server_8h_a5fc6a15ca26c6208f66ad2768a3108ef}{LIST\_HEAD} ? \hyperlink{quicklist_8h_a4cbe05838d62e8d1c8bfa46c9f1b083a}{QUICKLIST\_HEAD} : 
+      \hyperlink{quicklist_8h_a602bad1be3a6abb2a66ef87387cb7698}{QUICKLIST\_TAIL};
+00062     \textcolor{keywordflow}{if} (subject->encoding == \hyperlink{server_8h_aec792aeed6d4bf83966672e6a23043b8}{OBJ\_ENCODING\_QUICKLIST}) \{
+00063         \textcolor{keywordflow}{if} (quicklistPopCustom(subject->ptr, ql\_where, (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} **)&value,
+00064                                NULL, &vlong, listPopSaver)) \{
+00065             \textcolor{keywordflow}{if} (!value)
+00066                 value = createStringObjectFromLongLong(vlong);
+00067         \}
+00068     \} \textcolor{keywordflow}{else} \{
+00069         \hyperlink{server_8h_a11cc378e7778a830b41240578de3b204}{serverPanic}(\textcolor{stringliteral}{"Unknown list encoding"});
+00070     \}
+00071     \textcolor{keywordflow}{return} value;
+00072 \}
+00073 
+00074 \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} listTypeLength(\textcolor{keyword}{const} robj *subject) \{
+00075     \textcolor{keywordflow}{if} (subject->encoding == \hyperlink{server_8h_aec792aeed6d4bf83966672e6a23043b8}{OBJ\_ENCODING\_QUICKLIST}) \{
+00076         \textcolor{keywordflow}{return} quicklistCount(subject->ptr);
+00077     \} \textcolor{keywordflow}{else} \{
+00078         \hyperlink{server_8h_a11cc378e7778a830b41240578de3b204}{serverPanic}(\textcolor{stringliteral}{"Unknown list encoding"});
+00079     \}
+00080 \}
+00081 
+00082 \textcolor{comment}{/* Initialize an iterator at the specified index. */}
+00083 listTypeIterator *listTypeInitIterator(robj *subject, \textcolor{keywordtype}{long} index,
+00084                                        \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} direction) \{
+00085     listTypeIterator *li = zmalloc(\textcolor{keyword}{sizeof}(listTypeIterator));
+00086     li->subject = subject;
+00087     li->encoding = subject->encoding;
+00088     li->direction = direction;
+00089     li->iter = NULL;
+00090     \textcolor{comment}{/* LIST\_HEAD means start at TAIL and move *towards* head.}
+00091 \textcolor{comment}{     * LIST\_TAIL means start at HEAD and move *towards tail. */}
+00092     \textcolor{keywordtype}{int} iter\_direction =
+00093         direction == \hyperlink{server_8h_a5fc6a15ca26c6208f66ad2768a3108ef}{LIST\_HEAD} ? \hyperlink{adlist_8h_a7d37e2046bb8d302b8ca5de4883a1c7f}{AL\_START\_TAIL} : 
+      \hyperlink{adlist_8h_a353f032fdd7e66abe9f194fa7c89560b}{AL\_START\_HEAD};
+00094     \textcolor{keywordflow}{if} (li->encoding == \hyperlink{server_8h_aec792aeed6d4bf83966672e6a23043b8}{OBJ\_ENCODING\_QUICKLIST}) \{
+00095         li->iter = quicklistGetIteratorAtIdx(li->subject->ptr,
+00096                                              iter\_direction, index);
+00097     \} \textcolor{keywordflow}{else} \{
+00098         \hyperlink{server_8h_a11cc378e7778a830b41240578de3b204}{serverPanic}(\textcolor{stringliteral}{"Unknown list encoding"});
+00099     \}
+00100     \textcolor{keywordflow}{return} li;
+00101 \}
+00102 
+00103 \textcolor{comment}{/* Clean up the iterator. */}
+00104 \textcolor{keywordtype}{void} listTypeReleaseIterator(listTypeIterator *li) \{
+00105     zfree(li->iter);
+00106     zfree(li);
+00107 \}
+00108 
+00109 \textcolor{comment}{/* Stores pointer to current the entry in the provided entry structure}
+00110 \textcolor{comment}{ * and advances the position of the iterator. Returns 1 when the current}
+00111 \textcolor{comment}{ * entry is in fact an entry, 0 otherwise. */}
+00112 \textcolor{keywordtype}{int} listTypeNext(listTypeIterator *li, listTypeEntry *entry) \{
+00113     \textcolor{comment}{/* Protect from converting when iterating */}
+00114     \hyperlink{server_8h_a88114b5169b4c382df6b56506285e56a}{serverAssert}(li->subject->encoding == li->encoding);
+00115 
+00116     entry->li = li;
+00117     \textcolor{keywordflow}{if} (li->encoding == \hyperlink{server_8h_aec792aeed6d4bf83966672e6a23043b8}{OBJ\_ENCODING\_QUICKLIST}) \{
+00118         \textcolor{keywordflow}{return} quicklistNext(li->iter, &entry->entry);
+00119     \} \textcolor{keywordflow}{else} \{
+00120         \hyperlink{server_8h_a11cc378e7778a830b41240578de3b204}{serverPanic}(\textcolor{stringliteral}{"Unknown list encoding"});
+00121     \}
+00122     \textcolor{keywordflow}{return} 0;
+00123 \}
+00124 
+00125 \textcolor{comment}{/* Return entry or NULL at the current position of the iterator. */}
+00126 robj *listTypeGet(listTypeEntry *entry) \{
+00127     robj *value = NULL;
+00128     \textcolor{keywordflow}{if} (entry->li->encoding == \hyperlink{server_8h_aec792aeed6d4bf83966672e6a23043b8}{OBJ\_ENCODING\_QUICKLIST}) \{
+00129         \textcolor{keywordflow}{if} (entry->entry.value) \{
+00130             value = createStringObject((\textcolor{keywordtype}{char} *)entry->entry.value,
+00131                                        entry->entry.sz);
+00132         \} \textcolor{keywordflow}{else} \{
+00133             value = createStringObjectFromLongLong(entry->entry.longval);
+00134         \}
+00135     \} \textcolor{keywordflow}{else} \{
+00136         \hyperlink{server_8h_a11cc378e7778a830b41240578de3b204}{serverPanic}(\textcolor{stringliteral}{"Unknown list encoding"});
+00137     \}
+00138     \textcolor{keywordflow}{return} value;
+00139 \}
+00140 
+00141 \textcolor{keywordtype}{void} listTypeInsert(listTypeEntry *entry, robj *value, \textcolor{keywordtype}{int} where) \{
+00142     \textcolor{keywordflow}{if} (entry->li->encoding == \hyperlink{server_8h_aec792aeed6d4bf83966672e6a23043b8}{OBJ\_ENCODING\_QUICKLIST}) \{
+00143         value = getDecodedObject(value);
+00144         sds str = value->ptr;
+00145         size\_t len = sdslen(str);
+00146         \textcolor{keywordflow}{if} (where == \hyperlink{server_8h_a745de98bef5b645df56479181803235b}{LIST\_TAIL}) \{
+00147             quicklistInsertAfter((quicklist *)entry->entry.quicklist,
+00148                                  &entry->entry, str, len);
+00149         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (where == \hyperlink{server_8h_a5fc6a15ca26c6208f66ad2768a3108ef}{LIST\_HEAD}) \{
+00150             quicklistInsertBefore((quicklist *)entry->entry.quicklist,
+00151                                   &entry->entry, str, len);
+00152         \}
+00153         decrRefCount(value);
+00154     \} \textcolor{keywordflow}{else} \{
+00155         \hyperlink{server_8h_a11cc378e7778a830b41240578de3b204}{serverPanic}(\textcolor{stringliteral}{"Unknown list encoding"});
+00156     \}
+00157 \}
+00158 
+00159 \textcolor{comment}{/* Compare the given object with the entry at the current position. */}
+00160 \textcolor{keywordtype}{int} listTypeEqual(listTypeEntry *entry, robj *o) \{
+00161     \textcolor{keywordflow}{if} (entry->li->encoding == \hyperlink{server_8h_aec792aeed6d4bf83966672e6a23043b8}{OBJ\_ENCODING\_QUICKLIST}) \{
+00162         \hyperlink{server_8h_a7308f76cbff9a8d3797fe78190b91282}{serverAssertWithInfo}(NULL,o,\hyperlink{server_8h_afcfb5bd97af52d1dbce331745cae030c}{sdsEncodedObject}(o));
+00163         \textcolor{keywordflow}{return} quicklistCompare(entry->entry.zi,o->ptr,sdslen(o->ptr));
+00164     \} \textcolor{keywordflow}{else} \{
+00165         \hyperlink{server_8h_a11cc378e7778a830b41240578de3b204}{serverPanic}(\textcolor{stringliteral}{"Unknown list encoding"});
+00166     \}
+00167 \}
+00168 
+00169 \textcolor{comment}{/* Delete the element pointed to. */}
+00170 \textcolor{keywordtype}{void} listTypeDelete(listTypeIterator *iter, listTypeEntry *entry) \{
+00171     \textcolor{keywordflow}{if} (entry->li->encoding == \hyperlink{server_8h_aec792aeed6d4bf83966672e6a23043b8}{OBJ\_ENCODING\_QUICKLIST}) \{
+00172         quicklistDelEntry(iter->iter, &entry->entry);
+00173     \} \textcolor{keywordflow}{else} \{
+00174         \hyperlink{server_8h_a11cc378e7778a830b41240578de3b204}{serverPanic}(\textcolor{stringliteral}{"Unknown list encoding"});
+00175     \}
+00176 \}
+00177 
+00178 \textcolor{comment}{/* Create a quicklist from a single ziplist */}
+00179 \textcolor{keywordtype}{void} listTypeConvert(robj *subject, \textcolor{keywordtype}{int} enc) \{
+00180     \hyperlink{server_8h_a7308f76cbff9a8d3797fe78190b91282}{serverAssertWithInfo}(NULL,subject,subject->type==
+      \hyperlink{server_8h_a4a5f22a280949c97a0cb0d4213275126}{OBJ\_LIST});
+00181     \hyperlink{server_8h_a7308f76cbff9a8d3797fe78190b91282}{serverAssertWithInfo}(NULL,subject,subject->encoding==
+      \hyperlink{server_8h_aabf064ede983103f1fd0df2086e84eee}{OBJ\_ENCODING\_ZIPLIST});
+00182 
+00183     \textcolor{keywordflow}{if} (enc == \hyperlink{server_8h_aec792aeed6d4bf83966672e6a23043b8}{OBJ\_ENCODING\_QUICKLIST}) \{
+00184         size\_t zlen = server.list\_max\_ziplist\_size;
+00185         \textcolor{keywordtype}{int} depth = server.list\_compress\_depth;
+00186         subject->ptr = quicklistCreateFromZiplist(zlen, depth, subject->ptr);
+00187         subject->encoding = \hyperlink{server_8h_aec792aeed6d4bf83966672e6a23043b8}{OBJ\_ENCODING\_QUICKLIST};
+00188     \} \textcolor{keywordflow}{else} \{
+00189         \hyperlink{server_8h_a11cc378e7778a830b41240578de3b204}{serverPanic}(\textcolor{stringliteral}{"Unsupported list conversion"});
+00190     \}
+00191 \}
+00192 
+00193 \textcolor{comment}{/*-----------------------------------------------------------------------------}
+00194 \textcolor{comment}{ * List Commands}
+00195 \textcolor{comment}{ *----------------------------------------------------------------------------*/}
+00196 
+00197 \textcolor{keywordtype}{void} pushGenericCommand(\hyperlink{structclient}{client} *c, \textcolor{keywordtype}{int} where) \{
+00198     \textcolor{keywordtype}{int} j, pushed = 0;
+00199     robj *lobj = lookupKeyWrite(c->db,c->argv[1]);
+00200 
+00201     \textcolor{keywordflow}{if} (lobj && lobj->type != \hyperlink{server_8h_a4a5f22a280949c97a0cb0d4213275126}{OBJ\_LIST}) \{
+00202         addReply(c,shared.wrongtypeerr);
+00203         \textcolor{keywordflow}{return};
+00204     \}
+00205 
+00206     \textcolor{keywordflow}{for} (j = 2; j < c->argc; j++) \{
+00207         \textcolor{keywordflow}{if} (!lobj) \{
+00208             lobj = createQuicklistObject();
+00209             quicklistSetOptions(lobj->ptr, server.list\_max\_ziplist\_size,
+00210                                 server.list\_compress\_depth);
+00211             dbAdd(c->db,c->argv[1],lobj);
+00212         \}
+00213         listTypePush(lobj,c->argv[j],where);
+00214         pushed++;
+00215     \}
+00216     addReplyLongLong(c, (lobj ? listTypeLength(lobj) : 0));
+00217     \textcolor{keywordflow}{if} (pushed) \{
+00218         \textcolor{keywordtype}{char} *event = (where == \hyperlink{server_8h_a5fc6a15ca26c6208f66ad2768a3108ef}{LIST\_HEAD}) ? \textcolor{stringliteral}{"lpush"} : \textcolor{stringliteral}{"rpush"};
+00219 
+00220         signalModifiedKey(c->db,c->argv[1]);
+00221         notifyKeyspaceEvent(\hyperlink{server_8h_a1c0b64c84b0e66dff3554ffe3e2ec4c8}{NOTIFY\_LIST},event,c->argv[1],c->db->id);
+00222     \}
+00223     server.dirty += pushed;
+00224 \}
+00225 
+00226 \textcolor{keywordtype}{void} lpushCommand(\hyperlink{structclient}{client} *c) \{
+00227     pushGenericCommand(c,\hyperlink{server_8h_a5fc6a15ca26c6208f66ad2768a3108ef}{LIST\_HEAD});
+00228 \}
+00229 
+00230 \textcolor{keywordtype}{void} rpushCommand(\hyperlink{structclient}{client} *c) \{
+00231     pushGenericCommand(c,\hyperlink{server_8h_a745de98bef5b645df56479181803235b}{LIST\_TAIL});
+00232 \}
+00233 
+00234 \textcolor{keywordtype}{void} pushxGenericCommand(\hyperlink{structclient}{client} *c, \textcolor{keywordtype}{int} where) \{
+00235     \textcolor{keywordtype}{int} j, pushed = 0;
+00236     robj *subject;
+00237 
+00238     \textcolor{keywordflow}{if} ((subject = lookupKeyWriteOrReply(c,c->argv[1],shared.czero)) == NULL ||
+00239         checkType(c,subject,\hyperlink{server_8h_a4a5f22a280949c97a0cb0d4213275126}{OBJ\_LIST})) \textcolor{keywordflow}{return};
+00240 
+00241     \textcolor{keywordflow}{for} (j = 2; j < c->argc; j++) \{
+00242         listTypePush(subject,c->argv[j],where);
+00243         pushed++;
+00244     \}
+00245 
+00246     addReplyLongLong(c,listTypeLength(subject));
+00247 
+00248     \textcolor{keywordflow}{if} (pushed) \{
+00249         \textcolor{keywordtype}{char} *event = (where == \hyperlink{server_8h_a5fc6a15ca26c6208f66ad2768a3108ef}{LIST\_HEAD}) ? \textcolor{stringliteral}{"lpush"} : \textcolor{stringliteral}{"rpush"};
+00250         signalModifiedKey(c->db,c->argv[1]);
+00251         notifyKeyspaceEvent(\hyperlink{server_8h_a1c0b64c84b0e66dff3554ffe3e2ec4c8}{NOTIFY\_LIST},event,c->argv[1],c->db->id);
+00252     \}
+00253     server.dirty += pushed;
+00254 \}
+00255 
+00256 \textcolor{keywordtype}{void} lpushxCommand(\hyperlink{structclient}{client} *c) \{
+00257     pushxGenericCommand(c,\hyperlink{server_8h_a5fc6a15ca26c6208f66ad2768a3108ef}{LIST\_HEAD});
+00258 \}
+00259 
+00260 \textcolor{keywordtype}{void} rpushxCommand(\hyperlink{structclient}{client} *c) \{
+00261     pushxGenericCommand(c,\hyperlink{server_8h_a745de98bef5b645df56479181803235b}{LIST\_TAIL});
+00262 \}
+00263 
+00264 \textcolor{keywordtype}{void} linsertCommand(\hyperlink{structclient}{client} *c) \{
+00265     \textcolor{keywordtype}{int} where;
+00266     robj *subject;
+00267     listTypeIterator *iter;
+00268     listTypeEntry entry;
+00269     \textcolor{keywordtype}{int} inserted = 0;
+00270 
+00271     \textcolor{keywordflow}{if} (strcasecmp(c->argv[2]->ptr,\textcolor{stringliteral}{"after"}) == 0) \{
+00272         where = \hyperlink{server_8h_a745de98bef5b645df56479181803235b}{LIST\_TAIL};
+00273     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (strcasecmp(c->argv[2]->ptr,\textcolor{stringliteral}{"before"}) == 0) \{
+00274         where = \hyperlink{server_8h_a5fc6a15ca26c6208f66ad2768a3108ef}{LIST\_HEAD};
+00275     \} \textcolor{keywordflow}{else} \{
+00276         addReply(c,shared.syntaxerr);
+00277         \textcolor{keywordflow}{return};
+00278     \}
+00279 
+00280     \textcolor{keywordflow}{if} ((subject = lookupKeyWriteOrReply(c,c->argv[1],shared.czero)) == NULL ||
+00281         checkType(c,subject,\hyperlink{server_8h_a4a5f22a280949c97a0cb0d4213275126}{OBJ\_LIST})) \textcolor{keywordflow}{return};
+00282 
+00283     \textcolor{comment}{/* Seek pivot from head to tail */}
+00284     iter = listTypeInitIterator(subject,0,\hyperlink{server_8h_a745de98bef5b645df56479181803235b}{LIST\_TAIL});
+00285     \textcolor{keywordflow}{while} (listTypeNext(iter,&entry)) \{
+00286         \textcolor{keywordflow}{if} (listTypeEqual(&entry,c->argv[3])) \{
+00287             listTypeInsert(&entry,c->argv[4],where);
+00288             inserted = 1;
+00289             \textcolor{keywordflow}{break};
+00290         \}
+00291     \}
+00292     listTypeReleaseIterator(iter);
+00293 
+00294     \textcolor{keywordflow}{if} (inserted) \{
+00295         signalModifiedKey(c->db,c->argv[1]);
+00296         notifyKeyspaceEvent(\hyperlink{server_8h_a1c0b64c84b0e66dff3554ffe3e2ec4c8}{NOTIFY\_LIST},\textcolor{stringliteral}{"linsert"},
+00297                             c->argv[1],c->db->id);
+00298         server.dirty++;
+00299     \} \textcolor{keywordflow}{else} \{
+00300         \textcolor{comment}{/* Notify client of a failed insert */}
+00301         addReply(c,shared.cnegone);
+00302         \textcolor{keywordflow}{return};
+00303     \}
+00304 
+00305     addReplyLongLong(c,listTypeLength(subject));
+00306 \}
+00307 
+00308 \textcolor{keywordtype}{void} llenCommand(\hyperlink{structclient}{client} *c) \{
+00309     robj *o = lookupKeyReadOrReply(c,c->argv[1],shared.czero);
+00310     \textcolor{keywordflow}{if} (o == NULL || checkType(c,o,\hyperlink{server_8h_a4a5f22a280949c97a0cb0d4213275126}{OBJ\_LIST})) \textcolor{keywordflow}{return};
+00311     addReplyLongLong(c,listTypeLength(o));
+00312 \}
+00313 
+00314 \textcolor{keywordtype}{void} lindexCommand(\hyperlink{structclient}{client} *c) \{
+00315     robj *o = lookupKeyReadOrReply(c,c->argv[1],shared.nullbulk);
+00316     \textcolor{keywordflow}{if} (o == NULL || checkType(c,o,\hyperlink{server_8h_a4a5f22a280949c97a0cb0d4213275126}{OBJ\_LIST})) \textcolor{keywordflow}{return};
+00317     \textcolor{keywordtype}{long} index;
+00318     robj *value = NULL;
+00319 
+00320     \textcolor{keywordflow}{if} ((getLongFromObjectOrReply(c, c->argv[2], &index, NULL) != \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK}))
+00321         \textcolor{keywordflow}{return};
+00322 
+00323     \textcolor{keywordflow}{if} (o->encoding == \hyperlink{server_8h_aec792aeed6d4bf83966672e6a23043b8}{OBJ\_ENCODING\_QUICKLIST}) \{
+00324         quicklistEntry entry;
+00325         \textcolor{keywordflow}{if} (quicklistIndex(o->ptr, index, &entry)) \{
+00326             \textcolor{keywordflow}{if} (entry.value) \{
+00327                 value = createStringObject((\textcolor{keywordtype}{char}*)entry.value,entry.sz);
+00328             \} \textcolor{keywordflow}{else} \{
+00329                 value = createStringObjectFromLongLong(entry.longval);
+00330             \}
+00331             addReplyBulk(c,value);
+00332             decrRefCount(value);
+00333         \} \textcolor{keywordflow}{else} \{
+00334             addReply(c,shared.nullbulk);
+00335         \}
+00336     \} \textcolor{keywordflow}{else} \{
+00337         \hyperlink{server_8h_a11cc378e7778a830b41240578de3b204}{serverPanic}(\textcolor{stringliteral}{"Unknown list encoding"});
+00338     \}
+00339 \}
+00340 
+00341 \textcolor{keywordtype}{void} lsetCommand(\hyperlink{structclient}{client} *c) \{
+00342     robj *o = lookupKeyWriteOrReply(c,c->argv[1],shared.nokeyerr);
+00343     \textcolor{keywordflow}{if} (o == NULL || checkType(c,o,\hyperlink{server_8h_a4a5f22a280949c97a0cb0d4213275126}{OBJ\_LIST})) \textcolor{keywordflow}{return};
+00344     \textcolor{keywordtype}{long} index;
+00345     robj *value = c->argv[3];
+00346 
+00347     \textcolor{keywordflow}{if} ((getLongFromObjectOrReply(c, c->argv[2], &index, NULL) != \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK}))
+00348         \textcolor{keywordflow}{return};
+00349 
+00350     \textcolor{keywordflow}{if} (o->encoding == \hyperlink{server_8h_aec792aeed6d4bf83966672e6a23043b8}{OBJ\_ENCODING\_QUICKLIST}) \{
+00351         quicklist *ql = o->ptr;
+00352         \textcolor{keywordtype}{int} replaced = quicklistReplaceAtIndex(ql, index,
+00353                                                value->ptr, sdslen(value->ptr));
+00354         \textcolor{keywordflow}{if} (!replaced) \{
+00355             addReply(c,shared.outofrangeerr);
+00356         \} \textcolor{keywordflow}{else} \{
+00357             addReply(c,shared.ok);
+00358             signalModifiedKey(c->db,c->argv[1]);
+00359             notifyKeyspaceEvent(\hyperlink{server_8h_a1c0b64c84b0e66dff3554ffe3e2ec4c8}{NOTIFY\_LIST},\textcolor{stringliteral}{"lset"},c->argv[1],c->db->id);
+00360             server.dirty++;
+00361         \}
+00362     \} \textcolor{keywordflow}{else} \{
+00363         \hyperlink{server_8h_a11cc378e7778a830b41240578de3b204}{serverPanic}(\textcolor{stringliteral}{"Unknown list encoding"});
+00364     \}
+00365 \}
+00366 
+00367 \textcolor{keywordtype}{void} popGenericCommand(\hyperlink{structclient}{client} *c, \textcolor{keywordtype}{int} where) \{
+00368     robj *o = lookupKeyWriteOrReply(c,c->argv[1],shared.nullbulk);
+00369     \textcolor{keywordflow}{if} (o == NULL || checkType(c,o,\hyperlink{server_8h_a4a5f22a280949c97a0cb0d4213275126}{OBJ\_LIST})) \textcolor{keywordflow}{return};
+00370 
+00371     robj *value = listTypePop(o,where);
+00372     \textcolor{keywordflow}{if} (value == NULL) \{
+00373         addReply(c,shared.nullbulk);
+00374     \} \textcolor{keywordflow}{else} \{
+00375         \textcolor{keywordtype}{char} *event = (where == \hyperlink{server_8h_a5fc6a15ca26c6208f66ad2768a3108ef}{LIST\_HEAD}) ? \textcolor{stringliteral}{"lpop"} : \textcolor{stringliteral}{"rpop"};
+00376 
+00377         addReplyBulk(c,value);
+00378         decrRefCount(value);
+00379         notifyKeyspaceEvent(\hyperlink{server_8h_a1c0b64c84b0e66dff3554ffe3e2ec4c8}{NOTIFY\_LIST},event,c->argv[1],c->db->id);
+00380         \textcolor{keywordflow}{if} (listTypeLength(o) == 0) \{
+00381             notifyKeyspaceEvent(\hyperlink{server_8h_a9fa53dd1068e62365f3964ad3479eec2}{NOTIFY\_GENERIC},\textcolor{stringliteral}{"del"},
+00382                                 c->argv[1],c->db->id);
+00383             dbDelete(c->db,c->argv[1]);
+00384         \}
+00385         signalModifiedKey(c->db,c->argv[1]);
+00386         server.dirty++;
+00387     \}
+00388 \}
+00389 
+00390 \textcolor{keywordtype}{void} lpopCommand(\hyperlink{structclient}{client} *c) \{
+00391     popGenericCommand(c,\hyperlink{server_8h_a5fc6a15ca26c6208f66ad2768a3108ef}{LIST\_HEAD});
+00392 \}
+00393 
+00394 \textcolor{keywordtype}{void} rpopCommand(\hyperlink{structclient}{client} *c) \{
+00395     popGenericCommand(c,\hyperlink{server_8h_a745de98bef5b645df56479181803235b}{LIST\_TAIL});
+00396 \}
+00397 
+00398 \textcolor{keywordtype}{void} lrangeCommand(\hyperlink{structclient}{client} *c) \{
+00399     robj *o;
+00400     \textcolor{keywordtype}{long} start, end, llen, rangelen;
+00401 
+00402     \textcolor{keywordflow}{if} ((getLongFromObjectOrReply(c, c->argv[2], &start, NULL) != \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK}) ||
+00403         (getLongFromObjectOrReply(c, c->argv[3], &end, NULL) != \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK})) \textcolor{keywordflow}{return};
+00404 
+00405     \textcolor{keywordflow}{if} ((o = lookupKeyReadOrReply(c,c->argv[1],shared.emptymultibulk)) == NULL
+00406          || checkType(c,o,\hyperlink{server_8h_a4a5f22a280949c97a0cb0d4213275126}{OBJ\_LIST})) \textcolor{keywordflow}{return};
+00407     llen = listTypeLength(o);
+00408 
+00409     \textcolor{comment}{/* convert negative indexes */}
+00410     \textcolor{keywordflow}{if} (start < 0) start = llen+start;
+00411     \textcolor{keywordflow}{if} (end < 0) end = llen+end;
+00412     \textcolor{keywordflow}{if} (start < 0) start = 0;
+00413 
+00414     \textcolor{comment}{/* Invariant: start >= 0, so this test will be true when end < 0.}
+00415 \textcolor{comment}{     * The range is empty when start > end or start >= length. */}
+00416     \textcolor{keywordflow}{if} (start > end || start >= llen) \{
+00417         addReply(c,shared.emptymultibulk);
+00418         \textcolor{keywordflow}{return};
+00419     \}
+00420     \textcolor{keywordflow}{if} (end >= llen) end = llen-1;
+00421     rangelen = (end-start)+1;
+00422 
+00423     \textcolor{comment}{/* Return the result in form of a multi-bulk reply */}
+00424     addReplyMultiBulkLen(c,rangelen);
+00425     \textcolor{keywordflow}{if} (o->encoding == \hyperlink{server_8h_aec792aeed6d4bf83966672e6a23043b8}{OBJ\_ENCODING\_QUICKLIST}) \{
+00426         listTypeIterator *iter = listTypeInitIterator(o, start, \hyperlink{server_8h_a745de98bef5b645df56479181803235b}{LIST\_TAIL});
+00427 
+00428         \textcolor{keywordflow}{while}(rangelen--) \{
+00429             listTypeEntry entry;
+00430             listTypeNext(iter, &entry);
+00431             quicklistEntry *qe = &entry.entry;
+00432             \textcolor{keywordflow}{if} (qe->value) \{
+00433                 addReplyBulkCBuffer(c,qe->value,qe->sz);
+00434             \} \textcolor{keywordflow}{else} \{
+00435                 addReplyBulkLongLong(c,qe->longval);
+00436             \}
+00437         \}
+00438         listTypeReleaseIterator(iter);
+00439     \} \textcolor{keywordflow}{else} \{
+00440         \hyperlink{server_8h_a11cc378e7778a830b41240578de3b204}{serverPanic}(\textcolor{stringliteral}{"List encoding is not QUICKLIST!"});
+00441     \}
+00442 \}
+00443 
+00444 \textcolor{keywordtype}{void} ltrimCommand(\hyperlink{structclient}{client} *c) \{
+00445     robj *o;
+00446     \textcolor{keywordtype}{long} start, end, llen, ltrim, rtrim;
+00447 
+00448     \textcolor{keywordflow}{if} ((getLongFromObjectOrReply(c, c->argv[2], &start, NULL) != \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK}) ||
+00449         (getLongFromObjectOrReply(c, c->argv[3], &end, NULL) != \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK})) \textcolor{keywordflow}{return};
+00450 
+00451     \textcolor{keywordflow}{if} ((o = lookupKeyWriteOrReply(c,c->argv[1],shared.ok)) == NULL ||
+00452         checkType(c,o,\hyperlink{server_8h_a4a5f22a280949c97a0cb0d4213275126}{OBJ\_LIST})) \textcolor{keywordflow}{return};
+00453     llen = listTypeLength(o);
+00454 
+00455     \textcolor{comment}{/* convert negative indexes */}
+00456     \textcolor{keywordflow}{if} (start < 0) start = llen+start;
+00457     \textcolor{keywordflow}{if} (end < 0) end = llen+end;
+00458     \textcolor{keywordflow}{if} (start < 0) start = 0;
+00459 
+00460     \textcolor{comment}{/* Invariant: start >= 0, so this test will be true when end < 0.}
+00461 \textcolor{comment}{     * The range is empty when start > end or start >= length. */}
+00462     \textcolor{keywordflow}{if} (start > end || start >= llen) \{
+00463         \textcolor{comment}{/* Out of range start or start > end result in empty list */}
+00464         ltrim = llen;
+00465         rtrim = 0;
+00466     \} \textcolor{keywordflow}{else} \{
+00467         \textcolor{keywordflow}{if} (end >= llen) end = llen-1;
+00468         ltrim = start;
+00469         rtrim = llen-end-1;
+00470     \}
+00471 
+00472     \textcolor{comment}{/* Remove list elements to perform the trim */}
+00473     \textcolor{keywordflow}{if} (o->encoding == \hyperlink{server_8h_aec792aeed6d4bf83966672e6a23043b8}{OBJ\_ENCODING\_QUICKLIST}) \{
+00474         quicklistDelRange(o->ptr,0,ltrim);
+00475         quicklistDelRange(o->ptr,-rtrim,rtrim);
+00476     \} \textcolor{keywordflow}{else} \{
+00477         \hyperlink{server_8h_a11cc378e7778a830b41240578de3b204}{serverPanic}(\textcolor{stringliteral}{"Unknown list encoding"});
+00478     \}
+00479 
+00480     notifyKeyspaceEvent(\hyperlink{server_8h_a1c0b64c84b0e66dff3554ffe3e2ec4c8}{NOTIFY\_LIST},\textcolor{stringliteral}{"ltrim"},c->argv[1],c->db->id);
+00481     \textcolor{keywordflow}{if} (listTypeLength(o) == 0) \{
+00482         dbDelete(c->db,c->argv[1]);
+00483         notifyKeyspaceEvent(\hyperlink{server_8h_a9fa53dd1068e62365f3964ad3479eec2}{NOTIFY\_GENERIC},\textcolor{stringliteral}{"del"},c->argv[1],c->db->id);
+00484     \}
+00485     signalModifiedKey(c->db,c->argv[1]);
+00486     server.dirty++;
+00487     addReply(c,shared.ok);
+00488 \}
+00489 
+00490 \textcolor{keywordtype}{void} lremCommand(\hyperlink{structclient}{client} *c) \{
+00491     robj *subject, *obj;
+00492     obj = c->argv[3];
+00493     \textcolor{keywordtype}{long} toremove;
+00494     \textcolor{keywordtype}{long} removed = 0;
+00495 
+00496     \textcolor{keywordflow}{if} ((getLongFromObjectOrReply(c, c->argv[2], &toremove, NULL) != \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK}))
+00497         \textcolor{keywordflow}{return};
+00498 
+00499     subject = lookupKeyWriteOrReply(c,c->argv[1],shared.czero);
+00500     \textcolor{keywordflow}{if} (subject == NULL || checkType(c,subject,\hyperlink{server_8h_a4a5f22a280949c97a0cb0d4213275126}{OBJ\_LIST})) \textcolor{keywordflow}{return};
+00501 
+00502     listTypeIterator *li;
+00503     \textcolor{keywordflow}{if} (toremove < 0) \{
+00504         toremove = -toremove;
+00505         li = listTypeInitIterator(subject,-1,\hyperlink{server_8h_a5fc6a15ca26c6208f66ad2768a3108ef}{LIST\_HEAD});
+00506     \} \textcolor{keywordflow}{else} \{
+00507         li = listTypeInitIterator(subject,0,\hyperlink{server_8h_a745de98bef5b645df56479181803235b}{LIST\_TAIL});
+00508     \}
+00509 
+00510     listTypeEntry entry;
+00511     \textcolor{keywordflow}{while} (listTypeNext(li,&entry)) \{
+00512         \textcolor{keywordflow}{if} (listTypeEqual(&entry,obj)) \{
+00513             listTypeDelete(li, &entry);
+00514             server.dirty++;
+00515             removed++;
+00516             \textcolor{keywordflow}{if} (toremove && removed == toremove) \textcolor{keywordflow}{break};
+00517         \}
+00518     \}
+00519     listTypeReleaseIterator(li);
+00520 
+00521     \textcolor{keywordflow}{if} (removed) \{
+00522         signalModifiedKey(c->db,c->argv[1]);
+00523         notifyKeyspaceEvent(\hyperlink{server_8h_a9fa53dd1068e62365f3964ad3479eec2}{NOTIFY\_GENERIC},\textcolor{stringliteral}{"lrem"},c->argv[1],c->db->id);
+00524     \}
+00525 
+00526     \textcolor{keywordflow}{if} (listTypeLength(subject) == 0) \{
+00527         dbDelete(c->db,c->argv[1]);
+00528         notifyKeyspaceEvent(\hyperlink{server_8h_a9fa53dd1068e62365f3964ad3479eec2}{NOTIFY\_GENERIC},\textcolor{stringliteral}{"del"},c->argv[1],c->db->id);
+00529     \}
+00530 
+00531     addReplyLongLong(c,removed);
+00532 \}
+00533 
+00534 \textcolor{comment}{/* This is the semantic of this command:}
+00535 \textcolor{comment}{ *  RPOPLPUSH srclist dstlist:}
+00536 \textcolor{comment}{ *    IF LLEN(srclist) > 0}
+00537 \textcolor{comment}{ *      element = RPOP srclist}
+00538 \textcolor{comment}{ *      LPUSH dstlist element}
+00539 \textcolor{comment}{ *      RETURN element}
+00540 \textcolor{comment}{ *    ELSE}
+00541 \textcolor{comment}{ *      RETURN nil}
+00542 \textcolor{comment}{ *    END}
+00543 \textcolor{comment}{ *  END}
+00544 \textcolor{comment}{ *}
+00545 \textcolor{comment}{ * The idea is to be able to get an element from a list in a reliable way}
+00546 \textcolor{comment}{ * since the element is not just returned but pushed against another list}
+00547 \textcolor{comment}{ * as well. This command was originally proposed by Ezra Zygmuntowicz.}
+00548 \textcolor{comment}{ */}
+00549 
+00550 \textcolor{keywordtype}{void} rpoplpushHandlePush(\hyperlink{structclient}{client} *c, robj *dstkey, robj *dstobj, robj *value) \{
+00551     \textcolor{comment}{/* Create the list if the key does not exist */}
+00552     \textcolor{keywordflow}{if} (!dstobj) \{
+00553         dstobj = createQuicklistObject();
+00554         quicklistSetOptions(dstobj->ptr, server.list\_max\_ziplist\_size,
+00555                             server.list\_compress\_depth);
+00556         dbAdd(c->db,dstkey,dstobj);
+00557     \}
+00558     signalModifiedKey(c->db,dstkey);
+00559     listTypePush(dstobj,value,\hyperlink{server_8h_a5fc6a15ca26c6208f66ad2768a3108ef}{LIST\_HEAD});
+00560     notifyKeyspaceEvent(\hyperlink{server_8h_a1c0b64c84b0e66dff3554ffe3e2ec4c8}{NOTIFY\_LIST},\textcolor{stringliteral}{"lpush"},dstkey,c->db->id);
+00561     \textcolor{comment}{/* Always send the pushed value to the client. */}
+00562     addReplyBulk(c,value);
+00563 \}
+00564 
+00565 \textcolor{keywordtype}{void} rpoplpushCommand(\hyperlink{structclient}{client} *c) \{
+00566     robj *sobj, *value;
+00567     \textcolor{keywordflow}{if} ((sobj = lookupKeyWriteOrReply(c,c->argv[1],shared.nullbulk)) == NULL ||
+00568         checkType(c,sobj,\hyperlink{server_8h_a4a5f22a280949c97a0cb0d4213275126}{OBJ\_LIST})) \textcolor{keywordflow}{return};
+00569 
+00570     \textcolor{keywordflow}{if} (listTypeLength(sobj) == 0) \{
+00571         \textcolor{comment}{/* This may only happen after loading very old RDB files. Recent}
+00572 \textcolor{comment}{         * versions of Redis delete keys of empty lists. */}
+00573         addReply(c,shared.nullbulk);
+00574     \} \textcolor{keywordflow}{else} \{
+00575         robj *dobj = lookupKeyWrite(c->db,c->argv[2]);
+00576         robj *touchedkey = c->argv[1];
+00577 
+00578         \textcolor{keywordflow}{if} (dobj && checkType(c,dobj,\hyperlink{server_8h_a4a5f22a280949c97a0cb0d4213275126}{OBJ\_LIST})) \textcolor{keywordflow}{return};
+00579         value = listTypePop(sobj,\hyperlink{server_8h_a745de98bef5b645df56479181803235b}{LIST\_TAIL});
+00580         \textcolor{comment}{/* We saved touched key, and protect it, since rpoplpushHandlePush}
+00581 \textcolor{comment}{         * may change the client command argument vector (it does not}
+00582 \textcolor{comment}{         * currently). */}
+00583         incrRefCount(touchedkey);
+00584         rpoplpushHandlePush(c,c->argv[2],dobj,value);
+00585 
+00586         \textcolor{comment}{/* listTypePop returns an object with its refcount incremented */}
+00587         decrRefCount(value);
+00588 
+00589         \textcolor{comment}{/* Delete the source list when it is empty */}
+00590         notifyKeyspaceEvent(\hyperlink{server_8h_a1c0b64c84b0e66dff3554ffe3e2ec4c8}{NOTIFY\_LIST},\textcolor{stringliteral}{"rpop"},touchedkey,c->db->id);
+00591         \textcolor{keywordflow}{if} (listTypeLength(sobj) == 0) \{
+00592             dbDelete(c->db,touchedkey);
+00593             notifyKeyspaceEvent(\hyperlink{server_8h_a9fa53dd1068e62365f3964ad3479eec2}{NOTIFY\_GENERIC},\textcolor{stringliteral}{"del"},
+00594                                 touchedkey,c->db->id);
+00595         \}
+00596         signalModifiedKey(c->db,touchedkey);
+00597         decrRefCount(touchedkey);
+00598         server.dirty++;
+00599     \}
+00600 \}
+00601 
+00602 \textcolor{comment}{/*-----------------------------------------------------------------------------}
+00603 \textcolor{comment}{ * Blocking POP operations}
+00604 \textcolor{comment}{ *----------------------------------------------------------------------------*/}
+00605 
+00606 \textcolor{comment}{/* This is a helper function for handleClientsBlockedOnLists(). It's work}
+00607 \textcolor{comment}{ * is to serve a specific client (receiver) that is blocked on 'key'}
+00608 \textcolor{comment}{ * in the context of the specified 'db', doing the following:}
+00609 \textcolor{comment}{ *}
+00610 \textcolor{comment}{ * 1) Provide the client with the 'value' element.}
+00611 \textcolor{comment}{ * 2) If the dstkey is not NULL (we are serving a BRPOPLPUSH) also push the}
+00612 \textcolor{comment}{ *    'value' element on the destination list (the LPUSH side of the command).}
+00613 \textcolor{comment}{ * 3) Propagate the resulting BRPOP, BLPOP and additional LPUSH if any into}
+00614 \textcolor{comment}{ *    the AOF and replication channel.}
+00615 \textcolor{comment}{ *}
+00616 \textcolor{comment}{ * The argument 'where' is LIST\_TAIL or LIST\_HEAD, and indicates if the}
+00617 \textcolor{comment}{ * 'value' element was popped fron the head (BLPOP) or tail (BRPOP) so that}
+00618 \textcolor{comment}{ * we can propagate the command properly.}
+00619 \textcolor{comment}{ *}
+00620 \textcolor{comment}{ * The function returns C\_OK if we are able to serve the client, otherwise}
+00621 \textcolor{comment}{ * C\_ERR is returned to signal the caller that the list POP operation}
+00622 \textcolor{comment}{ * should be undone as the client was not served: This only happens for}
+00623 \textcolor{comment}{ * BRPOPLPUSH that fails to push the value to the destination key as it is}
+00624 \textcolor{comment}{ * of the wrong type. */}
+00625 \textcolor{keywordtype}{int} serveClientBlockedOnList(\hyperlink{structclient}{client} *receiver, robj *key, robj *dstkey, redisDb *db, robj *value
+      , \textcolor{keywordtype}{int} where)
+00626 \{
+00627     robj *argv[3];
+00628 
+00629     \textcolor{keywordflow}{if} (dstkey == NULL) \{
+00630         \textcolor{comment}{/* Propagate the [LR]POP operation. */}
+00631         argv[0] = (where == \hyperlink{server_8h_a5fc6a15ca26c6208f66ad2768a3108ef}{LIST\_HEAD}) ? shared.lpop :
+00632                                           shared.rpop;
+00633         argv[1] = key;
+00634         propagate((where == \hyperlink{server_8h_a5fc6a15ca26c6208f66ad2768a3108ef}{LIST\_HEAD}) ?
+00635             server.lpopCommand : server.rpopCommand,
+00636             db->id,argv,2,\hyperlink{server_8h_a542fb79924ca427c866fd63632f60777}{PROPAGATE\_AOF}|\hyperlink{server_8h_a59c6e025b4ed85642a0472fc3e73e298}{PROPAGATE\_REPL});
+00637 
+00638         \textcolor{comment}{/* BRPOP/BLPOP */}
+00639         addReplyMultiBulkLen(receiver,2);
+00640         addReplyBulk(receiver,key);
+00641         addReplyBulk(receiver,value);
+00642     \} \textcolor{keywordflow}{else} \{
+00643         \textcolor{comment}{/* BRPOPLPUSH */}
+00644         robj *dstobj =
+00645             lookupKeyWrite(receiver->db,dstkey);
+00646         \textcolor{keywordflow}{if} (!(dstobj &&
+00647              checkType(receiver,dstobj,\hyperlink{server_8h_a4a5f22a280949c97a0cb0d4213275126}{OBJ\_LIST})))
+00648         \{
+00649             \textcolor{comment}{/* Propagate the RPOP operation. */}
+00650             argv[0] = shared.rpop;
+00651             argv[1] = key;
+00652             propagate(server.rpopCommand,
+00653                 db->id,argv,2,
+00654                 \hyperlink{server_8h_a542fb79924ca427c866fd63632f60777}{PROPAGATE\_AOF}|
+00655                 \hyperlink{server_8h_a59c6e025b4ed85642a0472fc3e73e298}{PROPAGATE\_REPL});
+00656             rpoplpushHandlePush(receiver,dstkey,dstobj,
+00657                 value);
+00658             \textcolor{comment}{/* Propagate the LPUSH operation. */}
+00659             argv[0] = shared.lpush;
+00660             argv[1] = dstkey;
+00661             argv[2] = value;
+00662             propagate(server.lpushCommand,
+00663                 db->id,argv,3,
+00664                 \hyperlink{server_8h_a542fb79924ca427c866fd63632f60777}{PROPAGATE\_AOF}|
+00665                 \hyperlink{server_8h_a59c6e025b4ed85642a0472fc3e73e298}{PROPAGATE\_REPL});
+00666         \} \textcolor{keywordflow}{else} \{
+00667             \textcolor{comment}{/* BRPOPLPUSH failed because of wrong}
+00668 \textcolor{comment}{             * destination type. */}
+00669             \textcolor{keywordflow}{return} \hyperlink{server_8h_af98ac28d5f4d23d7ed5985188e6fb7d1}{C\_ERR};
+00670         \}
+00671     \}
+00672     \textcolor{keywordflow}{return} \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK};
+00673 \}
+00674 
+00675 \textcolor{comment}{/* Blocking RPOP/LPOP */}
+00676 \textcolor{keywordtype}{void} blockingPopGenericCommand(\hyperlink{structclient}{client} *c, \textcolor{keywordtype}{int} where) \{
+00677     robj *o;
+00678     mstime\_t timeout;
+00679     \textcolor{keywordtype}{int} j;
+00680 
+00681     \textcolor{keywordflow}{if} (getTimeoutFromObjectOrReply(c,c->argv[c->argc-1],&timeout,
+      \hyperlink{server_8h_a8553b0a6c729b15594731a0d37b4fb0d}{UNIT\_SECONDS})
+00682         != \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK}) \textcolor{keywordflow}{return};
+00683 
+00684     \textcolor{keywordflow}{for} (j = 1; j < c->argc-1; j++) \{
+00685         o = lookupKeyWrite(c->db,c->argv[j]);
+00686         \textcolor{keywordflow}{if} (o != NULL) \{
+00687             \textcolor{keywordflow}{if} (o->type != \hyperlink{server_8h_a4a5f22a280949c97a0cb0d4213275126}{OBJ\_LIST}) \{
+00688                 addReply(c,shared.wrongtypeerr);
+00689                 \textcolor{keywordflow}{return};
+00690             \} \textcolor{keywordflow}{else} \{
+00691                 \textcolor{keywordflow}{if} (listTypeLength(o) != 0) \{
+00692                     \textcolor{comment}{/* Non empty list, this is like a non normal [LR]POP. */}
+00693                     \textcolor{keywordtype}{char} *event = (where == \hyperlink{server_8h_a5fc6a15ca26c6208f66ad2768a3108ef}{LIST\_HEAD}) ? \textcolor{stringliteral}{"lpop"} : \textcolor{stringliteral}{"rpop"};
+00694                     robj *value = listTypePop(o,where);
+00695                     \hyperlink{server_8h_a88114b5169b4c382df6b56506285e56a}{serverAssert}(value != NULL);
+00696 
+00697                     addReplyMultiBulkLen(c,2);
+00698                     addReplyBulk(c,c->argv[j]);
+00699                     addReplyBulk(c,value);
+00700                     decrRefCount(value);
+00701                     notifyKeyspaceEvent(\hyperlink{server_8h_a1c0b64c84b0e66dff3554ffe3e2ec4c8}{NOTIFY\_LIST},event,
+00702                                         c->argv[j],c->db->id);
+00703                     \textcolor{keywordflow}{if} (listTypeLength(o) == 0) \{
+00704                         dbDelete(c->db,c->argv[j]);
+00705                         notifyKeyspaceEvent(\hyperlink{server_8h_a9fa53dd1068e62365f3964ad3479eec2}{NOTIFY\_GENERIC},\textcolor{stringliteral}{"del"},
+00706                                             c->argv[j],c->db->id);
+00707                     \}
+00708                     signalModifiedKey(c->db,c->argv[j]);
+00709                     server.dirty++;
+00710 
+00711                     \textcolor{comment}{/* Replicate it as an [LR]POP instead of B[LR]POP. */}
+00712                     rewriteClientCommandVector(c,2,
+00713                         (where == \hyperlink{server_8h_a5fc6a15ca26c6208f66ad2768a3108ef}{LIST\_HEAD}) ? shared.lpop : shared.rpop,
+00714                         c->argv[j]);
+00715                     \textcolor{keywordflow}{return};
+00716                 \}
+00717             \}
+00718         \}
+00719     \}
+00720 
+00721     \textcolor{comment}{/* If we are inside a MULTI/EXEC and the list is empty the only thing}
+00722 \textcolor{comment}{     * we can do is treating it as a timeout (even with timeout 0). */}
+00723     \textcolor{keywordflow}{if} (c->flags & \hyperlink{server_8h_a7f61f783f429419f8c593291a509b03a}{CLIENT\_MULTI}) \{
+00724         addReply(c,shared.nullmultibulk);
+00725         \textcolor{keywordflow}{return};
+00726     \}
+00727 
+00728     \textcolor{comment}{/* If the list is empty or the key does not exists we must block */}
+00729     blockForKeys(c,\hyperlink{server_8h_a279f6a31729ba24d6dab0944b82e0b55}{BLOCKED\_LIST},c->argv + 1,c->argc - 2,timeout,NULL,NULL);
+00730 \}
+00731 
+00732 \textcolor{keywordtype}{void} blpopCommand(\hyperlink{structclient}{client} *c) \{
+00733     blockingPopGenericCommand(c,\hyperlink{server_8h_a5fc6a15ca26c6208f66ad2768a3108ef}{LIST\_HEAD});
+00734 \}
+00735 
+00736 \textcolor{keywordtype}{void} brpopCommand(\hyperlink{structclient}{client} *c) \{
+00737     blockingPopGenericCommand(c,\hyperlink{server_8h_a745de98bef5b645df56479181803235b}{LIST\_TAIL});
+00738 \}
+00739 
+00740 \textcolor{keywordtype}{void} brpoplpushCommand(\hyperlink{structclient}{client} *c) \{
+00741     mstime\_t timeout;
+00742 
+00743     \textcolor{keywordflow}{if} (getTimeoutFromObjectOrReply(c,c->argv[3],&timeout,\hyperlink{server_8h_a8553b0a6c729b15594731a0d37b4fb0d}{UNIT\_SECONDS})
+00744         != \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK}) \textcolor{keywordflow}{return};
+00745 
+00746     robj *key = lookupKeyWrite(c->db, c->argv[1]);
+00747 
+00748     \textcolor{keywordflow}{if} (key == NULL) \{
+00749         \textcolor{keywordflow}{if} (c->flags & \hyperlink{server_8h_a7f61f783f429419f8c593291a509b03a}{CLIENT\_MULTI}) \{
+00750             \textcolor{comment}{/* Blocking against an empty list in a multi state}
+00751 \textcolor{comment}{             * returns immediately. */}
+00752             addReply(c, shared.nullbulk);
+00753         \} \textcolor{keywordflow}{else} \{
+00754             \textcolor{comment}{/* The list is empty and the client blocks. */}
+00755             blockForKeys(c,\hyperlink{server_8h_a279f6a31729ba24d6dab0944b82e0b55}{BLOCKED\_LIST},c->argv + 1,1,timeout,c->argv[2],NULL);
+00756         \}
+00757     \} \textcolor{keywordflow}{else} \{
+00758         \textcolor{keywordflow}{if} (key->type != \hyperlink{server_8h_a4a5f22a280949c97a0cb0d4213275126}{OBJ\_LIST}) \{
+00759             addReply(c, shared.wrongtypeerr);
+00760         \} \textcolor{keywordflow}{else} \{
+00761             \textcolor{comment}{/* The list exists and has elements, so}
+00762 \textcolor{comment}{             * the regular rpoplpushCommand is executed. */}
+00763             \hyperlink{server_8h_a7308f76cbff9a8d3797fe78190b91282}{serverAssertWithInfo}(c,key,listTypeLength(key) > 0);
+00764             rpoplpushCommand(c);
+00765         \}
+00766     \}
+00767 \}
+\end{DoxyCode}

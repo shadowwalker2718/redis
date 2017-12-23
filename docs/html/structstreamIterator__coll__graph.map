@@ -1,0 +1,7 @@
+<map id="streamIterator" name="streamIterator">
+<area shape="rect" id="node2" href="$structraxIterator.html" title="{raxIterator\n|+ flags\l+ key\l+ data\l+ key_len\l+ key_max\l+ key_static_string\l|}" alt="" coords="53,403,187,553"/>
+<area shape="rect" id="node3" href="$structrax.html" title="{rax\n|+ numele\l+ numnodes\l|}" alt="" coords="73,226,167,318"/>
+<area shape="rect" id="node4" href="$structraxNode.html" title="{raxNode\n|+ iskey\l+ isnull\l+ iscompr\l+ size\l+ data\l|}" alt="" coords="5,5,85,141"/>
+<area shape="rect" id="node5" href="$structraxStack.html" title="{raxStack\n|+ stack\l+ items\l+ maxitems\l+ static_items\l+ oom\l|}" alt="" coords="191,204,297,340"/>
+<area shape="rect" id="node6" href="$structstreamID.html" title="{streamID\n|+ ms\l+ seq\l|}" alt="" coords="211,432,287,524"/>
+</map>

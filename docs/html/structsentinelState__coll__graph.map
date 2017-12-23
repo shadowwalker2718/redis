@@ -1,0 +1,8 @@
+<map id="sentinelState" name="sentinelState">
+<area shape="rect" id="node2" href="$structdict.html" title="{dict\n|+ privdata\l+ rehashidx\l+ iterators\l|}" alt="" coords="133,395,224,502"/>
+<area shape="rect" id="node3" href="$structdictht.html" title="{dictht\n|+ size\l+ sizemask\l+ used\l|}" alt="" coords="5,182,96,289"/>
+<area shape="rect" id="node4" href="$structdictEntry.html" title="{dictEntry\n|+ key\l+ v\l|}" alt="" coords="13,5,88,97"/>
+<area shape="rect" id="node5" href="$structdictType.html" title="{dictType\n|+ hashFunction\l+ keyDup\l+ valDup\l+ keyCompare\l+ keyDestructor\l+ valDestructor\l|}" alt="" coords="121,160,237,311"/>
+<area shape="rect" id="node6" href="$structlist.html" title="{list\n|+ dup\l+ free\l+ match\l+ len\l|}" alt="" coords="251,388,322,509"/>
+<area shape="rect" id="node7" href="$structlistNode.html" title="{listNode\n|+ value\l|}" alt="" coords="261,197,331,274"/>
+</map>

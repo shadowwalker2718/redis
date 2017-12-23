@@ -1,0 +1,356 @@
+\hypertarget{rio_8c_source}{}\section{rio.\+c}
+\label{rio_8c_source}\index{src/rio.\+c@{src/rio.\+c}}
+
+\begin{DoxyCode}
+00001 \textcolor{comment}{/* rio.c is a simple stream-oriented I/O abstraction that provides an interface}
+00002 \textcolor{comment}{ * to write code that can consume/produce data using different concrete input}
+00003 \textcolor{comment}{ * and output devices. For instance the same rdb.c code using the rio}
+00004 \textcolor{comment}{ * abstraction can be used to read and write the RDB format using in-memory}
+00005 \textcolor{comment}{ * buffers or files.}
+00006 \textcolor{comment}{ *}
+00007 \textcolor{comment}{ * A rio object provides the following methods:}
+00008 \textcolor{comment}{ *  read: read from stream.}
+00009 \textcolor{comment}{ *  write: write to stream.}
+00010 \textcolor{comment}{ *  tell: get the current offset.}
+00011 \textcolor{comment}{ *}
+00012 \textcolor{comment}{ * It is also possible to set a 'checksum' method that is used by rio.c in order}
+00013 \textcolor{comment}{ * to compute a checksum of the data written or read, or to query the rio object}
+00014 \textcolor{comment}{ * for the current checksum.}
+00015 \textcolor{comment}{ *}
+00016 \textcolor{comment}{ * ----------------------------------------------------------------------------}
+00017 \textcolor{comment}{ *}
+00018 \textcolor{comment}{ * Copyright (c) 2009-2012, Pieter Noordhuis <pcnoordhuis at gmail dot com>}
+00019 \textcolor{comment}{ * Copyright (c) 2009-2012, Salvatore Sanfilippo <antirez at gmail dot com>}
+00020 \textcolor{comment}{ * All rights reserved.}
+00021 \textcolor{comment}{ *}
+00022 \textcolor{comment}{ * Redistribution and use in source and binary forms, with or without}
+00023 \textcolor{comment}{ * modification, are permitted provided that the following conditions are met:}
+00024 \textcolor{comment}{ *}
+00025 \textcolor{comment}{ *   * Redistributions of source code must retain the above copyright notice,}
+00026 \textcolor{comment}{ *     this list of conditions and the following disclaimer.}
+00027 \textcolor{comment}{ *   * Redistributions in binary form must reproduce the above copyright}
+00028 \textcolor{comment}{ *     notice, this list of conditions and the following disclaimer in the}
+00029 \textcolor{comment}{ *     documentation and/or other materials provided with the distribution.}
+00030 \textcolor{comment}{ *   * Neither the name of Redis nor the names of its contributors may be used}
+00031 \textcolor{comment}{ *     to endorse or promote products derived from this software without}
+00032 \textcolor{comment}{ *     specific prior written permission.}
+00033 \textcolor{comment}{ *}
+00034 \textcolor{comment}{ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"}
+00035 \textcolor{comment}{ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE}
+00036 \textcolor{comment}{ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE}
+00037 \textcolor{comment}{ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE}
+00038 \textcolor{comment}{ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR}
+00039 \textcolor{comment}{ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF}
+00040 \textcolor{comment}{ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS}
+00041 \textcolor{comment}{ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN}
+00042 \textcolor{comment}{ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)}
+00043 \textcolor{comment}{ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE}
+00044 \textcolor{comment}{ * POSSIBILITY OF SUCH DAMAGE.}
+00045 \textcolor{comment}{ */}
+00046 
+00047 
+00048 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \hyperlink{fmacros_8h}{"fmacros.h"}
+00049 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{string}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00050 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{stdio}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00051 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{unistd}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00052 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \hyperlink{rio_8h}{"rio.h"}
+00053 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \hyperlink{util_8h}{"util.h"}
+00054 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \hyperlink{crc64_8h}{"crc64.h"}
+00055 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \hyperlink{config_8h}{"config.h"}
+00056 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \hyperlink{server_8h}{"server.h"}
+00057 
+00058 \textcolor{comment}{/* ------------------------- Buffer I/O implementation ----------------------- */}
+00059 
+00060 \textcolor{comment}{/* Returns 1 or 0 for success/failure. */}
+00061 \textcolor{keyword}{static} size\_t rioBufferWrite(rio *r, \textcolor{keyword}{const} \textcolor{keywordtype}{void} *buf, size\_t len) \{
+00062     r->io.buffer.ptr = sdscatlen(r->io.buffer.ptr,(\textcolor{keywordtype}{char}*)buf,len);
+00063     r->io.buffer.pos += len;
+00064     \textcolor{keywordflow}{return} 1;
+00065 \}
+00066 
+00067 \textcolor{comment}{/* Returns 1 or 0 for success/failure. */}
+00068 \textcolor{keyword}{static} size\_t rioBufferRead(rio *r, \textcolor{keywordtype}{void} *buf, size\_t len) \{
+00069     \textcolor{keywordflow}{if} (sdslen(r->io.buffer.ptr)-r->io.buffer.pos < len)
+00070         \textcolor{keywordflow}{return} 0; \textcolor{comment}{/* not enough buffer to return len bytes. */}
+00071     memcpy(buf,r->io.buffer.ptr+r->io.buffer.pos,len);
+00072     r->io.buffer.pos += len;
+00073     \textcolor{keywordflow}{return} 1;
+00074 \}
+00075 
+00076 \textcolor{comment}{/* Returns read/write position in buffer. */}
+00077 \textcolor{keyword}{static} off\_t rioBufferTell(rio *r) \{
+00078     \textcolor{keywordflow}{return} r->io.buffer.pos;
+00079 \}
+00080 
+00081 \textcolor{comment}{/* Flushes any buffer to target device if applicable. Returns 1 on success}
+00082 \textcolor{comment}{ * and 0 on failures. */}
+00083 \textcolor{keyword}{static} \textcolor{keywordtype}{int} rioBufferFlush(rio *r) \{
+00084     \hyperlink{server_8h_ae7c9dc8f13568a9c856573751f1ee1ec}{UNUSED}(r);
+00085     \textcolor{keywordflow}{return} 1; \textcolor{comment}{/* Nothing to do, our write just appends to the buffer. */}
+00086 \}
+00087 
+00088 \textcolor{keyword}{static} \textcolor{keyword}{const} rio rioBufferIO = \{
+00089     rioBufferRead,
+00090     rioBufferWrite,
+00091     rioBufferTell,
+00092     rioBufferFlush,
+00093     NULL,           \textcolor{comment}{/* update\_checksum */}
+00094     0,              \textcolor{comment}{/* current checksum */}
+00095     0,              \textcolor{comment}{/* bytes read or written */}
+00096     0,              \textcolor{comment}{/* read/write chunk size */}
+00097     \{ \{ NULL, 0 \} \} \textcolor{comment}{/* union for io-specific vars */}
+00098 \};
+00099 
+00100 \textcolor{keywordtype}{void} rioInitWithBuffer(rio *r, sds s) \{
+00101     *r = rioBufferIO;
+00102     r->io.buffer.ptr = s;
+00103     r->io.buffer.pos = 0;
+00104 \}
+00105 
+00106 \textcolor{comment}{/* --------------------- Stdio file pointer implementation ------------------- */}
+00107 
+00108 \textcolor{comment}{/* Returns 1 or 0 for success/failure. */}
+00109 \textcolor{keyword}{static} size\_t rioFileWrite(rio *r, \textcolor{keyword}{const} \textcolor{keywordtype}{void} *buf, size\_t len) \{
+00110     size\_t retval;
+00111 
+00112     retval = fwrite(buf,len,1,r->io.file.fp);
+00113     r->io.file.buffered += len;
+00114 
+00115     \textcolor{keywordflow}{if} (r->io.file.autosync &&
+00116         r->io.file.buffered >= r->io.file.autosync)
+00117     \{
+00118         fflush(r->io.file.fp);
+00119         \hyperlink{config_8h_af5994c643c434574580bb7816af82cad}{aof\_fsync}(fileno(r->io.file.fp));
+00120         r->io.file.buffered = 0;
+00121     \}
+00122     \textcolor{keywordflow}{return} retval;
+00123 \}
+00124 
+00125 \textcolor{comment}{/* Returns 1 or 0 for success/failure. */}
+00126 \textcolor{keyword}{static} size\_t rioFileRead(rio *r, \textcolor{keywordtype}{void} *buf, size\_t len) \{
+00127     \textcolor{keywordflow}{return} fread(buf,len,1,r->io.file.fp);
+00128 \}
+00129 
+00130 \textcolor{comment}{/* Returns read/write position in file. */}
+00131 \textcolor{keyword}{static} off\_t rioFileTell(rio *r) \{
+00132     \textcolor{keywordflow}{return} ftello(r->io.file.fp);
+00133 \}
+00134 
+00135 \textcolor{comment}{/* Flushes any buffer to target device if applicable. Returns 1 on success}
+00136 \textcolor{comment}{ * and 0 on failures. */}
+00137 \textcolor{keyword}{static} \textcolor{keywordtype}{int} rioFileFlush(rio *r) \{
+00138     \textcolor{keywordflow}{return} (fflush(r->io.file.fp) == 0) ? 1 : 0;
+00139 \}
+00140 
+00141 \textcolor{keyword}{static} \textcolor{keyword}{const} rio rioFileIO = \{
+00142     rioFileRead,
+00143     rioFileWrite,
+00144     rioFileTell,
+00145     rioFileFlush,
+00146     NULL,           \textcolor{comment}{/* update\_checksum */}
+00147     0,              \textcolor{comment}{/* current checksum */}
+00148     0,              \textcolor{comment}{/* bytes read or written */}
+00149     0,              \textcolor{comment}{/* read/write chunk size */}
+00150     \{ \{ NULL, 0 \} \} \textcolor{comment}{/* union for io-specific vars */}
+00151 \};
+00152 
+00153 \textcolor{keywordtype}{void} rioInitWithFile(rio *r, FILE *fp) \{
+00154     *r = rioFileIO;
+00155     r->io.file.fp = fp;
+00156     r->io.file.buffered = 0;
+00157     r->io.file.autosync = 0;
+00158 \}
+00159 
+00160 \textcolor{comment}{/* ------------------- File descriptors set implementation ------------------- */}
+00161 
+00162 \textcolor{comment}{/* Returns 1 or 0 for success/failure.}
+00163 \textcolor{comment}{ * The function returns success as long as we are able to correctly write}
+00164 \textcolor{comment}{ * to at least one file descriptor.}
+00165 \textcolor{comment}{ *}
+00166 \textcolor{comment}{ * When buf is NULL and len is 0, the function performs a flush operation}
+00167 \textcolor{comment}{ * if there is some pending buffer, so this function is also used in order}
+00168 \textcolor{comment}{ * to implement rioFdsetFlush(). */}
+00169 \textcolor{keyword}{static} size\_t rioFdsetWrite(rio *r, \textcolor{keyword}{const} \textcolor{keywordtype}{void} *buf, size\_t len) \{
+00170     ssize\_t retval;
+00171     \textcolor{keywordtype}{int} j;
+00172     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *p = (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char}*) buf;
+00173     \textcolor{keywordtype}{int} doflush = (buf == NULL && len == 0);
+00174 
+00175     \textcolor{comment}{/* To start we always append to our buffer. If it gets larger than}
+00176 \textcolor{comment}{     * a given size, we actually write to the sockets. */}
+00177     \textcolor{keywordflow}{if} (len) \{
+00178         r->io.fdset.buf = sdscatlen(r->io.fdset.buf,buf,len);
+00179         len = 0; \textcolor{comment}{/* Prevent entering the while below if we don't flush. */}
+00180         \textcolor{keywordflow}{if} (sdslen(r->io.fdset.buf) > \hyperlink{server_8h_ac30919814359f46fb41e9fc497dd8e05}{PROTO\_IOBUF\_LEN}) doflush = 1;
+00181     \}
+00182 
+00183     \textcolor{keywordflow}{if} (doflush) \{
+00184         p = (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char}*) r->io.fdset.buf;
+00185         len = sdslen(r->io.fdset.buf);
+00186     \}
+00187 
+00188     \textcolor{comment}{/* Write in little chunchs so that when there are big writes we}
+00189 \textcolor{comment}{     * parallelize while the kernel is sending data in background to}
+00190 \textcolor{comment}{     * the TCP socket. */}
+00191     \textcolor{keywordflow}{while}(len) \{
+00192         size\_t count = len < 1024 ? len : 1024;
+00193         \textcolor{keywordtype}{int} broken = 0;
+00194         \textcolor{keywordflow}{for} (j = 0; j < r->io.fdset.numfds; j++) \{
+00195             \textcolor{keywordflow}{if} (r->io.fdset.state[j] != 0) \{
+00196                 \textcolor{comment}{/* Skip FDs alraedy in error. */}
+00197                 broken++;
+00198                 \textcolor{keywordflow}{continue};
+00199             \}
+00200 
+00201             \textcolor{comment}{/* Make sure to write 'count' bytes to the socket regardless}
+00202 \textcolor{comment}{             * of short writes. */}
+00203             size\_t nwritten = 0;
+00204             \textcolor{keywordflow}{while}(nwritten != count) \{
+00205                 retval = write(r->io.fdset.fds[j],p+nwritten,count-nwritten);
+00206                 \textcolor{keywordflow}{if} (retval <= 0) \{
+00207                     \textcolor{comment}{/* With blocking sockets, which is the sole user of this}
+00208 \textcolor{comment}{                     * rio target, EWOULDBLOCK is returned only because of}
+00209 \textcolor{comment}{                     * the SO\_SNDTIMEO socket option, so we translate the error}
+00210 \textcolor{comment}{                     * into one more recognizable by the user. */}
+00211                     \textcolor{keywordflow}{if} (retval == -1 && errno == EWOULDBLOCK) errno = ETIMEDOUT;
+00212                     \textcolor{keywordflow}{break};
+00213                 \}
+00214                 nwritten += retval;
+00215             \}
+00216 
+00217             \textcolor{keywordflow}{if} (nwritten != count) \{
+00218                 \textcolor{comment}{/* Mark this FD as broken. */}
+00219                 r->io.fdset.state[j] = errno;
+00220                 \textcolor{keywordflow}{if} (r->io.fdset.state[j] == 0) r->io.fdset.state[j] = EIO;
+00221             \}
+00222         \}
+00223         \textcolor{keywordflow}{if} (broken == r->io.fdset.numfds) \textcolor{keywordflow}{return} 0; \textcolor{comment}{/* All the FDs in error. */}
+00224         p += count;
+00225         len -= count;
+00226         r->io.fdset.pos += count;
+00227     \}
+00228 
+00229     \textcolor{keywordflow}{if} (doflush) sdsclear(r->io.fdset.buf);
+00230     \textcolor{keywordflow}{return} 1;
+00231 \}
+00232 
+00233 \textcolor{comment}{/* Returns 1 or 0 for success/failure. */}
+00234 \textcolor{keyword}{static} size\_t rioFdsetRead(rio *r, \textcolor{keywordtype}{void} *buf, size\_t len) \{
+00235     \hyperlink{server_8h_ae7c9dc8f13568a9c856573751f1ee1ec}{UNUSED}(r);
+00236     \hyperlink{server_8h_ae7c9dc8f13568a9c856573751f1ee1ec}{UNUSED}(buf);
+00237     \hyperlink{server_8h_ae7c9dc8f13568a9c856573751f1ee1ec}{UNUSED}(len);
+00238     \textcolor{keywordflow}{return} 0; \textcolor{comment}{/* Error, this target does not support reading. */}
+00239 \}
+00240 
+00241 \textcolor{comment}{/* Returns read/write position in file. */}
+00242 \textcolor{keyword}{static} off\_t rioFdsetTell(rio *r) \{
+00243     \textcolor{keywordflow}{return} r->io.fdset.pos;
+00244 \}
+00245 
+00246 \textcolor{comment}{/* Flushes any buffer to target device if applicable. Returns 1 on success}
+00247 \textcolor{comment}{ * and 0 on failures. */}
+00248 \textcolor{keyword}{static} \textcolor{keywordtype}{int} rioFdsetFlush(rio *r) \{
+00249     \textcolor{comment}{/* Our flush is implemented by the write method, that recognizes a}
+00250 \textcolor{comment}{     * buffer set to NULL with a count of zero as a flush request. */}
+00251     \textcolor{keywordflow}{return} rioFdsetWrite(r,NULL,0);
+00252 \}
+00253 
+00254 \textcolor{keyword}{static} \textcolor{keyword}{const} rio rioFdsetIO = \{
+00255     rioFdsetRead,
+00256     rioFdsetWrite,
+00257     rioFdsetTell,
+00258     rioFdsetFlush,
+00259     NULL,           \textcolor{comment}{/* update\_checksum */}
+00260     0,              \textcolor{comment}{/* current checksum */}
+00261     0,              \textcolor{comment}{/* bytes read or written */}
+00262     0,              \textcolor{comment}{/* read/write chunk size */}
+00263     \{ \{ NULL, 0 \} \} \textcolor{comment}{/* union for io-specific vars */}
+00264 \};
+00265 
+00266 \textcolor{keywordtype}{void} rioInitWithFdset(rio *r, \textcolor{keywordtype}{int} *fds, \textcolor{keywordtype}{int} numfds) \{
+00267     \textcolor{keywordtype}{int} j;
+00268 
+00269     *r = rioFdsetIO;
+00270     r->io.fdset.fds = zmalloc(\textcolor{keyword}{sizeof}(\textcolor{keywordtype}{int})*numfds);
+00271     r->io.fdset.state = zmalloc(\textcolor{keyword}{sizeof}(\textcolor{keywordtype}{int})*numfds);
+00272     memcpy(r->io.fdset.fds,fds,\textcolor{keyword}{sizeof}(\textcolor{keywordtype}{int})*numfds);
+00273     \textcolor{keywordflow}{for} (j = 0; j < numfds; j++) r->io.fdset.state[j] = 0;
+00274     r->io.fdset.numfds = numfds;
+00275     r->io.fdset.pos = 0;
+00276     r->io.fdset.buf = sdsempty();
+00277 \}
+00278 
+00279 \textcolor{comment}{/* release the rio stream. */}
+00280 \textcolor{keywordtype}{void} rioFreeFdset(rio *r) \{
+00281     zfree(r->io.fdset.fds);
+00282     zfree(r->io.fdset.state);
+00283     sdsfree(r->io.fdset.buf);
+00284 \}
+00285 
+00286 \textcolor{comment}{/* ---------------------------- Generic functions ---------------------------- */}
+00287 
+00288 \textcolor{comment}{/* This function can be installed both in memory and file streams when checksum}
+00289 \textcolor{comment}{ * computation is needed. */}
+00290 \textcolor{keywordtype}{void} rioGenericUpdateChecksum(rio *r, \textcolor{keyword}{const} \textcolor{keywordtype}{void} *buf, size\_t len) \{
+00291     r->cksum = crc64(r->cksum,buf,len);
+00292 \}
+00293 
+00294 \textcolor{comment}{/* Set the file-based rio object to auto-fsync every 'bytes' file written.}
+00295 \textcolor{comment}{ * By default this is set to zero that means no automatic file sync is}
+00296 \textcolor{comment}{ * performed.}
+00297 \textcolor{comment}{ *}
+00298 \textcolor{comment}{ * This feature is useful in a few contexts since when we rely on OS write}
+00299 \textcolor{comment}{ * buffers sometimes the OS buffers way too much, resulting in too many}
+00300 \textcolor{comment}{ * disk I/O concentrated in very little time. When we fsync in an explicit}
+00301 \textcolor{comment}{ * way instead the I/O pressure is more distributed across time. */}
+00302 \textcolor{keywordtype}{void} rioSetAutoSync(rio *r, off\_t bytes) \{
+00303     \hyperlink{server_8h_a88114b5169b4c382df6b56506285e56a}{serverAssert}(r->read == rioFileIO.read);
+00304     r->io.file.autosync = bytes;
+00305 \}
+00306 
+00307 \textcolor{comment}{/* --------------------------- Higher level interface --------------------------}
+00308 \textcolor{comment}{ *}
+00309 \textcolor{comment}{ * The following higher level functions use lower level rio.c functions to help}
+00310 \textcolor{comment}{ * generating the Redis protocol for the Append Only File. */}
+00311 
+00312 \textcolor{comment}{/* Write multi bulk count in the format: "*<count>\(\backslash\)r\(\backslash\)n". */}
+00313 size\_t rioWriteBulkCount(rio *r, \textcolor{keywordtype}{char} prefix, \textcolor{keywordtype}{int} count) \{
+00314     \textcolor{keywordtype}{char} cbuf[128];
+00315     \textcolor{keywordtype}{int} clen;
+00316 
+00317     cbuf[0] = prefix;
+00318     clen = 1+ll2string(cbuf+1,\textcolor{keyword}{sizeof}(cbuf)-1,count);
+00319     cbuf[clen++] = \textcolor{stringliteral}{'\(\backslash\)r'};
+00320     cbuf[clen++] = \textcolor{stringliteral}{'\(\backslash\)n'};
+00321     \textcolor{keywordflow}{if} (rioWrite(r,cbuf,clen) == 0) \textcolor{keywordflow}{return} 0;
+00322     \textcolor{keywordflow}{return} clen;
+00323 \}
+00324 
+00325 \textcolor{comment}{/* Write binary-safe string in the format: "$<count>\(\backslash\)r\(\backslash\)n<payload>\(\backslash\)r\(\backslash\)n". */}
+00326 size\_t rioWriteBulkString(rio *r, \textcolor{keyword}{const} \textcolor{keywordtype}{char} *buf, size\_t len) \{
+00327     size\_t nwritten;
+00328 
+00329     \textcolor{keywordflow}{if} ((nwritten = rioWriteBulkCount(r,\textcolor{stringliteral}{'$'},len)) == 0) \textcolor{keywordflow}{return} 0;
+00330     \textcolor{keywordflow}{if} (len > 0 && rioWrite(r,buf,len) == 0) \textcolor{keywordflow}{return} 0;
+00331     \textcolor{keywordflow}{if} (rioWrite(r,\textcolor{stringliteral}{"\(\backslash\)r\(\backslash\)n"},2) == 0) \textcolor{keywordflow}{return} 0;
+00332     \textcolor{keywordflow}{return} nwritten+len+2;
+00333 \}
+00334 
+00335 \textcolor{comment}{/* Write a long long value in format: "$<count>\(\backslash\)r\(\backslash\)n<payload>\(\backslash\)r\(\backslash\)n". */}
+00336 size\_t rioWriteBulkLongLong(rio *r, \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} l) \{
+00337     \textcolor{keywordtype}{char} lbuf[32];
+00338     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{int} llen;
+00339 
+00340     llen = ll2string(lbuf,\textcolor{keyword}{sizeof}(lbuf),l);
+00341     \textcolor{keywordflow}{return} rioWriteBulkString(r,lbuf,llen);
+00342 \}
+00343 
+00344 \textcolor{comment}{/* Write a double value in the format: "$<count>\(\backslash\)r\(\backslash\)n<payload>\(\backslash\)r\(\backslash\)n" */}
+00345 size\_t rioWriteBulkDouble(rio *r, \textcolor{keywordtype}{double} d) \{
+00346     \textcolor{keywordtype}{char} dbuf[128];
+00347     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{int} dlen;
+00348 
+00349     dlen = snprintf(dbuf,\textcolor{keyword}{sizeof}(dbuf),\textcolor{stringliteral}{"%.17g"},d);
+00350     \textcolor{keywordflow}{return} rioWriteBulkString(r,dbuf,dlen);
+00351 \}
+\end{DoxyCode}

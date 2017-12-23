@@ -1,0 +1,6 @@
+<map id="clusterNodeFailReport" name="clusterNodeFailReport">
+<area shape="rect" id="node2" href="$structclusterNode.html" title="{clusterNode\n|+ ctime\l+ name\l+ flags\l+ configEpoch\l+ slots\l+ numslots\l+ numslaves\l+ ping_sent\l+ pong_received\l+ fail_time\land 7 more...\l|}" alt="" coords="94,344,213,568"/>
+<area shape="rect" id="node3" href="$structclusterLink.html" title="{clusterLink\n|+ ctime\l+ fd\l+ sndbuf\l+ rcvbuf\l|}" alt="" coords="181,631,267,752"/>
+<area shape="rect" id="node4" href="$structlist.html" title="{list\n|+ dup\l+ free\l+ match\l+ len\l|}" alt="" coords="118,160,189,281"/>
+<area shape="rect" id="node5" href="$structlistNode.html" title="{listNode\n|+ value\l|}" alt="" coords="118,5,189,83"/>
+</map>

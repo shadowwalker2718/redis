@@ -1,0 +1,58 @@
+\hypertarget{release_8c_source}{}\section{release.\+c}
+\label{release_8c_source}\index{src/release.\+c@{src/release.\+c}}
+
+\begin{DoxyCode}
+00001 \textcolor{comment}{/*}
+00002 \textcolor{comment}{ * Copyright (c) 2009-2012, Salvatore Sanfilippo <antirez at gmail dot com>}
+00003 \textcolor{comment}{ * All rights reserved.}
+00004 \textcolor{comment}{ *}
+00005 \textcolor{comment}{ * Redistribution and use in source and binary forms, with or without}
+00006 \textcolor{comment}{ * modification, are permitted provided that the following conditions are met:}
+00007 \textcolor{comment}{ *}
+00008 \textcolor{comment}{ *   * Redistributions of source code must retain the above copyright notice,}
+00009 \textcolor{comment}{ *     this list of conditions and the following disclaimer.}
+00010 \textcolor{comment}{ *   * Redistributions in binary form must reproduce the above copyright}
+00011 \textcolor{comment}{ *     notice, this list of conditions and the following disclaimer in the}
+00012 \textcolor{comment}{ *     documentation and/or other materials provided with the distribution.}
+00013 \textcolor{comment}{ *   * Neither the name of Redis nor the names of its contributors may be used}
+00014 \textcolor{comment}{ *     to endorse or promote products derived from this software without}
+00015 \textcolor{comment}{ *     specific prior written permission.}
+00016 \textcolor{comment}{ *}
+00017 \textcolor{comment}{ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"}
+00018 \textcolor{comment}{ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE}
+00019 \textcolor{comment}{ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE}
+00020 \textcolor{comment}{ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE}
+00021 \textcolor{comment}{ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR}
+00022 \textcolor{comment}{ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF}
+00023 \textcolor{comment}{ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS}
+00024 \textcolor{comment}{ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN}
+00025 \textcolor{comment}{ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)}
+00026 \textcolor{comment}{ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE}
+00027 \textcolor{comment}{ * POSSIBILITY OF SUCH DAMAGE.}
+00028 \textcolor{comment}{ */}
+00029 
+00030 \textcolor{comment}{/* Every time the Redis Git SHA1 or Dirty status changes only this small}
+00031 \textcolor{comment}{ * file is recompiled, as we access this information in all the other}
+00032 \textcolor{comment}{ * files using this functions. */}
+00033 
+00034 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{string}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00035 
+00036 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \hyperlink{release_8h}{"release.h"}
+00037 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \hyperlink{version_8h}{"version.h"}
+00038 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \hyperlink{crc64_8h}{"crc64.h"}
+00039 
+00040 \textcolor{keywordtype}{char} *redisGitSHA1(\textcolor{keywordtype}{void}) \{
+00041     \textcolor{keywordflow}{return} \hyperlink{release_8h_a1b35aa9f60c274eb631ba59d6027bc3e}{REDIS\_GIT\_SHA1};
+00042 \}
+00043 
+00044 \textcolor{keywordtype}{char} *redisGitDirty(\textcolor{keywordtype}{void}) \{
+00045     \textcolor{keywordflow}{return} \hyperlink{release_8h_a9f898d3c5a239c0ad24abf94a7287e24}{REDIS\_GIT\_DIRTY};
+00046 \}
+00047 
+00048 uint64\_t redisBuildId(\textcolor{keywordtype}{void}) \{
+00049     \textcolor{keywordtype}{char} *buildid = \hyperlink{version_8h_a357a0d302ef7fbb42bf2db0632b9f7fe}{REDIS\_VERSION} \hyperlink{release_8h_abede7a2ad28571d363ca88b8e0eed55e}{REDIS\_BUILD\_ID} 
+      \hyperlink{release_8h_a9f898d3c5a239c0ad24abf94a7287e24}{REDIS\_GIT\_DIRTY} \hyperlink{release_8h_a1b35aa9f60c274eb631ba59d6027bc3e}{REDIS\_GIT\_SHA1};
+00050 
+00051     \textcolor{keywordflow}{return} crc64(0,(\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char}*)buildid,strlen(buildid));
+00052 \}
+\end{DoxyCode}

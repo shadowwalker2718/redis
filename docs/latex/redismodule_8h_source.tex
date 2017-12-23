@@ -1,0 +1,428 @@
+\hypertarget{redismodule_8h_source}{}\section{redismodule.\+h}
+\label{redismodule_8h_source}\index{src/redismodule.\+h@{src/redismodule.\+h}}
+
+\begin{DoxyCode}
+00001 \textcolor{preprocessor}{#}\textcolor{preprocessor}{ifndef} \textcolor{preprocessor}{REDISMODULE\_H}
+00002 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{REDISMODULE\_H}
+00003 
+00004 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{sys}\textcolor{preprocessor}{/}\textcolor{preprocessor}{types}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00005 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{stdint}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00006 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{stdio}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00007 
+00008 \textcolor{comment}{/* ---------------- Defines common between core and modules --------------- */}
+00009 
+00010 \textcolor{comment}{/* Error status return values. */}
+00011 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{REDISMODULE\_OK} 0
+00012 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{REDISMODULE\_ERR} 1
+00013 
+00014 \textcolor{comment}{/* API versions. */}
+00015 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{REDISMODULE\_APIVER\_1} 1
+00016 
+00017 \textcolor{comment}{/* API flags and constants */}
+00018 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{REDISMODULE\_READ} \textcolor{preprocessor}{(}1\textcolor{preprocessor}{<<}0\textcolor{preprocessor}{)}
+00019 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{REDISMODULE\_WRITE} \textcolor{preprocessor}{(}1\textcolor{preprocessor}{<<}1\textcolor{preprocessor}{)}
+00020 
+00021 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{REDISMODULE\_LIST\_HEAD} 0
+00022 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{REDISMODULE\_LIST\_TAIL} 1
+00023 
+00024 \textcolor{comment}{/* Key types. */}
+00025 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{REDISMODULE\_KEYTYPE\_EMPTY} 0
+00026 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{REDISMODULE\_KEYTYPE\_STRING} 1
+00027 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{REDISMODULE\_KEYTYPE\_LIST} 2
+00028 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{REDISMODULE\_KEYTYPE\_HASH} 3
+00029 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{REDISMODULE\_KEYTYPE\_SET} 4
+00030 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{REDISMODULE\_KEYTYPE\_ZSET} 5
+00031 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{REDISMODULE\_KEYTYPE\_MODULE} 6
+00032 
+00033 \textcolor{comment}{/* Reply types. */}
+00034 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{REDISMODULE\_REPLY\_UNKNOWN} \textcolor{preprocessor}{-}1
+00035 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{REDISMODULE\_REPLY\_STRING} 0
+00036 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{REDISMODULE\_REPLY\_ERROR} 1
+00037 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{REDISMODULE\_REPLY\_INTEGER} 2
+00038 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{REDISMODULE\_REPLY\_ARRAY} 3
+00039 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{REDISMODULE\_REPLY\_NULL} 4
+00040 
+00041 \textcolor{comment}{/* Postponed array length. */}
+00042 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{REDISMODULE\_POSTPONED\_ARRAY\_LEN} \textcolor{preprocessor}{-}1
+00043 
+00044 \textcolor{comment}{/* Expire */}
+00045 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{REDISMODULE\_NO\_EXPIRE} \textcolor{preprocessor}{-}1
+00046 
+00047 \textcolor{comment}{/* Sorted set API flags. */}
+00048 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{REDISMODULE\_ZADD\_XX}      \textcolor{preprocessor}{(}1\textcolor{preprocessor}{<<}0\textcolor{preprocessor}{)}
+00049 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{REDISMODULE\_ZADD\_NX}      \textcolor{preprocessor}{(}1\textcolor{preprocessor}{<<}1\textcolor{preprocessor}{)}
+00050 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{REDISMODULE\_ZADD\_ADDED}   \textcolor{preprocessor}{(}1\textcolor{preprocessor}{<<}2\textcolor{preprocessor}{)}
+00051 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{REDISMODULE\_ZADD\_UPDATED} \textcolor{preprocessor}{(}1\textcolor{preprocessor}{<<}3\textcolor{preprocessor}{)}
+00052 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{REDISMODULE\_ZADD\_NOP}     \textcolor{preprocessor}{(}1\textcolor{preprocessor}{<<}4\textcolor{preprocessor}{)}
+00053 
+00054 \textcolor{comment}{/* Hash API flags. */}
+00055 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{REDISMODULE\_HASH\_NONE}       0
+00056 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{REDISMODULE\_HASH\_NX}         \textcolor{preprocessor}{(}1\textcolor{preprocessor}{<<}0\textcolor{preprocessor}{)}
+00057 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{REDISMODULE\_HASH\_XX}         \textcolor{preprocessor}{(}1\textcolor{preprocessor}{<<}1\textcolor{preprocessor}{)}
+00058 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{REDISMODULE\_HASH\_CFIELDS}    \textcolor{preprocessor}{(}1\textcolor{preprocessor}{<<}2\textcolor{preprocessor}{)}
+00059 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{REDISMODULE\_HASH\_EXISTS}     \textcolor{preprocessor}{(}1\textcolor{preprocessor}{<<}3\textcolor{preprocessor}{)}
+00060 
+00061 \textcolor{comment}{/* Context Flags: Info about the current context returned by RM\_GetContextFlags */}
+00062 
+00063 \textcolor{comment}{/* The command is running in the context of a Lua script */}
+00064 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{REDISMODULE\_CTX\_FLAGS\_LUA} 0x0001
+00065 \textcolor{comment}{/* The command is running inside a Redis transaction */}
+00066 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{REDISMODULE\_CTX\_FLAGS\_MULTI} 0x0002
+00067 \textcolor{comment}{/* The instance is a master */}
+00068 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{REDISMODULE\_CTX\_FLAGS\_MASTER} 0x0004
+00069 \textcolor{comment}{/* The instance is a slave */}
+00070 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{REDISMODULE\_CTX\_FLAGS\_SLAVE} 0x0008
+00071 \textcolor{comment}{/* The instance is read-only (usually meaning it's a slave as well) */}
+00072 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{REDISMODULE\_CTX\_FLAGS\_READONLY} 0x0010
+00073 \textcolor{comment}{/* The instance is running in cluster mode */}
+00074 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{REDISMODULE\_CTX\_FLAGS\_CLUSTER} 0x0020
+00075 \textcolor{comment}{/* The instance has AOF enabled */}
+00076 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{REDISMODULE\_CTX\_FLAGS\_AOF} 0x0040 \textcolor{comment}{//}
+00077 \textcolor{comment}{/* The instance has RDB enabled */}
+00078 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{REDISMODULE\_CTX\_FLAGS\_RDB} 0x0080 \textcolor{comment}{//}
+00079 \textcolor{comment}{/* The instance has Maxmemory set */}
+00080 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{REDISMODULE\_CTX\_FLAGS\_MAXMEMORY} 0x0100
+00081 \textcolor{comment}{/* Maxmemory is set and has an eviction policy that may delete keys */}
+00082 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{REDISMODULE\_CTX\_FLAGS\_EVICT} 0x0200
+00083 
+00084 
+00085 \textcolor{comment}{/* A special pointer that we can use between the core and the module to signal}
+00086 \textcolor{comment}{ * field deletion, and that is impossible to be a valid pointer. */}
+00087 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{REDISMODULE\_HASH\_DELETE} \textcolor{preprocessor}{(}\textcolor{preprocessor}{(}RedisModuleString\textcolor{preprocessor}{*}\textcolor{preprocessor}{)}\textcolor{preprocessor}{(}\textcolor{keywordtype}{long}\textcolor{preprocessor}{)}1\textcolor{preprocessor}{)}
+00088 
+00089 \textcolor{comment}{/* Error messages. */}
+00090 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{REDISMODULE\_ERRORMSG\_WRONGTYPE} \textcolor{stringliteral}{"WRONGTYPE Operation against a key holding the wrong kind of
+       value"}
+00091 
+00092 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{REDISMODULE\_POSITIVE\_INFINITE} \textcolor{preprocessor}{(}1.0\textcolor{preprocessor}{/}0.0\textcolor{preprocessor}{)}
+00093 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{REDISMODULE\_NEGATIVE\_INFINITE} \textcolor{preprocessor}{(}\textcolor{preprocessor}{-}1.0\textcolor{preprocessor}{/}0.0\textcolor{preprocessor}{)}
+00094 
+00095 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{REDISMODULE\_NOT\_USED}\textcolor{preprocessor}{(}\textcolor{preprocessor}{V}\textcolor{preprocessor}{)} \textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{keywordtype}{void}\textcolor{preprocessor}{)} \textcolor{preprocessor}{V}\textcolor{preprocessor}{)}
+00096 
+00097 \textcolor{comment}{/* ------------------------- End of common defines ------------------------ */}
+00098 
+00099 \textcolor{preprocessor}{#}\textcolor{preprocessor}{ifndef} \hyperlink{module_8c_a1c891ed8ef2530fbaf7e418dfb43be63}{REDISMODULE\_CORE}
+00100 
+00101 \textcolor{keyword}{typedef} \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} mstime\_t;
+00102 
+00103 \textcolor{comment}{/* Incomplete structures for compiler checks but opaque access. */}
+00104 \textcolor{keyword}{typedef} \textcolor{keyword}{struct} RedisModuleCtx RedisModuleCtx;
+00105 \textcolor{keyword}{typedef} \textcolor{keyword}{struct} RedisModuleKey RedisModuleKey;
+00106 \textcolor{keyword}{typedef} \textcolor{keyword}{struct} RedisModuleString RedisModuleString;
+00107 \textcolor{keyword}{typedef} \textcolor{keyword}{struct} RedisModuleCallReply RedisModuleCallReply;
+00108 \textcolor{keyword}{typedef} \textcolor{keyword}{struct} RedisModuleIO RedisModuleIO;
+00109 \textcolor{keyword}{typedef} \textcolor{keyword}{struct} RedisModuleType RedisModuleType;
+00110 \textcolor{keyword}{typedef} \textcolor{keyword}{struct} RedisModuleDigest RedisModuleDigest;
+00111 \textcolor{keyword}{typedef} \textcolor{keyword}{struct} RedisModuleBlockedClient RedisModuleBlockedClient;
+00112 
+00113 \textcolor{keyword}{typedef} \textcolor{keywordtype}{int} (*RedisModuleCmdFunc) (RedisModuleCtx *ctx, RedisModuleString **argv, \textcolor{keywordtype}{int} argc);
+00114 
+00115 \textcolor{keyword}{typedef} \textcolor{keywordtype}{void} *(*RedisModuleTypeLoadFunc)(RedisModuleIO *rdb, \textcolor{keywordtype}{int} encver);
+00116 \textcolor{keyword}{typedef} \textcolor{keywordtype}{void} (*RedisModuleTypeSaveFunc)(RedisModuleIO *rdb, \textcolor{keywordtype}{void} *value);
+00117 \textcolor{keyword}{typedef} \textcolor{keywordtype}{void} (*RedisModuleTypeRewriteFunc)(RedisModuleIO *aof, RedisModuleString *key, \textcolor{keywordtype}{void} *value);
+00118 \textcolor{keyword}{typedef} size\_t (*RedisModuleTypeMemUsageFunc)(\textcolor{keyword}{const} \textcolor{keywordtype}{void} *value);
+00119 \textcolor{keyword}{typedef} \textcolor{keywordtype}{void} (*RedisModuleTypeDigestFunc)(RedisModuleDigest *digest, \textcolor{keywordtype}{void} *value);
+00120 \textcolor{keyword}{typedef} \textcolor{keywordtype}{void} (*RedisModuleTypeFreeFunc)(\textcolor{keywordtype}{void} *value);
+00121 
+00122 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{REDISMODULE\_TYPE\_METHOD\_VERSION} 1
+\Hypertarget{redismodule_8h_source_l00123}\hyperlink{structRedisModuleTypeMethods}{00123} \textcolor{keyword}{typedef} \textcolor{keyword}{struct} RedisModuleTypeMethods \{
+00124     uint64\_t version;
+00125     RedisModuleTypeLoadFunc rdb\_load;
+00126     RedisModuleTypeSaveFunc rdb\_save;
+00127     RedisModuleTypeRewriteFunc aof\_rewrite;
+00128     RedisModuleTypeMemUsageFunc mem\_usage;
+00129     RedisModuleTypeDigestFunc digest;
+00130     RedisModuleTypeFreeFunc free;
+00131 \} RedisModuleTypeMethods;
+00132 
+00133 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{REDISMODULE\_GET\_API}\textcolor{preprocessor}{(}\textcolor{preprocessor}{name}\textcolor{preprocessor}{)}
+00134     \textcolor{preprocessor}{RedisModule\_GetApi}\textcolor{preprocessor}{(}\textcolor{stringliteral}{"RedisModule\_"} \textcolor{preprocessor}{#}\textcolor{preprocessor}{name}\textcolor{preprocessor}{,} \textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{void} \textcolor{preprocessor}{*}\textcolor{preprocessor}{*}\textcolor{preprocessor}{)}\textcolor{preprocessor}{&}\textcolor{preprocessor}{RedisModule\_} \textcolor{preprocessor}{##} \textcolor{preprocessor}{name}\textcolor{preprocessor}{)}\textcolor{preprocessor}{)}
+00135 
+00136 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{REDISMODULE\_API\_FUNC}\textcolor{preprocessor}{(}\textcolor{preprocessor}{x}\textcolor{preprocessor}{)} \textcolor{preprocessor}{(}\textcolor{preprocessor}{*}\textcolor{preprocessor}{x}\textcolor{preprocessor}{)}
+00137 
+00138 
+00139 \textcolor{keywordtype}{void} *REDISMODULE\_API\_FUNC(RedisModule\_Alloc)(size\_t bytes);
+00140 \textcolor{keywordtype}{void} *REDISMODULE\_API\_FUNC(RedisModule\_Realloc)(\textcolor{keywordtype}{void} *ptr, size\_t bytes);
+00141 \textcolor{keywordtype}{void} REDISMODULE\_API\_FUNC(RedisModule\_Free)(\textcolor{keywordtype}{void} *ptr);
+00142 \textcolor{keywordtype}{void} *REDISMODULE\_API\_FUNC(RedisModule\_Calloc)(size\_t nmemb, size\_t size);
+00143 \textcolor{keywordtype}{char} *REDISMODULE\_API\_FUNC(RedisModule\_Strdup)(\textcolor{keyword}{const} \textcolor{keywordtype}{char} *str);
+00144 \textcolor{keywordtype}{int} REDISMODULE\_API\_FUNC(RedisModule\_GetApi)(\textcolor{keyword}{const} \textcolor{keywordtype}{char} *, \textcolor{keywordtype}{void} *);
+00145 \textcolor{keywordtype}{int} REDISMODULE\_API\_FUNC(RedisModule\_CreateCommand)(RedisModuleCtx *ctx, \textcolor{keyword}{const} \textcolor{keywordtype}{char} *name, 
+      RedisModuleCmdFunc cmdfunc, \textcolor{keyword}{const} \textcolor{keywordtype}{char} *strflags, \textcolor{keywordtype}{int} firstkey, \textcolor{keywordtype}{int} lastkey, \textcolor{keywordtype}{int} keystep);
+00146 \textcolor{keywordtype}{void} REDISMODULE\_API\_FUNC(RedisModule\_SetModuleAttribs)(RedisModuleCtx *ctx, \textcolor{keyword}{const} \textcolor{keywordtype}{char} *name, \textcolor{keywordtype}{int} ver
+      , \textcolor{keywordtype}{int} apiver);
+00147 \textcolor{keywordtype}{int} REDISMODULE\_API\_FUNC(RedisModule\_IsModuleNameBusy)(\textcolor{keyword}{const} \textcolor{keywordtype}{char} *name);
+00148 \textcolor{keywordtype}{int} REDISMODULE\_API\_FUNC(RedisModule\_WrongArity)(RedisModuleCtx *ctx);
+00149 \textcolor{keywordtype}{int} REDISMODULE\_API\_FUNC(RedisModule\_ReplyWithLongLong)(RedisModuleCtx *ctx, \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} ll);
+00150 \textcolor{keywordtype}{int} REDISMODULE\_API\_FUNC(RedisModule\_GetSelectedDb)(RedisModuleCtx *ctx);
+00151 \textcolor{keywordtype}{int} REDISMODULE\_API\_FUNC(RedisModule\_SelectDb)(RedisModuleCtx *ctx, \textcolor{keywordtype}{int} newid);
+00152 \textcolor{keywordtype}{void} *REDISMODULE\_API\_FUNC(RedisModule\_OpenKey)(RedisModuleCtx *ctx, RedisModuleString *keyname, \textcolor{keywordtype}{int} 
+      mode);
+00153 \textcolor{keywordtype}{void} REDISMODULE\_API\_FUNC(RedisModule\_CloseKey)(RedisModuleKey *kp);
+00154 \textcolor{keywordtype}{int} REDISMODULE\_API\_FUNC(RedisModule\_KeyType)(RedisModuleKey *kp);
+00155 size\_t REDISMODULE\_API\_FUNC(RedisModule\_ValueLength)(RedisModuleKey *kp);
+00156 \textcolor{keywordtype}{int} REDISMODULE\_API\_FUNC(RedisModule\_ListPush)(RedisModuleKey *kp, \textcolor{keywordtype}{int} where, RedisModuleString *ele);
+00157 RedisModuleString *REDISMODULE\_API\_FUNC(RedisModule\_ListPop)(RedisModuleKey *key, \textcolor{keywordtype}{int} where);
+00158 RedisModuleCallReply *REDISMODULE\_API\_FUNC(RedisModule\_Call)(RedisModuleCtx *ctx, \textcolor{keyword}{const} \textcolor{keywordtype}{char} *cmdname,
+       \textcolor{keyword}{const} \textcolor{keywordtype}{char} *fmt, ...);
+00159 \textcolor{keyword}{const} \textcolor{keywordtype}{char} *REDISMODULE\_API\_FUNC(RedisModule\_CallReplyProto)(RedisModuleCallReply *reply, size\_t *len)
+      ;
+00160 \textcolor{keywordtype}{void} REDISMODULE\_API\_FUNC(RedisModule\_FreeCallReply)(RedisModuleCallReply *reply);
+00161 \textcolor{keywordtype}{int} REDISMODULE\_API\_FUNC(RedisModule\_CallReplyType)(RedisModuleCallReply *reply);
+00162 \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} REDISMODULE\_API\_FUNC(RedisModule\_CallReplyInteger)(RedisModuleCallReply *reply);
+00163 size\_t REDISMODULE\_API\_FUNC(RedisModule\_CallReplyLength)(RedisModuleCallReply *reply);
+00164 RedisModuleCallReply *REDISMODULE\_API\_FUNC(RedisModule\_CallReplyArrayElement)(RedisModuleCallReply *
+      reply, size\_t idx);
+00165 RedisModuleString *REDISMODULE\_API\_FUNC(RedisModule\_CreateString)(RedisModuleCtx *ctx, \textcolor{keyword}{const} \textcolor{keywordtype}{char} *ptr
+      , size\_t len);
+00166 RedisModuleString *REDISMODULE\_API\_FUNC(RedisModule\_CreateStringFromLongLong)(RedisModuleCtx *ctx, \textcolor{keywordtype}{
+      long} \textcolor{keywordtype}{long} ll);
+00167 RedisModuleString *REDISMODULE\_API\_FUNC(RedisModule\_CreateStringFromString)(RedisModuleCtx *ctx, \textcolor{keyword}{const}
+       RedisModuleString *str);
+00168 RedisModuleString *REDISMODULE\_API\_FUNC(RedisModule\_CreateStringPrintf)(RedisModuleCtx *ctx, \textcolor{keyword}{const} \textcolor{keywordtype}{
+      char} *fmt, ...);
+00169 \textcolor{keywordtype}{void} REDISMODULE\_API\_FUNC(RedisModule\_FreeString)(RedisModuleCtx *ctx, RedisModuleString *str);
+00170 \textcolor{keyword}{const} \textcolor{keywordtype}{char} *REDISMODULE\_API\_FUNC(RedisModule\_StringPtrLen)(\textcolor{keyword}{const} RedisModuleString *str, size\_t *len);
+00171 \textcolor{keywordtype}{int} REDISMODULE\_API\_FUNC(RedisModule\_ReplyWithError)(RedisModuleCtx *ctx, \textcolor{keyword}{const} \textcolor{keywordtype}{char} *err);
+00172 \textcolor{keywordtype}{int} REDISMODULE\_API\_FUNC(RedisModule\_ReplyWithSimpleString)(RedisModuleCtx *ctx, \textcolor{keyword}{const} \textcolor{keywordtype}{char} *msg);
+00173 \textcolor{keywordtype}{int} REDISMODULE\_API\_FUNC(RedisModule\_ReplyWithArray)(RedisModuleCtx *ctx, \textcolor{keywordtype}{long} len);
+00174 \textcolor{keywordtype}{void} REDISMODULE\_API\_FUNC(RedisModule\_ReplySetArrayLength)(RedisModuleCtx *ctx, \textcolor{keywordtype}{long} len);
+00175 \textcolor{keywordtype}{int} REDISMODULE\_API\_FUNC(RedisModule\_ReplyWithStringBuffer)(RedisModuleCtx *ctx, \textcolor{keyword}{const} \textcolor{keywordtype}{char} *buf, 
+      size\_t len);
+00176 \textcolor{keywordtype}{int} REDISMODULE\_API\_FUNC(RedisModule\_ReplyWithString)(RedisModuleCtx *ctx, RedisModuleString *str);
+00177 \textcolor{keywordtype}{int} REDISMODULE\_API\_FUNC(RedisModule\_ReplyWithNull)(RedisModuleCtx *ctx);
+00178 \textcolor{keywordtype}{int} REDISMODULE\_API\_FUNC(RedisModule\_ReplyWithDouble)(RedisModuleCtx *ctx, \textcolor{keywordtype}{double} d);
+00179 \textcolor{keywordtype}{int} REDISMODULE\_API\_FUNC(RedisModule\_ReplyWithCallReply)(RedisModuleCtx *ctx, RedisModuleCallReply *
+      reply);
+00180 \textcolor{keywordtype}{int} REDISMODULE\_API\_FUNC(RedisModule\_StringToLongLong)(\textcolor{keyword}{const} RedisModuleString *str, \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} *ll);
+00181 \textcolor{keywordtype}{int} REDISMODULE\_API\_FUNC(RedisModule\_StringToDouble)(\textcolor{keyword}{const} RedisModuleString *str, \textcolor{keywordtype}{double} *d);
+00182 \textcolor{keywordtype}{void} REDISMODULE\_API\_FUNC(RedisModule\_AutoMemory)(RedisModuleCtx *ctx);
+00183 \textcolor{keywordtype}{int} REDISMODULE\_API\_FUNC(RedisModule\_Replicate)(RedisModuleCtx *ctx, \textcolor{keyword}{const} \textcolor{keywordtype}{char} *cmdname, \textcolor{keyword}{const} \textcolor{keywordtype}{char} *
+      fmt, ...);
+00184 \textcolor{keywordtype}{int} REDISMODULE\_API\_FUNC(RedisModule\_ReplicateVerbatim)(RedisModuleCtx *ctx);
+00185 \textcolor{keyword}{const} \textcolor{keywordtype}{char} *REDISMODULE\_API\_FUNC(RedisModule\_CallReplyStringPtr)(RedisModuleCallReply *reply, size\_t *
+      len);
+00186 RedisModuleString *REDISMODULE\_API\_FUNC(RedisModule\_CreateStringFromCallReply)(RedisModuleCallReply *
+      reply);
+00187 \textcolor{keywordtype}{int} REDISMODULE\_API\_FUNC(RedisModule\_DeleteKey)(RedisModuleKey *key);
+00188 \textcolor{keywordtype}{int} REDISMODULE\_API\_FUNC(RedisModule\_StringSet)(RedisModuleKey *key, RedisModuleString *str);
+00189 \textcolor{keywordtype}{char} *REDISMODULE\_API\_FUNC(RedisModule\_StringDMA)(RedisModuleKey *key, size\_t *len, \textcolor{keywordtype}{int} mode);
+00190 \textcolor{keywordtype}{int} REDISMODULE\_API\_FUNC(RedisModule\_StringTruncate)(RedisModuleKey *key, size\_t newlen);
+00191 mstime\_t REDISMODULE\_API\_FUNC(RedisModule\_GetExpire)(RedisModuleKey *key);
+00192 \textcolor{keywordtype}{int} REDISMODULE\_API\_FUNC(RedisModule\_SetExpire)(RedisModuleKey *key, mstime\_t expire);
+00193 \textcolor{keywordtype}{int} REDISMODULE\_API\_FUNC(RedisModule\_ZsetAdd)(RedisModuleKey *key, \textcolor{keywordtype}{double} score, RedisModuleString *
+      ele, \textcolor{keywordtype}{int} *flagsptr);
+00194 \textcolor{keywordtype}{int} REDISMODULE\_API\_FUNC(RedisModule\_ZsetIncrby)(RedisModuleKey *key, \textcolor{keywordtype}{double} score, RedisModuleString 
+      *ele, \textcolor{keywordtype}{int} *flagsptr, \textcolor{keywordtype}{double} *newscore);
+00195 \textcolor{keywordtype}{int} REDISMODULE\_API\_FUNC(RedisModule\_ZsetScore)(RedisModuleKey *key, RedisModuleString *ele, \textcolor{keywordtype}{double} *
+      score);
+00196 \textcolor{keywordtype}{int} REDISMODULE\_API\_FUNC(RedisModule\_ZsetRem)(RedisModuleKey *key, RedisModuleString *ele, \textcolor{keywordtype}{int} *
+      deleted);
+00197 \textcolor{keywordtype}{void} REDISMODULE\_API\_FUNC(RedisModule\_ZsetRangeStop)(RedisModuleKey *key);
+00198 \textcolor{keywordtype}{int} REDISMODULE\_API\_FUNC(RedisModule\_ZsetFirstInScoreRange)(RedisModuleKey *key, \textcolor{keywordtype}{double} min, \textcolor{keywordtype}{double} 
+      max, \textcolor{keywordtype}{int} minex, \textcolor{keywordtype}{int} maxex);
+00199 \textcolor{keywordtype}{int} REDISMODULE\_API\_FUNC(RedisModule\_ZsetLastInScoreRange)(RedisModuleKey *key, \textcolor{keywordtype}{double} min, \textcolor{keywordtype}{double} max
+      , \textcolor{keywordtype}{int} minex, \textcolor{keywordtype}{int} maxex);
+00200 \textcolor{keywordtype}{int} REDISMODULE\_API\_FUNC(RedisModule\_ZsetFirstInLexRange)(RedisModuleKey *key, RedisModuleString *min,
+       RedisModuleString *max);
+00201 \textcolor{keywordtype}{int} REDISMODULE\_API\_FUNC(RedisModule\_ZsetLastInLexRange)(RedisModuleKey *key, RedisModuleString *min, 
+      RedisModuleString *max);
+00202 RedisModuleString *REDISMODULE\_API\_FUNC(RedisModule\_ZsetRangeCurrentElement)(RedisModuleKey *key, \textcolor{keywordtype}{
+      double} *score);
+00203 \textcolor{keywordtype}{int} REDISMODULE\_API\_FUNC(RedisModule\_ZsetRangeNext)(RedisModuleKey *key);
+00204 \textcolor{keywordtype}{int} REDISMODULE\_API\_FUNC(RedisModule\_ZsetRangePrev)(RedisModuleKey *key);
+00205 \textcolor{keywordtype}{int} REDISMODULE\_API\_FUNC(RedisModule\_ZsetRangeEndReached)(RedisModuleKey *key);
+00206 \textcolor{keywordtype}{int} REDISMODULE\_API\_FUNC(RedisModule\_HashSet)(RedisModuleKey *key, \textcolor{keywordtype}{int} flags, ...);
+00207 \textcolor{keywordtype}{int} REDISMODULE\_API\_FUNC(RedisModule\_HashGet)(RedisModuleKey *key, \textcolor{keywordtype}{int} flags, ...);
+00208 \textcolor{keywordtype}{int} REDISMODULE\_API\_FUNC(RedisModule\_IsKeysPositionRequest)(RedisModuleCtx *ctx);
+00209 \textcolor{keywordtype}{void} REDISMODULE\_API\_FUNC(RedisModule\_KeyAtPos)(RedisModuleCtx *ctx, \textcolor{keywordtype}{int} pos);
+00210 \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} REDISMODULE\_API\_FUNC(RedisModule\_GetClientId)(RedisModuleCtx *ctx);
+00211 \textcolor{keywordtype}{int} REDISMODULE\_API\_FUNC(RedisModule\_GetContextFlags)(RedisModuleCtx *ctx);
+00212 \textcolor{keywordtype}{void} *REDISMODULE\_API\_FUNC(RedisModule\_PoolAlloc)(RedisModuleCtx *ctx, size\_t bytes);
+00213 RedisModuleType *REDISMODULE\_API\_FUNC(RedisModule\_CreateDataType)(RedisModuleCtx *ctx, \textcolor{keyword}{const} \textcolor{keywordtype}{char} *
+      name, \textcolor{keywordtype}{int} encver, RedisModuleTypeMethods *typemethods);
+00214 \textcolor{keywordtype}{int} REDISMODULE\_API\_FUNC(RedisModule\_ModuleTypeSetValue)(RedisModuleKey *key, RedisModuleType *mt, \textcolor{keywordtype}{
+      void} *value);
+00215 RedisModuleType *REDISMODULE\_API\_FUNC(RedisModule\_ModuleTypeGetType)(RedisModuleKey *key);
+00216 \textcolor{keywordtype}{void} *REDISMODULE\_API\_FUNC(RedisModule\_ModuleTypeGetValue)(RedisModuleKey *key);
+00217 \textcolor{keywordtype}{void} REDISMODULE\_API\_FUNC(RedisModule\_SaveUnsigned)(RedisModuleIO *io, uint64\_t value);
+00218 uint64\_t REDISMODULE\_API\_FUNC(RedisModule\_LoadUnsigned)(RedisModuleIO *io);
+00219 \textcolor{keywordtype}{void} REDISMODULE\_API\_FUNC(RedisModule\_SaveSigned)(RedisModuleIO *io, int64\_t value);
+00220 int64\_t REDISMODULE\_API\_FUNC(RedisModule\_LoadSigned)(RedisModuleIO *io);
+00221 \textcolor{keywordtype}{void} REDISMODULE\_API\_FUNC(RedisModule\_EmitAOF)(RedisModuleIO *io, \textcolor{keyword}{const} \textcolor{keywordtype}{char} *cmdname, \textcolor{keyword}{const} \textcolor{keywordtype}{char} *fmt
+      , ...);
+00222 \textcolor{keywordtype}{void} REDISMODULE\_API\_FUNC(RedisModule\_SaveString)(RedisModuleIO *io, RedisModuleString *s);
+00223 \textcolor{keywordtype}{void} REDISMODULE\_API\_FUNC(RedisModule\_SaveStringBuffer)(RedisModuleIO *io, \textcolor{keyword}{const} \textcolor{keywordtype}{char} *str, size\_t len
+      );
+00224 RedisModuleString *REDISMODULE\_API\_FUNC(RedisModule\_LoadString)(RedisModuleIO *io);
+00225 \textcolor{keywordtype}{char} *REDISMODULE\_API\_FUNC(RedisModule\_LoadStringBuffer)(RedisModuleIO *io, size\_t *lenptr);
+00226 \textcolor{keywordtype}{void} REDISMODULE\_API\_FUNC(RedisModule\_SaveDouble)(RedisModuleIO *io, \textcolor{keywordtype}{double} value);
+00227 \textcolor{keywordtype}{double} REDISMODULE\_API\_FUNC(RedisModule\_LoadDouble)(RedisModuleIO *io);
+00228 \textcolor{keywordtype}{void} REDISMODULE\_API\_FUNC(RedisModule\_SaveFloat)(RedisModuleIO *io, \textcolor{keywordtype}{float} value);
+00229 \textcolor{keywordtype}{float} REDISMODULE\_API\_FUNC(RedisModule\_LoadFloat)(RedisModuleIO *io);
+00230 \textcolor{keywordtype}{void} REDISMODULE\_API\_FUNC(RedisModule\_Log)(RedisModuleCtx *ctx, \textcolor{keyword}{const} \textcolor{keywordtype}{char} *level, \textcolor{keyword}{const} \textcolor{keywordtype}{char} *fmt, 
+      ...);
+00231 \textcolor{keywordtype}{void} REDISMODULE\_API\_FUNC(RedisModule\_LogIOError)(RedisModuleIO *io, \textcolor{keyword}{const} \textcolor{keywordtype}{char} *levelstr, \textcolor{keyword}{const} \textcolor{keywordtype}{char} 
+      *fmt, ...);
+00232 \textcolor{keywordtype}{int} REDISMODULE\_API\_FUNC(RedisModule\_StringAppendBuffer)(RedisModuleCtx *ctx, RedisModuleString *str, \textcolor{keyword}{
+      const} \textcolor{keywordtype}{char} *buf, size\_t len);
+00233 \textcolor{keywordtype}{void} REDISMODULE\_API\_FUNC(RedisModule\_RetainString)(RedisModuleCtx *ctx, RedisModuleString *str);
+00234 \textcolor{keywordtype}{int} REDISMODULE\_API\_FUNC(RedisModule\_StringCompare)(RedisModuleString *a, RedisModuleString *b);
+00235 RedisModuleCtx *REDISMODULE\_API\_FUNC(RedisModule\_GetContextFromIO)(RedisModuleIO *io);
+00236 \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} REDISMODULE\_API\_FUNC(RedisModule\_Milliseconds)(\textcolor{keywordtype}{void});
+00237 \textcolor{keywordtype}{void} REDISMODULE\_API\_FUNC(RedisModule\_DigestAddStringBuffer)(RedisModuleDigest *md, \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *ele
+      , size\_t len);
+00238 \textcolor{keywordtype}{void} REDISMODULE\_API\_FUNC(RedisModule\_DigestAddLongLong)(RedisModuleDigest *md, \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} ele);
+00239 \textcolor{keywordtype}{void} REDISMODULE\_API\_FUNC(RedisModule\_DigestEndSequence)(RedisModuleDigest *md);
+00240 
+00241 \textcolor{comment}{/* Experimental APIs */}
+00242 \textcolor{preprocessor}{#}\textcolor{preprocessor}{ifdef} \textcolor{preprocessor}{REDISMODULE\_EXPERIMENTAL\_API}
+00243 RedisModuleBlockedClient *REDISMODULE\_API\_FUNC(RedisModule\_BlockClient)(RedisModuleCtx *ctx, 
+      RedisModuleCmdFunc reply\_callback, RedisModuleCmdFunc timeout\_callback, \textcolor{keywordtype}{void} (*free\_privdata)(\textcolor{keywordtype}{void}*), \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} 
+      timeout\_ms);
+00244 \textcolor{keywordtype}{int} REDISMODULE\_API\_FUNC(RedisModule\_UnblockClient)(RedisModuleBlockedClient *bc, \textcolor{keywordtype}{void} *privdata);
+00245 \textcolor{keywordtype}{int} REDISMODULE\_API\_FUNC(RedisModule\_IsBlockedReplyRequest)(RedisModuleCtx *ctx);
+00246 \textcolor{keywordtype}{int} REDISMODULE\_API\_FUNC(RedisModule\_IsBlockedTimeoutRequest)(RedisModuleCtx *ctx);
+00247 \textcolor{keywordtype}{void} *REDISMODULE\_API\_FUNC(RedisModule\_GetBlockedClientPrivateData)(RedisModuleCtx *ctx);
+00248 \textcolor{keywordtype}{int} REDISMODULE\_API\_FUNC(RedisModule\_AbortBlock)(RedisModuleBlockedClient *bc);
+00249 RedisModuleCtx *REDISMODULE\_API\_FUNC(RedisModule\_GetThreadSafeContext)(RedisModuleBlockedClient *bc);
+00250 \textcolor{keywordtype}{void} REDISMODULE\_API\_FUNC(RedisModule\_FreeThreadSafeContext)(RedisModuleCtx *ctx);
+00251 \textcolor{keywordtype}{void} REDISMODULE\_API\_FUNC(RedisModule\_ThreadSafeContextLock)(RedisModuleCtx *ctx);
+00252 \textcolor{keywordtype}{void} REDISMODULE\_API\_FUNC(RedisModule\_ThreadSafeContextUnlock)(RedisModuleCtx *ctx);
+00253 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00254 
+00255 \textcolor{comment}{/* This is included inline inside each Redis module. */}
+00256 \textcolor{keyword}{static} \textcolor{keywordtype}{int} RedisModule\_Init(RedisModuleCtx *ctx, \textcolor{keyword}{const} \textcolor{keywordtype}{char} *name, \textcolor{keywordtype}{int} ver, \textcolor{keywordtype}{int} apiver) \textcolor{keyword}{\_\_attribute\_\_}(
+      (unused));
+00257 \textcolor{keyword}{static} \textcolor{keywordtype}{int} RedisModule\_Init(RedisModuleCtx *ctx, \textcolor{keyword}{const} \textcolor{keywordtype}{char} *name, \textcolor{keywordtype}{int} ver, \textcolor{keywordtype}{int} apiver) \{
+00258     \textcolor{keywordtype}{void} *getapifuncptr = ((\textcolor{keywordtype}{void}**)ctx)[0];
+00259     RedisModule\_GetApi = (\textcolor{keywordtype}{int} (*)(\textcolor{keyword}{const} \textcolor{keywordtype}{char} *, \textcolor{keywordtype}{void} *)) (\textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long})getapifuncptr;
+00260     REDISMODULE\_GET\_API(Alloc);
+00261     REDISMODULE\_GET\_API(Calloc);
+00262     REDISMODULE\_GET\_API(Free);
+00263     REDISMODULE\_GET\_API(Realloc);
+00264     REDISMODULE\_GET\_API(Strdup);
+00265     REDISMODULE\_GET\_API(CreateCommand);
+00266     REDISMODULE\_GET\_API(SetModuleAttribs);
+00267     REDISMODULE\_GET\_API(IsModuleNameBusy);
+00268     REDISMODULE\_GET\_API(WrongArity);
+00269     REDISMODULE\_GET\_API(ReplyWithLongLong);
+00270     REDISMODULE\_GET\_API(ReplyWithError);
+00271     REDISMODULE\_GET\_API(ReplyWithSimpleString);
+00272     REDISMODULE\_GET\_API(ReplyWithArray);
+00273     REDISMODULE\_GET\_API(ReplySetArrayLength);
+00274     REDISMODULE\_GET\_API(ReplyWithStringBuffer);
+00275     REDISMODULE\_GET\_API(ReplyWithString);
+00276     REDISMODULE\_GET\_API(ReplyWithNull);
+00277     REDISMODULE\_GET\_API(ReplyWithCallReply);
+00278     REDISMODULE\_GET\_API(ReplyWithDouble);
+00279     REDISMODULE\_GET\_API(ReplySetArrayLength);
+00280     REDISMODULE\_GET\_API(GetSelectedDb);
+00281     REDISMODULE\_GET\_API(SelectDb);
+00282     REDISMODULE\_GET\_API(OpenKey);
+00283     REDISMODULE\_GET\_API(CloseKey);
+00284     REDISMODULE\_GET\_API(KeyType);
+00285     REDISMODULE\_GET\_API(ValueLength);
+00286     REDISMODULE\_GET\_API(ListPush);
+00287     REDISMODULE\_GET\_API(ListPop);
+00288     REDISMODULE\_GET\_API(StringToLongLong);
+00289     REDISMODULE\_GET\_API(StringToDouble);
+00290     REDISMODULE\_GET\_API(Call);
+00291     REDISMODULE\_GET\_API(CallReplyProto);
+00292     REDISMODULE\_GET\_API(FreeCallReply);
+00293     REDISMODULE\_GET\_API(CallReplyInteger);
+00294     REDISMODULE\_GET\_API(CallReplyType);
+00295     REDISMODULE\_GET\_API(CallReplyLength);
+00296     REDISMODULE\_GET\_API(CallReplyArrayElement);
+00297     REDISMODULE\_GET\_API(CallReplyStringPtr);
+00298     REDISMODULE\_GET\_API(CreateStringFromCallReply);
+00299     REDISMODULE\_GET\_API(CreateString);
+00300     REDISMODULE\_GET\_API(CreateStringFromLongLong);
+00301     REDISMODULE\_GET\_API(CreateStringFromString);
+00302     REDISMODULE\_GET\_API(CreateStringPrintf);
+00303     REDISMODULE\_GET\_API(FreeString);
+00304     REDISMODULE\_GET\_API(StringPtrLen);
+00305     REDISMODULE\_GET\_API(AutoMemory);
+00306     REDISMODULE\_GET\_API(Replicate);
+00307     REDISMODULE\_GET\_API(ReplicateVerbatim);
+00308     REDISMODULE\_GET\_API(DeleteKey);
+00309     REDISMODULE\_GET\_API(StringSet);
+00310     REDISMODULE\_GET\_API(StringDMA);
+00311     REDISMODULE\_GET\_API(StringTruncate);
+00312     REDISMODULE\_GET\_API(GetExpire);
+00313     REDISMODULE\_GET\_API(SetExpire);
+00314     REDISMODULE\_GET\_API(ZsetAdd);
+00315     REDISMODULE\_GET\_API(ZsetIncrby);
+00316     REDISMODULE\_GET\_API(ZsetScore);
+00317     REDISMODULE\_GET\_API(ZsetRem);
+00318     REDISMODULE\_GET\_API(ZsetRangeStop);
+00319     REDISMODULE\_GET\_API(ZsetFirstInScoreRange);
+00320     REDISMODULE\_GET\_API(ZsetLastInScoreRange);
+00321     REDISMODULE\_GET\_API(ZsetFirstInLexRange);
+00322     REDISMODULE\_GET\_API(ZsetLastInLexRange);
+00323     REDISMODULE\_GET\_API(ZsetRangeCurrentElement);
+00324     REDISMODULE\_GET\_API(ZsetRangeNext);
+00325     REDISMODULE\_GET\_API(ZsetRangePrev);
+00326     REDISMODULE\_GET\_API(ZsetRangeEndReached);
+00327     REDISMODULE\_GET\_API(HashSet);
+00328     REDISMODULE\_GET\_API(HashGet);
+00329     REDISMODULE\_GET\_API(IsKeysPositionRequest);
+00330     REDISMODULE\_GET\_API(KeyAtPos);
+00331     REDISMODULE\_GET\_API(GetClientId);
+00332     REDISMODULE\_GET\_API(GetContextFlags);
+00333     REDISMODULE\_GET\_API(PoolAlloc);
+00334     REDISMODULE\_GET\_API(CreateDataType);
+00335     REDISMODULE\_GET\_API(ModuleTypeSetValue);
+00336     REDISMODULE\_GET\_API(ModuleTypeGetType);
+00337     REDISMODULE\_GET\_API(ModuleTypeGetValue);
+00338     REDISMODULE\_GET\_API(SaveUnsigned);
+00339     REDISMODULE\_GET\_API(LoadUnsigned);
+00340     REDISMODULE\_GET\_API(SaveSigned);
+00341     REDISMODULE\_GET\_API(LoadSigned);
+00342     REDISMODULE\_GET\_API(SaveString);
+00343     REDISMODULE\_GET\_API(SaveStringBuffer);
+00344     REDISMODULE\_GET\_API(LoadString);
+00345     REDISMODULE\_GET\_API(LoadStringBuffer);
+00346     REDISMODULE\_GET\_API(SaveDouble);
+00347     REDISMODULE\_GET\_API(LoadDouble);
+00348     REDISMODULE\_GET\_API(SaveFloat);
+00349     REDISMODULE\_GET\_API(LoadFloat);
+00350     REDISMODULE\_GET\_API(EmitAOF);
+00351     REDISMODULE\_GET\_API(Log);
+00352     REDISMODULE\_GET\_API(LogIOError);
+00353     REDISMODULE\_GET\_API(StringAppendBuffer);
+00354     REDISMODULE\_GET\_API(RetainString);
+00355     REDISMODULE\_GET\_API(StringCompare);
+00356     REDISMODULE\_GET\_API(GetContextFromIO);
+00357     REDISMODULE\_GET\_API(Milliseconds);
+00358     REDISMODULE\_GET\_API(DigestAddStringBuffer);
+00359     REDISMODULE\_GET\_API(DigestAddLongLong);
+00360     REDISMODULE\_GET\_API(DigestEndSequence);
+00361 
+00362 \textcolor{preprocessor}{#}\textcolor{preprocessor}{ifdef} \textcolor{preprocessor}{REDISMODULE\_EXPERIMENTAL\_API}
+00363     REDISMODULE\_GET\_API(GetThreadSafeContext);
+00364     REDISMODULE\_GET\_API(FreeThreadSafeContext);
+00365     REDISMODULE\_GET\_API(ThreadSafeContextLock);
+00366     REDISMODULE\_GET\_API(ThreadSafeContextUnlock);
+00367     REDISMODULE\_GET\_API(BlockClient);
+00368     REDISMODULE\_GET\_API(UnblockClient);
+00369     REDISMODULE\_GET\_API(IsBlockedReplyRequest);
+00370     REDISMODULE\_GET\_API(IsBlockedTimeoutRequest);
+00371     REDISMODULE\_GET\_API(GetBlockedClientPrivateData);
+00372     REDISMODULE\_GET\_API(AbortBlock);
+00373 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00374 
+00375     \textcolor{keywordflow}{if} (RedisModule\_IsModuleNameBusy(name)) \textcolor{keywordflow}{return} REDISMODULE\_ERR;
+00376     RedisModule\_SetModuleAttribs(ctx,name,ver,apiver);
+00377     \textcolor{keywordflow}{return} REDISMODULE\_OK;
+00378 \}
+00379 
+00380 \textcolor{preprocessor}{#}\textcolor{preprocessor}{else}
+00381 
+00382 \textcolor{comment}{/* Things only defined for the modules core, not exported to modules}
+00383 \textcolor{comment}{ * including this file. */}
+00384 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{RedisModuleString} \textcolor{preprocessor}{robj}
+00385 
+00386 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif} \textcolor{comment}{/* REDISMODULE\_CORE */}
+00387 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif} \textcolor{comment}{/* REDISMOUDLE\_H */}
+\end{DoxyCode}

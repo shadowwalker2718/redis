@@ -1,0 +1,46 @@
+\hypertarget{debugmacro_8h_source}{}\section{debugmacro.\+h}
+\label{debugmacro_8h_source}\index{src/debugmacro.\+h@{src/debugmacro.\+h}}
+
+\begin{DoxyCode}
+00001 \textcolor{comment}{/* This file contains debugging macros to be used when investigating issues.}
+00002 \textcolor{comment}{ *}
+00003 \textcolor{comment}{ * -----------------------------------------------------------------------------}
+00004 \textcolor{comment}{ *}
+00005 \textcolor{comment}{ * Copyright (c) 2016, Salvatore Sanfilippo <antirez at gmail dot com>}
+00006 \textcolor{comment}{ * All rights reserved.}
+00007 \textcolor{comment}{ *}
+00008 \textcolor{comment}{ * Redistribution and use in source and binary forms, with or without}
+00009 \textcolor{comment}{ * modification, are permitted provided that the following conditions are met:}
+00010 \textcolor{comment}{ *}
+00011 \textcolor{comment}{ *   * Redistributions of source code must retain the above copyright notice,}
+00012 \textcolor{comment}{ *     this list of conditions and the following disclaimer.}
+00013 \textcolor{comment}{ *   * Redistributions in binary form must reproduce the above copyright}
+00014 \textcolor{comment}{ *     notice, this list of conditions and the following disclaimer in the}
+00015 \textcolor{comment}{ *     documentation and/or other materials provided with the distribution.}
+00016 \textcolor{comment}{ *   * Neither the name of Redis nor the names of its contributors may be used}
+00017 \textcolor{comment}{ *     to endorse or promote products derived from this software without}
+00018 \textcolor{comment}{ *     specific prior written permission.}
+00019 \textcolor{comment}{ *}
+00020 \textcolor{comment}{ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"}
+00021 \textcolor{comment}{ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE}
+00022 \textcolor{comment}{ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE}
+00023 \textcolor{comment}{ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE}
+00024 \textcolor{comment}{ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR}
+00025 \textcolor{comment}{ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF}
+00026 \textcolor{comment}{ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS}
+00027 \textcolor{comment}{ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN}
+00028 \textcolor{comment}{ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)}
+00029 \textcolor{comment}{ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE}
+00030 \textcolor{comment}{ * POSSIBILITY OF SUCH DAMAGE.}
+00031 \textcolor{comment}{ */}
+00032 
+00033 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{stdio}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00034 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{D}\textcolor{preprocessor}{(}\textcolor{preprocessor}{...}\textcolor{preprocessor}{)}
+00035     \textcolor{keywordflow}{do} \textcolor{preprocessor}{\{}
+00036         \textcolor{preprocessor}{FILE} \textcolor{preprocessor}{*}\textcolor{preprocessor}{fp} \textcolor{preprocessor}{=} \textcolor{preprocessor}{fopen}\textcolor{preprocessor}{(}\textcolor{stringliteral}{"/tmp/log.txt"}\textcolor{preprocessor}{,}\textcolor{stringliteral}{"a"}\textcolor{preprocessor}{)}\textcolor{preprocessor}{;}
+00037         \textcolor{preprocessor}{fprintf}\textcolor{preprocessor}{(}\textcolor{preprocessor}{fp}\textcolor{preprocessor}{,}\textcolor{stringliteral}{"%s:%s:%d:\(\backslash\)t"}\textcolor{preprocessor}{,} \textcolor{preprocessor}{\_\_FILE\_\_}\textcolor{preprocessor}{,} \textcolor{keyword}{\_\_func\_\_}\textcolor{preprocessor}{,} \textcolor{preprocessor}{\_\_LINE\_\_}\textcolor{preprocessor}{)}\textcolor{preprocessor}{;}
+00038         \textcolor{preprocessor}{fprintf}\textcolor{preprocessor}{(}\textcolor{preprocessor}{fp}\textcolor{preprocessor}{,}\textcolor{preprocessor}{\_\_VA\_ARGS\_\_}\textcolor{preprocessor}{)}\textcolor{preprocessor}{;}
+00039         \textcolor{preprocessor}{fprintf}\textcolor{preprocessor}{(}\textcolor{preprocessor}{fp}\textcolor{preprocessor}{,}\textcolor{stringliteral}{"\(\backslash\)n"}\textcolor{preprocessor}{)}\textcolor{preprocessor}{;}
+00040         \textcolor{preprocessor}{fclose}\textcolor{preprocessor}{(}\textcolor{preprocessor}{fp}\textcolor{preprocessor}{)}\textcolor{preprocessor}{;}
+00041     \textcolor{preprocessor}{\}} \textcolor{keywordflow}{while} \textcolor{preprocessor}{(}0\textcolor{preprocessor}{)}\textcolor{preprocessor}{;}
+\end{DoxyCode}

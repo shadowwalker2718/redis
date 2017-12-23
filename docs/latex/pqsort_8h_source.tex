@@ -1,0 +1,45 @@
+\hypertarget{pqsort_8h_source}{}\section{pqsort.\+h}
+\label{pqsort_8h_source}\index{src/pqsort.\+h@{src/pqsort.\+h}}
+
+\begin{DoxyCode}
+00001 \textcolor{comment}{/* The following is the NetBSD libc qsort implementation modified in order to}
+00002 \textcolor{comment}{ * support partial sorting of ranges for Redis.}
+00003 \textcolor{comment}{ *}
+00004 \textcolor{comment}{ * Copyright (c) 2009-2012, Salvatore Sanfilippo <antirez at gmail dot com>}
+00005 \textcolor{comment}{ * All rights reserved.}
+00006 \textcolor{comment}{ *}
+00007 \textcolor{comment}{ * Redistribution and use in source and binary forms, with or without}
+00008 \textcolor{comment}{ * modification, are permitted provided that the following conditions are met:}
+00009 \textcolor{comment}{ *}
+00010 \textcolor{comment}{ *   * Redistributions of source code must retain the above copyright notice,}
+00011 \textcolor{comment}{ *     this list of conditions and the following disclaimer.}
+00012 \textcolor{comment}{ *   * Redistributions in binary form must reproduce the above copyright}
+00013 \textcolor{comment}{ *     notice, this list of conditions and the following disclaimer in the}
+00014 \textcolor{comment}{ *     documentation and/or other materials provided with the distribution.}
+00015 \textcolor{comment}{ *   * Neither the name of Redis nor the names of its contributors may be used}
+00016 \textcolor{comment}{ *     to endorse or promote products derived from this software without}
+00017 \textcolor{comment}{ *     specific prior written permission.}
+00018 \textcolor{comment}{ *}
+00019 \textcolor{comment}{ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"}
+00020 \textcolor{comment}{ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE}
+00021 \textcolor{comment}{ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE}
+00022 \textcolor{comment}{ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE}
+00023 \textcolor{comment}{ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR}
+00024 \textcolor{comment}{ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF}
+00025 \textcolor{comment}{ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS}
+00026 \textcolor{comment}{ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN}
+00027 \textcolor{comment}{ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)}
+00028 \textcolor{comment}{ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE}
+00029 \textcolor{comment}{ * POSSIBILITY OF SUCH DAMAGE.}
+00030 \textcolor{comment}{ *}
+00031 \textcolor{comment}{ * See the pqsort.c file for the original copyright notice. */}
+00032 
+00033 \textcolor{preprocessor}{#}\textcolor{preprocessor}{ifndef} \textcolor{preprocessor}{\_\_PQSORT\_H}
+00034 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{\_\_PQSORT\_H}
+00035 
+00036 \textcolor{keywordtype}{void}
+00037 pqsort(\textcolor{keywordtype}{void} *a, size\_t n, size\_t es,
+00038     \textcolor{keywordtype}{int} (*cmp) (\textcolor{keyword}{const} \textcolor{keywordtype}{void} *, \textcolor{keyword}{const} \textcolor{keywordtype}{void} *), size\_t lrange, size\_t rrange);
+00039 
+00040 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+\end{DoxyCode}

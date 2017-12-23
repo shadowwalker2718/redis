@@ -1,0 +1,59 @@
+\hypertarget{util_8h_source}{}\section{util.\+h}
+\label{util_8h_source}\index{src/util.\+h@{src/util.\+h}}
+
+\begin{DoxyCode}
+00001 \textcolor{comment}{/*}
+00002 \textcolor{comment}{ * Copyright (c) 2009-2012, Salvatore Sanfilippo <antirez at gmail dot com>}
+00003 \textcolor{comment}{ * All rights reserved.}
+00004 \textcolor{comment}{ *}
+00005 \textcolor{comment}{ * Redistribution and use in source and binary forms, with or without}
+00006 \textcolor{comment}{ * modification, are permitted provided that the following conditions are met:}
+00007 \textcolor{comment}{ *}
+00008 \textcolor{comment}{ *   * Redistributions of source code must retain the above copyright notice,}
+00009 \textcolor{comment}{ *     this list of conditions and the following disclaimer.}
+00010 \textcolor{comment}{ *   * Redistributions in binary form must reproduce the above copyright}
+00011 \textcolor{comment}{ *     notice, this list of conditions and the following disclaimer in the}
+00012 \textcolor{comment}{ *     documentation and/or other materials provided with the distribution.}
+00013 \textcolor{comment}{ *   * Neither the name of Redis nor the names of its contributors may be used}
+00014 \textcolor{comment}{ *     to endorse or promote products derived from this software without}
+00015 \textcolor{comment}{ *     specific prior written permission.}
+00016 \textcolor{comment}{ *}
+00017 \textcolor{comment}{ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"}
+00018 \textcolor{comment}{ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE}
+00019 \textcolor{comment}{ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE}
+00020 \textcolor{comment}{ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE}
+00021 \textcolor{comment}{ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR}
+00022 \textcolor{comment}{ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF}
+00023 \textcolor{comment}{ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS}
+00024 \textcolor{comment}{ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN}
+00025 \textcolor{comment}{ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)}
+00026 \textcolor{comment}{ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE}
+00027 \textcolor{comment}{ * POSSIBILITY OF SUCH DAMAGE.}
+00028 \textcolor{comment}{ */}
+00029 
+00030 \textcolor{preprocessor}{#}\textcolor{preprocessor}{ifndef} \textcolor{preprocessor}{\_\_REDIS\_UTIL\_H}
+00031 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{\_\_REDIS\_UTIL\_H}
+00032 
+00033 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{stdint}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00034 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \hyperlink{sds_8h}{"sds.h"}
+00035 
+00036 \textcolor{keywordtype}{int} stringmatchlen(\textcolor{keyword}{const} \textcolor{keywordtype}{char} *p, \textcolor{keywordtype}{int} plen, \textcolor{keyword}{const} \textcolor{keywordtype}{char} *s, \textcolor{keywordtype}{int} slen, \textcolor{keywordtype}{int} nocase);
+00037 \textcolor{keywordtype}{int} stringmatch(\textcolor{keyword}{const} \textcolor{keywordtype}{char} *p, \textcolor{keyword}{const} \textcolor{keywordtype}{char} *s, \textcolor{keywordtype}{int} nocase);
+00038 \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} memtoll(\textcolor{keyword}{const} \textcolor{keywordtype}{char} *p, \textcolor{keywordtype}{int} *err);
+00039 uint32\_t digits10(uint64\_t v);
+00040 uint32\_t sdigits10(int64\_t v);
+00041 \textcolor{keywordtype}{int} ll2string(\textcolor{keywordtype}{char} *s, size\_t len, \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} value);
+00042 \textcolor{keywordtype}{int} string2ll(\textcolor{keyword}{const} \textcolor{keywordtype}{char} *s, size\_t slen, \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} *value);
+00043 \textcolor{keywordtype}{int} string2l(\textcolor{keyword}{const} \textcolor{keywordtype}{char} *s, size\_t slen, \textcolor{keywordtype}{long} *value);
+00044 \textcolor{keywordtype}{int} string2ld(\textcolor{keyword}{const} \textcolor{keywordtype}{char} *s, size\_t slen, \textcolor{keywordtype}{long} \textcolor{keywordtype}{double} *dp);
+00045 \textcolor{keywordtype}{int} d2string(\textcolor{keywordtype}{char} *buf, size\_t len, \textcolor{keywordtype}{double} value);
+00046 \textcolor{keywordtype}{int} ld2string(\textcolor{keywordtype}{char} *buf, size\_t len, \textcolor{keywordtype}{long} \textcolor{keywordtype}{double} value, \textcolor{keywordtype}{int} humanfriendly);
+00047 sds getAbsolutePath(\textcolor{keywordtype}{char} *filename);
+00048 \textcolor{keywordtype}{int} pathIsBaseName(\textcolor{keywordtype}{char} *path);
+00049 
+00050 \textcolor{preprocessor}{#}\textcolor{preprocessor}{ifdef} \textcolor{preprocessor}{REDIS\_TEST}
+00051 \textcolor{keywordtype}{int} utilTest(\textcolor{keywordtype}{int} argc, \textcolor{keywordtype}{char} **argv);
+00052 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+00053 
+00054 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+\end{DoxyCode}

@@ -1,0 +1,6 @@
+<map id="redisAeEvents" name="redisAeEvents">
+<area shape="rect" id="node2" href="$structaeEventLoop.html" title="{aeEventLoop\n|+ maxfd\l+ setsize\l+ timeEventNextId\l+ lastTime\l+ stop\l+ apidata\l+ beforesleep\l+ aftersleep\l|}" alt="" coords="115,219,247,399"/>
+<area shape="rect" id="node3" href="$structaeFiredEvent.html" title="{aeFiredEvent\n|+ fd\l+ mask\l|}" alt="" coords="5,35,104,127"/>
+<area shape="rect" id="node4" href="$structaeTimeEvent.html" title="{aeTimeEvent\n|+ id\l+ when_sec\l+ when_ms\l+ timeProc\l+ finalizerProc\l+ clientData\l|}" alt="" coords="128,5,235,156"/>
+<area shape="rect" id="node5" href="$structaeFileEvent.html" title="{aeFileEvent\n|+ mask\l+ rfileProc\l+ wfileProc\l+ clientData\l|}" alt="" coords="320,20,413,141"/>
+</map>

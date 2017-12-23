@@ -1,0 +1,168 @@
+\hypertarget{rax_8h_source}{}\section{rax.\+h}
+\label{rax_8h_source}\index{src/rax.\+h@{src/rax.\+h}}
+
+\begin{DoxyCode}
+00001 \textcolor{preprocessor}{#}\textcolor{preprocessor}{ifndef} \textcolor{preprocessor}{RAX\_H}
+00002 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{RAX\_H}
+00003 
+00004 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{stdint}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00005 
+00006 \textcolor{comment}{/* Representation of a radix tree as implemented in this file, that contains}
+00007 \textcolor{comment}{ * the strings "foo", "foobar" and "footer" after the insertion of each}
+00008 \textcolor{comment}{ * word. When the node represents a key inside the radix tree, we write it}
+00009 \textcolor{comment}{ * between [], otherwise it is written between ().}
+00010 \textcolor{comment}{ *}
+00011 \textcolor{comment}{ * This is the vanilla representation:}
+00012 \textcolor{comment}{ *}
+00013 \textcolor{comment}{ *              (f) ""}
+00014 \textcolor{comment}{ *                \(\backslash\)}
+00015 \textcolor{comment}{ *                (o) "f"}
+00016 \textcolor{comment}{ *                  \(\backslash\)}
+00017 \textcolor{comment}{ *                  (o) "fo"}
+00018 \textcolor{comment}{ *                    \(\backslash\)}
+00019 \textcolor{comment}{ *                  [t   b] "foo"}
+00020 \textcolor{comment}{ *                  /     \(\backslash\)}
+00021 \textcolor{comment}{ *         "foot" (e)     (a) "foob"}
+00022 \textcolor{comment}{ *                /         \(\backslash\)}
+00023 \textcolor{comment}{ *      "foote" (r)         (r) "fooba"}
+00024 \textcolor{comment}{ *              /             \(\backslash\)}
+00025 \textcolor{comment}{ *    "footer" []             [] "foobar"}
+00026 \textcolor{comment}{ *}
+00027 \textcolor{comment}{ * However, this implementation implements a very common optimization where}
+00028 \textcolor{comment}{ * successive nodes having a single child are "compressed" into the node}
+00029 \textcolor{comment}{ * itself as a string of characters, each representing a next-level child,}
+00030 \textcolor{comment}{ * and only the link to the node representing the last character node is}
+00031 \textcolor{comment}{ * provided inside the representation. So the above representation is turend}
+00032 \textcolor{comment}{ * into:}
+00033 \textcolor{comment}{ *}
+00034 \textcolor{comment}{ *                  ["foo"] ""}
+00035 \textcolor{comment}{ *                     |}
+00036 \textcolor{comment}{ *                  [t   b] "foo"}
+00037 \textcolor{comment}{ *                  /     \(\backslash\)}
+00038 \textcolor{comment}{ *        "foot" ("er")    ("ar") "foob"}
+00039 \textcolor{comment}{ *                 /          \(\backslash\)}
+00040 \textcolor{comment}{ *       "footer" []          [] "foobar"}
+00041 \textcolor{comment}{ *}
+00042 \textcolor{comment}{ * However this optimization makes the implementation a bit more complex.}
+00043 \textcolor{comment}{ * For instance if a key "first" is added in the above radix tree, a}
+00044 \textcolor{comment}{ * "node splitting" operation is needed, since the "foo" prefix is no longer}
+00045 \textcolor{comment}{ * composed of nodes having a single child one after the other. This is the}
+00046 \textcolor{comment}{ * above tree and the resulting node splitting after this event happens:}
+00047 \textcolor{comment}{ *}
+00048 \textcolor{comment}{ *}
+00049 \textcolor{comment}{ *                    (f) ""}
+00050 \textcolor{comment}{ *                    /}
+00051 \textcolor{comment}{ *                 (i o) "f"}
+00052 \textcolor{comment}{ *                 /   \(\backslash\)}
+00053 \textcolor{comment}{ *    "firs"  ("rst")  (o) "fo"}
+00054 \textcolor{comment}{ *              /        \(\backslash\)}
+00055 \textcolor{comment}{ *    "first" []       [t   b] "foo"}
+00056 \textcolor{comment}{ *                     /     \(\backslash\)}
+00057 \textcolor{comment}{ *           "foot" ("er")    ("ar") "foob"}
+00058 \textcolor{comment}{ *                    /          \(\backslash\)}
+00059 \textcolor{comment}{ *          "footer" []          [] "foobar"}
+00060 \textcolor{comment}{ *}
+00061 \textcolor{comment}{ * Similarly after deletion, if a new chain of nodes having a single child}
+00062 \textcolor{comment}{ * is created (the chain must also not include nodes that represent keys),}
+00063 \textcolor{comment}{ * it must be compressed back into a single node.}
+00064 \textcolor{comment}{ *}
+00065 \textcolor{comment}{ */}
+00066 
+00067 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{RAX\_NODE\_MAX\_SIZE} \textcolor{preprocessor}{(}\textcolor{preprocessor}{(}1\textcolor{preprocessor}{<<}29\textcolor{preprocessor}{)}\textcolor{preprocessor}{-}1\textcolor{preprocessor}{)}
+\Hypertarget{rax_8h_source_l00068}\hyperlink{structraxNode}{00068} \textcolor{keyword}{typedef} \textcolor{keyword}{struct} \hyperlink{structraxNode}{raxNode} \{
+00069     uint32\_t iskey:1;     \textcolor{comment}{/* Does this node contain a key? */}
+00070     uint32\_t isnull:1;    \textcolor{comment}{/* Associated value is NULL (don't store it). */}
+00071     uint32\_t iscompr:1;   \textcolor{comment}{/* Node is compressed. */}
+00072     uint32\_t size:29;     \textcolor{comment}{/* Number of children, or compressed string len. */}
+00073     \textcolor{comment}{/* Data layout is as follows:}
+00074 \textcolor{comment}{     *}
+00075 \textcolor{comment}{     * If node is not compressed we have 'size' bytes, one for each children}
+00076 \textcolor{comment}{     * character, and 'size' raxNode pointers, point to each child node.}
+00077 \textcolor{comment}{     * Note how the character is not stored in the children but in the}
+00078 \textcolor{comment}{     * edge of the parents:}
+00079 \textcolor{comment}{     *}
+00080 \textcolor{comment}{     * [header strlen=0][abc][a-ptr][b-ptr][c-ptr](value-ptr?)}
+00081 \textcolor{comment}{     *}
+00082 \textcolor{comment}{     * if node is compressed (strlen != 0) the node has 1 children.}
+00083 \textcolor{comment}{     * In that case the 'size' bytes of the string stored immediately at}
+00084 \textcolor{comment}{     * the start of the data section, represent a sequence of successive}
+00085 \textcolor{comment}{     * nodes linked one after the other, for which only the last one in}
+00086 \textcolor{comment}{     * the sequence is actually represented as a node, and pointed to by}
+00087 \textcolor{comment}{     * the current compressed node.}
+00088 \textcolor{comment}{     *}
+00089 \textcolor{comment}{     * [header strlen=3][xyz][z-ptr](value-ptr?)}
+00090 \textcolor{comment}{     *}
+00091 \textcolor{comment}{     * Both compressed and not compressed nodes can represent a key}
+00092 \textcolor{comment}{     * with associated data in the radix tree at any level (not just terminal}
+00093 \textcolor{comment}{     * nodes).}
+00094 \textcolor{comment}{     *}
+00095 \textcolor{comment}{     * If the node has an associated key (iskey=1) and is not NULL}
+00096 \textcolor{comment}{     * (isnull=0), then after the raxNode pointers poiting to the}
+00097 \textcolor{comment}{     * childen, an additional value pointer is present (as you can see}
+00098 \textcolor{comment}{     * in the representation above as "value-ptr" field).}
+00099 \textcolor{comment}{     */}
+00100     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} data[];
+00101 \} raxNode;
+00102 
+\Hypertarget{rax_8h_source_l00103}\hyperlink{structrax}{00103} \textcolor{keyword}{typedef} \textcolor{keyword}{struct} \hyperlink{structrax}{rax} \{
+00104     raxNode *head;
+00105     uint64\_t numele;
+00106     uint64\_t numnodes;
+00107 \} rax;
+00108 
+00109 \textcolor{comment}{/* Stack data structure used by raxLowWalk() in order to, optionally, return}
+00110 \textcolor{comment}{ * a list of parent nodes to the caller. The nodes do not have a "parent"}
+00111 \textcolor{comment}{ * field for space concerns, so we use the auxiliary stack when needed. */}
+00112 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{RAX\_STACK\_STATIC\_ITEMS} 32
+\Hypertarget{rax_8h_source_l00113}\hyperlink{structraxStack}{00113} \textcolor{keyword}{typedef} \textcolor{keyword}{struct} \hyperlink{structraxStack}{raxStack} \{
+00114     \textcolor{keywordtype}{void} **stack; \textcolor{comment}{/* Points to static\_items or an heap allocated array. */}
+00115     size\_t items, maxitems; \textcolor{comment}{/* Number of items contained and total space. */}
+00116     \textcolor{comment}{/* Up to RAXSTACK\_STACK\_ITEMS items we avoid to allocate on the heap}
+00117 \textcolor{comment}{     * and use this static array of pointers instead. */}
+00118     \textcolor{keywordtype}{void} *static\_items[\hyperlink{rax_8h_aff05c7893713f82d106c046f55ac1bf5}{RAX\_STACK\_STATIC\_ITEMS}];
+00119     \textcolor{keywordtype}{int} oom; \textcolor{comment}{/* True if pushing into this stack failed for OOM at some point. */}
+00120 \} raxStack;
+00121 
+00122 \textcolor{comment}{/* Radix tree iterator state is encapsulated into this data structure. */}
+00123 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{RAX\_ITER\_STATIC\_LEN} 128
+00124 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{RAX\_ITER\_JUST\_SEEKED} \textcolor{preprocessor}{(}1\textcolor{preprocessor}{<<}0\textcolor{preprocessor}{)} \textcolor{comment}{/* Iterator was just seeked. Return current}
+00125 \textcolor{comment}{                                       element for the first iteration and}
+00126 \textcolor{comment}{                                       clear the flag. */}
+00127 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{RAX\_ITER\_EOF} \textcolor{preprocessor}{(}1\textcolor{preprocessor}{<<}1\textcolor{preprocessor}{)}    \textcolor{comment}{/* End of iteration reached. */}
+00128 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{RAX\_ITER\_SAFE} \textcolor{preprocessor}{(}1\textcolor{preprocessor}{<<}2\textcolor{preprocessor}{)}   \textcolor{comment}{/* Safe iterator, allows operations while}
+00129 \textcolor{comment}{                                  iterating. But it is slower. */}
+\Hypertarget{rax_8h_source_l00130}\hyperlink{structraxIterator}{00130} \textcolor{keyword}{typedef} \textcolor{keyword}{struct} \hyperlink{structraxIterator}{raxIterator} \{
+00131     \textcolor{keywordtype}{int} flags;
+00132     rax *rt;                \textcolor{comment}{/* Radix tree we are iterating. */}
+00133     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *key;     \textcolor{comment}{/* The current string. */}
+00134     \textcolor{keywordtype}{void} *data;             \textcolor{comment}{/* Data associated to this key. */}
+00135     size\_t key\_len;         \textcolor{comment}{/* Current key length. */}
+00136     size\_t key\_max;         \textcolor{comment}{/* Max key len the current key buffer can hold. */}
+00137     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} key\_static\_string[\hyperlink{rax_8h_a172e740ce3572b21018192e7877217dd}{RAX\_ITER\_STATIC\_LEN}];
+00138     raxNode *node;          \textcolor{comment}{/* Current node. Only for unsafe iteration. */}
+00139     \hyperlink{structraxStack}{raxStack} stack;         \textcolor{comment}{/* Stack used for unsafe iteration. */}
+00140 \} raxIterator;
+00141 
+00142 \textcolor{comment}{/* A special pointer returned for not found items. */}
+00143 \textcolor{keyword}{extern} \textcolor{keywordtype}{void} *raxNotFound;
+00144 
+00145 \textcolor{comment}{/* Exported API. */}
+00146 rax *raxNew(\textcolor{keywordtype}{void});
+00147 \textcolor{keywordtype}{int} raxInsert(rax *rax, \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *s, size\_t len, \textcolor{keywordtype}{void} *data, \textcolor{keywordtype}{void} **old);
+00148 \textcolor{keywordtype}{int} raxRemove(rax *rax, \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *s, size\_t len, \textcolor{keywordtype}{void} **old);
+00149 \textcolor{keywordtype}{void} *raxFind(rax *rax, \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *s, size\_t len);
+00150 \textcolor{keywordtype}{void} raxFree(rax *rax);
+00151 \textcolor{keywordtype}{void} raxFreeWithCallback(rax *rax, \textcolor{keywordtype}{void} (*free\_callback)(\textcolor{keywordtype}{void}*));
+00152 \textcolor{keywordtype}{void} raxStart(\hyperlink{structraxIterator}{raxIterator} *it, rax *rt);
+00153 \textcolor{keywordtype}{int} raxSeek(\hyperlink{structraxIterator}{raxIterator} *it, \textcolor{keyword}{const} \textcolor{keywordtype}{char} *op, \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *ele, size\_t len);
+00154 \textcolor{keywordtype}{int} raxNext(\hyperlink{structraxIterator}{raxIterator} *it);
+00155 \textcolor{keywordtype}{int} raxPrev(\hyperlink{structraxIterator}{raxIterator} *it);
+00156 \textcolor{keywordtype}{int} raxRandomWalk(\hyperlink{structraxIterator}{raxIterator} *it, size\_t steps);
+00157 \textcolor{keywordtype}{int} raxCompare(\hyperlink{structraxIterator}{raxIterator} *iter, \textcolor{keyword}{const} \textcolor{keywordtype}{char} *op, \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *key, size\_t key\_len);
+00158 \textcolor{keywordtype}{void} raxStop(\hyperlink{structraxIterator}{raxIterator} *it);
+00159 \textcolor{keywordtype}{int} raxEOF(\hyperlink{structraxIterator}{raxIterator} *it);
+00160 \textcolor{keywordtype}{void} raxShow(rax *rax);
+00161 uint64\_t raxSize(rax *rax);
+00162 
+00163 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+\end{DoxyCode}

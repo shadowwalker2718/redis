@@ -1,0 +1,12 @@
+<map id="clusterState" name="clusterState">
+<area shape="rect" id="node2" href="$structrax.html" title="{rax\n|+ numele\l+ numnodes\l|}" alt="" coords="5,454,100,546"/>
+<area shape="rect" id="node3" href="$structraxNode.html" title="{raxNode\n|+ iskey\l+ isnull\l+ iscompr\l+ size\l+ data\l|}" alt="" coords="13,182,93,318"/>
+<area shape="rect" id="node4" href="$structclusterNode.html" title="{clusterNode\n|+ ctime\l+ name\l+ flags\l+ configEpoch\l+ slots\l+ numslots\l+ numslaves\l+ ping_sent\l+ pong_received\l+ fail_time\land 7 more...\l|}" alt="" coords="417,388,536,612"/>
+<area shape="rect" id="node5" href="$structclusterLink.html" title="{clusterLink\n|+ ctime\l+ fd\l+ sndbuf\l+ rcvbuf\l|}" alt="" coords="470,785,555,906"/>
+<area shape="rect" id="node6" href="$structlist.html" title="{list\n|+ dup\l+ free\l+ match\l+ len\l|}" alt="" coords="441,189,512,311"/>
+<area shape="rect" id="node7" href="$structlistNode.html" title="{listNode\n|+ value\l|}" alt="" coords="441,13,512,90"/>
+<area shape="rect" id="node8" href="$structdict.html" title="{dict\n|+ privdata\l+ rehashidx\l+ iterators\l|}" alt="" coords="131,447,222,553"/>
+<area shape="rect" id="node9" href="$structdictht.html" title="{dictht\n|+ size\l+ sizemask\l+ used\l|}" alt="" coords="259,197,350,303"/>
+<area shape="rect" id="node10" href="$structdictEntry.html" title="{dictEntry\n|+ key\l+ v\l|}" alt="" coords="267,5,342,97"/>
+<area shape="rect" id="node11" href="$structdictType.html" title="{dictType\n|+ hashFunction\l+ keyDup\l+ valDup\l+ keyCompare\l+ keyDestructor\l+ valDestructor\l|}" alt="" coords="119,175,235,325"/>
+</map>

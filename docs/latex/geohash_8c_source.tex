@@ -1,0 +1,300 @@
+\hypertarget{geohash_8c_source}{}\section{geohash.\+c}
+\label{geohash_8c_source}\index{src/geohash.\+c@{src/geohash.\+c}}
+
+\begin{DoxyCode}
+00001 \textcolor{comment}{/*}
+00002 \textcolor{comment}{ * Copyright (c) 2013-2014, yinqiwen <yinqiwen@gmail.com>}
+00003 \textcolor{comment}{ * Copyright (c) 2014, Matt Stancliff <matt@genges.com>.}
+00004 \textcolor{comment}{ * Copyright (c) 2015-2016, Salvatore Sanfilippo <antirez@gmail.com>.}
+00005 \textcolor{comment}{ * All rights reserved.}
+00006 \textcolor{comment}{ *}
+00007 \textcolor{comment}{ * Redistribution and use in source and binary forms, with or without}
+00008 \textcolor{comment}{ * modification, are permitted provided that the following conditions are met:}
+00009 \textcolor{comment}{ *}
+00010 \textcolor{comment}{ *  * Redistributions of source code must retain the above copyright notice,}
+00011 \textcolor{comment}{ *    this list of conditions and the following disclaimer.}
+00012 \textcolor{comment}{ *  * Redistributions in binary form must reproduce the above copyright}
+00013 \textcolor{comment}{ *    notice, this list of conditions and the following disclaimer in the}
+00014 \textcolor{comment}{ *    documentation and/or other materials provided with the distribution.}
+00015 \textcolor{comment}{ *  * Neither the name of Redis nor the names of its contributors may be used}
+00016 \textcolor{comment}{ *    to endorse or promote products derived from this software without}
+00017 \textcolor{comment}{ *    specific prior written permission.}
+00018 \textcolor{comment}{ *}
+00019 \textcolor{comment}{ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"}
+00020 \textcolor{comment}{ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE}
+00021 \textcolor{comment}{ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE}
+00022 \textcolor{comment}{ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS}
+00023 \textcolor{comment}{ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR}
+00024 \textcolor{comment}{ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF}
+00025 \textcolor{comment}{ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS}
+00026 \textcolor{comment}{ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN}
+00027 \textcolor{comment}{ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)}
+00028 \textcolor{comment}{ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF}
+00029 \textcolor{comment}{ * THE POSSIBILITY OF SUCH DAMAGE.}
+00030 \textcolor{comment}{ */}
+00031 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \hyperlink{geohash_8h}{"geohash.h"}
+00032 
+00033 \textcolor{comment}{/**}
+00034 \textcolor{comment}{ * Hashing works like this:}
+00035 \textcolor{comment}{ * Divide the world into 4 buckets.  Label each one as such:}
+00036 \textcolor{comment}{ *  -----------------}
+00037 \textcolor{comment}{ *  |       |       |}
+00038 \textcolor{comment}{ *  |       |       |}
+00039 \textcolor{comment}{ *  | 0,1   | 1,1   |}
+00040 \textcolor{comment}{ *  -----------------}
+00041 \textcolor{comment}{ *  |       |       |}
+00042 \textcolor{comment}{ *  |       |       |}
+00043 \textcolor{comment}{ *  | 0,0   | 1,0   |}
+00044 \textcolor{comment}{ *  -----------------}
+00045 \textcolor{comment}{ */}
+00046 
+00047 \textcolor{comment}{/* Interleave lower bits of x and y, so the bits of x}
+00048 \textcolor{comment}{ * are in the even positions and bits from y in the odd;}
+00049 \textcolor{comment}{ * x and y must initially be less than 2**32 (65536).}
+00050 \textcolor{comment}{ * From:  https://graphics.stanford.edu/~seander/bithacks.html#InterleaveBMN}
+00051 \textcolor{comment}{ */}
+00052 \textcolor{keyword}{static} \textcolor{keyword}{inline} uint64\_t interleave64(uint32\_t xlo, uint32\_t ylo) \{
+00053     \textcolor{keyword}{static} \textcolor{keyword}{const} uint64\_t B[] = \{0x5555555555555555ULL, 0x3333333333333333ULL,
+00054                                  0x0F0F0F0F0F0F0F0FULL, 0x00FF00FF00FF00FFULL,
+00055                                  0x0000FFFF0000FFFFULL\};
+00056     \textcolor{keyword}{static} \textcolor{keyword}{const} \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{int} S[] = \{1, 2, 4, 8, 16\};
+00057 
+00058     uint64\_t x = xlo;
+00059     uint64\_t y = ylo;
+00060 
+00061     x = (x | (x << S[4])) & B[4];
+00062     y = (y | (y << S[4])) & B[4];
+00063 
+00064     x = (x | (x << S[3])) & B[3];
+00065     y = (y | (y << S[3])) & B[3];
+00066 
+00067     x = (x | (x << S[2])) & B[2];
+00068     y = (y | (y << S[2])) & B[2];
+00069 
+00070     x = (x | (x << S[1])) & B[1];
+00071     y = (y | (y << S[1])) & B[1];
+00072 
+00073     x = (x | (x << S[0])) & B[0];
+00074     y = (y | (y << S[0])) & B[0];
+00075 
+00076     \textcolor{keywordflow}{return} x | (y << 1);
+00077 \}
+00078 
+00079 \textcolor{comment}{/* reverse the interleave process}
+00080 \textcolor{comment}{ * derived from http://stackoverflow.com/questions/4909263}
+00081 \textcolor{comment}{ */}
+00082 \textcolor{keyword}{static} \textcolor{keyword}{inline} uint64\_t deinterleave64(uint64\_t interleaved) \{
+00083     \textcolor{keyword}{static} \textcolor{keyword}{const} uint64\_t B[] = \{0x5555555555555555ULL, 0x3333333333333333ULL,
+00084                                  0x0F0F0F0F0F0F0F0FULL, 0x00FF00FF00FF00FFULL,
+00085                                  0x0000FFFF0000FFFFULL, 0x00000000FFFFFFFFULL\};
+00086     \textcolor{keyword}{static} \textcolor{keyword}{const} \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{int} S[] = \{0, 1, 2, 4, 8, 16\};
+00087 
+00088     uint64\_t x = interleaved;
+00089     uint64\_t y = interleaved >> 1;
+00090 
+00091     x = (x | (x >> S[0])) & B[0];
+00092     y = (y | (y >> S[0])) & B[0];
+00093 
+00094     x = (x | (x >> S[1])) & B[1];
+00095     y = (y | (y >> S[1])) & B[1];
+00096 
+00097     x = (x | (x >> S[2])) & B[2];
+00098     y = (y | (y >> S[2])) & B[2];
+00099 
+00100     x = (x | (x >> S[3])) & B[3];
+00101     y = (y | (y >> S[3])) & B[3];
+00102 
+00103     x = (x | (x >> S[4])) & B[4];
+00104     y = (y | (y >> S[4])) & B[4];
+00105 
+00106     x = (x | (x >> S[5])) & B[5];
+00107     y = (y | (y >> S[5])) & B[5];
+00108 
+00109     \textcolor{keywordflow}{return} x | (y << 32);
+00110 \}
+00111 
+00112 \textcolor{keywordtype}{void} geohashGetCoordRange(GeoHashRange *long\_range, GeoHashRange *lat\_range) \{
+00113     \textcolor{comment}{/* These are constraints from EPSG:900913 / EPSG:3785 / OSGEO:41001 */}
+00114     \textcolor{comment}{/* We can't geocode at the north/south pole. */}
+00115     long\_range->max = \hyperlink{geohash_8h_a86a07918583c89467cf3e459adf513f5}{GEO\_LONG\_MAX};
+00116     long\_range->min = \hyperlink{geohash_8h_abf32454c8db6da7cf595d5ac092bb313}{GEO\_LONG\_MIN};
+00117     lat\_range->max = \hyperlink{geohash_8h_a831d966c99458d47620ea66a4c6768ab}{GEO\_LAT\_MAX};
+00118     lat\_range->min = \hyperlink{geohash_8h_a7da01a8f44929d11f00b2966c834a9b9}{GEO\_LAT\_MIN};
+00119 \}
+00120 
+00121 \textcolor{keywordtype}{int} geohashEncode(\textcolor{keyword}{const} GeoHashRange *long\_range, \textcolor{keyword}{const} GeoHashRange *lat\_range,
+00122                   \textcolor{keywordtype}{double} longitude, \textcolor{keywordtype}{double} latitude, uint8\_t step,
+00123                   GeoHashBits *hash) \{
+00124     \textcolor{comment}{/* Check basic arguments sanity. */}
+00125     \textcolor{keywordflow}{if} (hash == NULL || step > 32 || step == 0 ||
+00126         \hyperlink{geohash_8h_ad32ba49c768239fda251cd53af812b21}{RANGEPISZERO}(lat\_range) || \hyperlink{geohash_8h_ad32ba49c768239fda251cd53af812b21}{RANGEPISZERO}(long\_range)) \textcolor{keywordflow}{return} 0;
+00127 
+00128     \textcolor{comment}{/* Return an error when trying to index outside the supported}
+00129 \textcolor{comment}{     * constraints. */}
+00130     \textcolor{keywordflow}{if} (longitude > 180 || longitude < -180 ||
+00131         latitude > 85.05112878 || latitude < -85.05112878) \textcolor{keywordflow}{return} 0;
+00132 
+00133     hash->bits = 0;
+00134     hash->step = step;
+00135 
+00136     \textcolor{keywordflow}{if} (latitude < lat\_range->min || latitude > lat\_range->max ||
+00137         longitude < long\_range->min || longitude > long\_range->max) \{
+00138         \textcolor{keywordflow}{return} 0;
+00139     \}
+00140 
+00141     \textcolor{keywordtype}{double} lat\_offset =
+00142         (latitude - lat\_range->min) / (lat\_range->max - lat\_range->min);
+00143     \textcolor{keywordtype}{double} long\_offset =
+00144         (longitude - long\_range->min) / (long\_range->max - long\_range->min);
+00145 
+00146     \textcolor{comment}{/* convert to fixed point based on the step size */}
+00147     lat\_offset *= (1 << step);
+00148     long\_offset *= (1 << step);
+00149     hash->bits = interleave64(lat\_offset, long\_offset);
+00150     \textcolor{keywordflow}{return} 1;
+00151 \}
+00152 
+00153 \textcolor{keywordtype}{int} geohashEncodeType(\textcolor{keywordtype}{double} longitude, \textcolor{keywordtype}{double} latitude, uint8\_t step, GeoHashBits *hash) \{
+00154     GeoHashRange r[2] = \{\{0\}\};
+00155     geohashGetCoordRange(&r[0], &r[1]);
+00156     \textcolor{keywordflow}{return} geohashEncode(&r[0], &r[1], longitude, latitude, step, hash);
+00157 \}
+00158 
+00159 \textcolor{keywordtype}{int} geohashEncodeWGS84(\textcolor{keywordtype}{double} longitude, \textcolor{keywordtype}{double} latitude, uint8\_t step,
+00160                        GeoHashBits *hash) \{
+00161     \textcolor{keywordflow}{return} geohashEncodeType(longitude, latitude, step, hash);
+00162 \}
+00163 
+00164 \textcolor{keywordtype}{int} geohashDecode(\textcolor{keyword}{const} GeoHashRange long\_range, \textcolor{keyword}{const} GeoHashRange lat\_range,
+00165                    \textcolor{keyword}{const} GeoHashBits hash, GeoHashArea *area) \{
+00166     \textcolor{keywordflow}{if} (\hyperlink{geohash_8h_a097b8152f901ce8d8537f70b7108d9d4}{HASHISZERO}(hash) || NULL == area || \hyperlink{geohash_8h_aa0025397de7ebbc5b0ee9bf2c1c64221}{RANGEISZERO}(lat\_range) ||
+00167         \hyperlink{geohash_8h_aa0025397de7ebbc5b0ee9bf2c1c64221}{RANGEISZERO}(long\_range)) \{
+00168         \textcolor{keywordflow}{return} 0;
+00169     \}
+00170 
+00171     area->hash = hash;
+00172     uint8\_t step = hash.step;
+00173     uint64\_t hash\_sep = deinterleave64(hash.bits); \textcolor{comment}{/* hash = [LAT][LONG] */}
+00174 
+00175     \textcolor{keywordtype}{double} lat\_scale = lat\_range.max - lat\_range.min;
+00176     \textcolor{keywordtype}{double} long\_scale = long\_range.max - long\_range.min;
+00177 
+00178     uint32\_t ilato = hash\_sep;       \textcolor{comment}{/* get lat part of deinterleaved hash */}
+00179     uint32\_t ilono = hash\_sep >> 32; \textcolor{comment}{/* shift over to get long part of hash */}
+00180 
+00181     \textcolor{comment}{/* divide by 2**step.}
+00182 \textcolor{comment}{     * Then, for 0-1 coordinate, multiply times scale and add}
+00183 \textcolor{comment}{       to the min to get the absolute coordinate. */}
+00184     area->latitude.min =
+00185         lat\_range.min + (ilato * 1.0 / (1ull << step)) * lat\_scale;
+00186     area->latitude.max =
+00187         lat\_range.min + ((ilato + 1) * 1.0 / (1ull << step)) * lat\_scale;
+00188     area->longitude.min =
+00189         long\_range.min + (ilono * 1.0 / (1ull << step)) * long\_scale;
+00190     area->longitude.max =
+00191         long\_range.min + ((ilono + 1) * 1.0 / (1ull << step)) * long\_scale;
+00192 
+00193     \textcolor{keywordflow}{return} 1;
+00194 \}
+00195 
+00196 \textcolor{keywordtype}{int} geohashDecodeType(\textcolor{keyword}{const} GeoHashBits hash, GeoHashArea *area) \{
+00197     GeoHashRange r[2] = \{\{0\}\};
+00198     geohashGetCoordRange(&r[0], &r[1]);
+00199     \textcolor{keywordflow}{return} geohashDecode(r[0], r[1], hash, area);
+00200 \}
+00201 
+00202 \textcolor{keywordtype}{int} geohashDecodeWGS84(\textcolor{keyword}{const} GeoHashBits hash, GeoHashArea *area) \{
+00203     \textcolor{keywordflow}{return} geohashDecodeType(hash, area);
+00204 \}
+00205 
+00206 \textcolor{keywordtype}{int} geohashDecodeAreaToLongLat(\textcolor{keyword}{const} GeoHashArea *area, \textcolor{keywordtype}{double} *xy) \{
+00207     \textcolor{keywordflow}{if} (!xy) \textcolor{keywordflow}{return} 0;
+00208     xy[0] = (area->longitude.min + area->longitude.max) / 2;
+00209     xy[1] = (area->latitude.min + area->latitude.max) / 2;
+00210     \textcolor{keywordflow}{return} 1;
+00211 \}
+00212 
+00213 \textcolor{keywordtype}{int} geohashDecodeToLongLatType(\textcolor{keyword}{const} GeoHashBits hash, \textcolor{keywordtype}{double} *xy) \{
+00214     GeoHashArea area = \{\{0\}\};
+00215     \textcolor{keywordflow}{if} (!xy || !geohashDecodeType(hash, &area))
+00216         \textcolor{keywordflow}{return} 0;
+00217     \textcolor{keywordflow}{return} geohashDecodeAreaToLongLat(&area, xy);
+00218 \}
+00219 
+00220 \textcolor{keywordtype}{int} geohashDecodeToLongLatWGS84(\textcolor{keyword}{const} GeoHashBits hash, \textcolor{keywordtype}{double} *xy) \{
+00221     \textcolor{keywordflow}{return} geohashDecodeToLongLatType(hash, xy);
+00222 \}
+00223 
+00224 \textcolor{keyword}{static} \textcolor{keywordtype}{void} geohash\_move\_x(GeoHashBits *hash, int8\_t d) \{
+00225     \textcolor{keywordflow}{if} (d == 0)
+00226         \textcolor{keywordflow}{return};
+00227 
+00228     uint64\_t x = hash->bits & 0xaaaaaaaaaaaaaaaaULL;
+00229     uint64\_t y = hash->bits & 0x5555555555555555ULL;
+00230 
+00231     uint64\_t zz = 0x5555555555555555ULL >> (64 - hash->step * 2);
+00232 
+00233     \textcolor{keywordflow}{if} (d > 0) \{
+00234         x = x + (zz + 1);
+00235     \} \textcolor{keywordflow}{else} \{
+00236         x = x | zz;
+00237         x = x - (zz + 1);
+00238     \}
+00239 
+00240     x &= (0xaaaaaaaaaaaaaaaaULL >> (64 - hash->step * 2));
+00241     hash->bits = (x | y);
+00242 \}
+00243 
+00244 \textcolor{keyword}{static} \textcolor{keywordtype}{void} geohash\_move\_y(GeoHashBits *hash, int8\_t d) \{
+00245     \textcolor{keywordflow}{if} (d == 0)
+00246         \textcolor{keywordflow}{return};
+00247 
+00248     uint64\_t x = hash->bits & 0xaaaaaaaaaaaaaaaaULL;
+00249     uint64\_t y = hash->bits & 0x5555555555555555ULL;
+00250 
+00251     uint64\_t zz = 0xaaaaaaaaaaaaaaaaULL >> (64 - hash->step * 2);
+00252     \textcolor{keywordflow}{if} (d > 0) \{
+00253         y = y + (zz + 1);
+00254     \} \textcolor{keywordflow}{else} \{
+00255         y = y | zz;
+00256         y = y - (zz + 1);
+00257     \}
+00258     y &= (0x5555555555555555ULL >> (64 - hash->step * 2));
+00259     hash->bits = (x | y);
+00260 \}
+00261 
+00262 \textcolor{keywordtype}{void} geohashNeighbors(\textcolor{keyword}{const} GeoHashBits *hash, GeoHashNeighbors *neighbors) \{
+00263     neighbors->east = *hash;
+00264     neighbors->west = *hash;
+00265     neighbors->north = *hash;
+00266     neighbors->south = *hash;
+00267     neighbors->south\_east = *hash;
+00268     neighbors->south\_west = *hash;
+00269     neighbors->north\_east = *hash;
+00270     neighbors->north\_west = *hash;
+00271 
+00272     geohash\_move\_x(&neighbors->east, 1);
+00273     geohash\_move\_y(&neighbors->east, 0);
+00274 
+00275     geohash\_move\_x(&neighbors->west, -1);
+00276     geohash\_move\_y(&neighbors->west, 0);
+00277 
+00278     geohash\_move\_x(&neighbors->south, 0);
+00279     geohash\_move\_y(&neighbors->south, -1);
+00280 
+00281     geohash\_move\_x(&neighbors->north, 0);
+00282     geohash\_move\_y(&neighbors->north, 1);
+00283 
+00284     geohash\_move\_x(&neighbors->north\_west, -1);
+00285     geohash\_move\_y(&neighbors->north\_west, 1);
+00286 
+00287     geohash\_move\_x(&neighbors->north\_east, 1);
+00288     geohash\_move\_y(&neighbors->north\_east, 1);
+00289 
+00290     geohash\_move\_x(&neighbors->south\_east, 1);
+00291     geohash\_move\_y(&neighbors->south\_east, -1);
+00292 
+00293     geohash\_move\_x(&neighbors->south\_west, -1);
+00294     geohash\_move\_y(&neighbors->south\_west, -1);
+00295 \}
+\end{DoxyCode}

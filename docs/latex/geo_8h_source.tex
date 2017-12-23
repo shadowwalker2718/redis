@@ -1,0 +1,27 @@
+\hypertarget{geo_8h_source}{}\section{geo.\+h}
+\label{geo_8h_source}\index{src/geo.\+h@{src/geo.\+h}}
+
+\begin{DoxyCode}
+00001 \textcolor{preprocessor}{#}\textcolor{preprocessor}{ifndef} \textcolor{preprocessor}{\_\_GEO\_H\_\_}
+00002 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{\_\_GEO\_H\_\_}
+00003 
+00004 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \hyperlink{server_8h}{"server.h"}
+00005 
+00006 \textcolor{comment}{/* Structures used inside geo.c in order to represent points and array of}
+00007 \textcolor{comment}{ * points on the earth. */}
+\Hypertarget{geo_8h_source_l00008}\hyperlink{structgeoPoint}{00008} \textcolor{keyword}{typedef} \textcolor{keyword}{struct} \hyperlink{structgeoPoint}{geoPoint} \{
+00009     \textcolor{keywordtype}{double} longitude;
+00010     \textcolor{keywordtype}{double} latitude;
+00011     \textcolor{keywordtype}{double} dist;
+00012     \textcolor{keywordtype}{double} score;
+00013     \textcolor{keywordtype}{char} *member;
+00014 \} geoPoint;
+00015 
+\Hypertarget{geo_8h_source_l00016}\hyperlink{structgeoArray}{00016} \textcolor{keyword}{typedef} \textcolor{keyword}{struct} \hyperlink{structgeoArray}{geoArray} \{
+00017     \textcolor{keyword}{struct} \hyperlink{structgeoPoint}{geoPoint} *array;
+00018     size\_t buckets;
+00019     size\_t used;
+00020 \} geoArray;
+00021 
+00022 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+\end{DoxyCode}

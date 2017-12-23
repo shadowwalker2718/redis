@@ -1,0 +1,599 @@
+\hypertarget{sort_8c_source}{}\section{sort.\+c}
+\label{sort_8c_source}\index{src/sort.\+c@{src/sort.\+c}}
+
+\begin{DoxyCode}
+00001 \textcolor{comment}{/* SORT command and helper functions.}
+00002 \textcolor{comment}{ *}
+00003 \textcolor{comment}{ * Copyright (c) 2009-2012, Salvatore Sanfilippo <antirez at gmail dot com>}
+00004 \textcolor{comment}{ * All rights reserved.}
+00005 \textcolor{comment}{ *}
+00006 \textcolor{comment}{ * Redistribution and use in source and binary forms, with or without}
+00007 \textcolor{comment}{ * modification, are permitted provided that the following conditions are met:}
+00008 \textcolor{comment}{ *}
+00009 \textcolor{comment}{ *   * Redistributions of source code must retain the above copyright notice,}
+00010 \textcolor{comment}{ *     this list of conditions and the following disclaimer.}
+00011 \textcolor{comment}{ *   * Redistributions in binary form must reproduce the above copyright}
+00012 \textcolor{comment}{ *     notice, this list of conditions and the following disclaimer in the}
+00013 \textcolor{comment}{ *     documentation and/or other materials provided with the distribution.}
+00014 \textcolor{comment}{ *   * Neither the name of Redis nor the names of its contributors may be used}
+00015 \textcolor{comment}{ *     to endorse or promote products derived from this software without}
+00016 \textcolor{comment}{ *     specific prior written permission.}
+00017 \textcolor{comment}{ *}
+00018 \textcolor{comment}{ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"}
+00019 \textcolor{comment}{ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE}
+00020 \textcolor{comment}{ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE}
+00021 \textcolor{comment}{ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE}
+00022 \textcolor{comment}{ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR}
+00023 \textcolor{comment}{ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF}
+00024 \textcolor{comment}{ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS}
+00025 \textcolor{comment}{ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN}
+00026 \textcolor{comment}{ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)}
+00027 \textcolor{comment}{ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE}
+00028 \textcolor{comment}{ * POSSIBILITY OF SUCH DAMAGE.}
+00029 \textcolor{comment}{ */}
+00030 
+00031 
+00032 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \hyperlink{server_8h}{"server.h"}
+00033 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \hyperlink{pqsort_8h}{"pqsort.h"}           \textcolor{comment}{/* Partial qsort for SORT+LIMIT */}
+00034 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{math}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>} \textcolor{comment}{/* isnan() */}
+00035 
+00036 zskiplistNode* zslGetElementByRank(zskiplist *zsl, \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{long} rank);
+00037 
+00038 redisSortOperation *createSortOperation(\textcolor{keywordtype}{int} type, robj *pattern) \{
+00039     redisSortOperation *so = zmalloc(\textcolor{keyword}{sizeof}(*so));
+00040     so->type = type;
+00041     so->pattern = pattern;
+00042     \textcolor{keywordflow}{return} so;
+00043 \}
+00044 
+00045 \textcolor{comment}{/* Return the value associated to the key with a name obtained using}
+00046 \textcolor{comment}{ * the following rules:}
+00047 \textcolor{comment}{ *}
+00048 \textcolor{comment}{ * 1) The first occurrence of '*' in 'pattern' is substituted with 'subst'.}
+00049 \textcolor{comment}{ *}
+00050 \textcolor{comment}{ * 2) If 'pattern' matches the "->" string, everything on the left of}
+00051 \textcolor{comment}{ *    the arrow is treated as the name of a hash field, and the part on the}
+00052 \textcolor{comment}{ *    left as the key name containing a hash. The value of the specified}
+00053 \textcolor{comment}{ *    field is returned.}
+00054 \textcolor{comment}{ *}
+00055 \textcolor{comment}{ * 3) If 'pattern' equals "#", the function simply returns 'subst' itself so}
+00056 \textcolor{comment}{ *    that the SORT command can be used like: SORT key GET # to retrieve}
+00057 \textcolor{comment}{ *    the Set/List elements directly.}
+00058 \textcolor{comment}{ *}
+00059 \textcolor{comment}{ * The returned object will always have its refcount increased by 1}
+00060 \textcolor{comment}{ * when it is non-NULL. */}
+00061 robj *lookupKeyByPattern(redisDb *db, robj *pattern, robj *subst) \{
+00062     \textcolor{keywordtype}{char} *p, *f, *k;
+00063     sds spat, ssub;
+00064     robj *keyobj, *fieldobj = NULL, *o;
+00065     \textcolor{keywordtype}{int} prefixlen, sublen, postfixlen, fieldlen;
+00066 
+00067     \textcolor{comment}{/* If the pattern is "#" return the substitution object itself in order}
+00068 \textcolor{comment}{     * to implement the "SORT ... GET #" feature. */}
+00069     spat = pattern->ptr;
+00070     \textcolor{keywordflow}{if} (spat[0] == \textcolor{stringliteral}{'#'} && spat[1] == \textcolor{stringliteral}{'\(\backslash\)0'}) \{
+00071         incrRefCount(subst);
+00072         \textcolor{keywordflow}{return} subst;
+00073     \}
+00074 
+00075     \textcolor{comment}{/* The substitution object may be specially encoded. If so we create}
+00076 \textcolor{comment}{     * a decoded object on the fly. Otherwise getDecodedObject will just}
+00077 \textcolor{comment}{     * increment the ref count, that we'll decrement later. */}
+00078     subst = getDecodedObject(subst);
+00079     ssub = subst->ptr;
+00080 
+00081     \textcolor{comment}{/* If we can't find '*' in the pattern we return NULL as to GET a}
+00082 \textcolor{comment}{     * fixed key does not make sense. */}
+00083     p = strchr(spat,\textcolor{stringliteral}{'*'});
+00084     \textcolor{keywordflow}{if} (!p) \{
+00085         decrRefCount(subst);
+00086         \textcolor{keywordflow}{return} NULL;
+00087     \}
+00088 
+00089     \textcolor{comment}{/* Find out if we're dealing with a hash dereference. */}
+00090     \textcolor{keywordflow}{if} ((f = strstr(p+1, \textcolor{stringliteral}{"->"})) != NULL && *(f+2) != \textcolor{stringliteral}{'\(\backslash\)0'}) \{
+00091         fieldlen = sdslen(spat)-(f-spat)-2;
+00092         fieldobj = createStringObject(f+2,fieldlen);
+00093     \} \textcolor{keywordflow}{else} \{
+00094         fieldlen = 0;
+00095     \}
+00096 
+00097     \textcolor{comment}{/* Perform the '*' substitution. */}
+00098     prefixlen = p-spat;
+00099     sublen = sdslen(ssub);
+00100     postfixlen = sdslen(spat)-(prefixlen+1)-(fieldlen ? fieldlen+2 : 0);
+00101     keyobj = createStringObject(NULL,prefixlen+sublen+postfixlen);
+00102     k = keyobj->ptr;
+00103     memcpy(k,spat,prefixlen);
+00104     memcpy(k+prefixlen,ssub,sublen);
+00105     memcpy(k+prefixlen+sublen,p+1,postfixlen);
+00106     decrRefCount(subst); \textcolor{comment}{/* Incremented by decodeObject() */}
+00107 
+00108     \textcolor{comment}{/* Lookup substituted key */}
+00109     o = lookupKeyRead(db,keyobj);
+00110     \textcolor{keywordflow}{if} (o == NULL) \textcolor{keywordflow}{goto} noobj;
+00111 
+00112     \textcolor{keywordflow}{if} (fieldobj) \{
+00113         \textcolor{keywordflow}{if} (o->type != \hyperlink{server_8h_a87c05ba4f7f36741864277f02a4423fb}{OBJ\_HASH}) \textcolor{keywordflow}{goto} noobj;
+00114 
+00115         \textcolor{comment}{/* Retrieve value from hash by the field name. The returend object}
+00116 \textcolor{comment}{         * is a new object with refcount already incremented. */}
+00117         o = hashTypeGetValueObject(o, fieldobj->ptr);
+00118     \} \textcolor{keywordflow}{else} \{
+00119         \textcolor{keywordflow}{if} (o->type != \hyperlink{server_8h_a65236ea160f69cdef33ec942092af88f}{OBJ\_STRING}) \textcolor{keywordflow}{goto} noobj;
+00120 
+00121         \textcolor{comment}{/* Every object that this function returns needs to have its refcount}
+00122 \textcolor{comment}{         * increased. sortCommand decreases it again. */}
+00123         incrRefCount(o);
+00124     \}
+00125     decrRefCount(keyobj);
+00126     \textcolor{keywordflow}{if} (fieldobj) decrRefCount(fieldobj);
+00127     \textcolor{keywordflow}{return} o;
+00128 
+00129 noobj:
+00130     decrRefCount(keyobj);
+00131     \textcolor{keywordflow}{if} (fieldlen) decrRefCount(fieldobj);
+00132     \textcolor{keywordflow}{return} NULL;
+00133 \}
+00134 
+00135 \textcolor{comment}{/* sortCompare() is used by qsort in sortCommand(). Given that qsort\_r with}
+00136 \textcolor{comment}{ * the additional parameter is not standard but a BSD-specific we have to}
+00137 \textcolor{comment}{ * pass sorting parameters via the global 'server' structure */}
+00138 \textcolor{keywordtype}{int} sortCompare(\textcolor{keyword}{const} \textcolor{keywordtype}{void} *s1, \textcolor{keyword}{const} \textcolor{keywordtype}{void} *s2) \{
+00139     \textcolor{keyword}{const} redisSortObject *so1 = s1, *so2 = s2;
+00140     \textcolor{keywordtype}{int} cmp;
+00141 
+00142     \textcolor{keywordflow}{if} (!server.sort\_alpha) \{
+00143         \textcolor{comment}{/* Numeric sorting. Here it's trivial as we precomputed scores */}
+00144         \textcolor{keywordflow}{if} (so1->u.score > so2->u.score) \{
+00145             cmp = 1;
+00146         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (so1->u.score < so2->u.score) \{
+00147             cmp = -1;
+00148         \} \textcolor{keywordflow}{else} \{
+00149             \textcolor{comment}{/* Objects have the same score, but we don't want the comparison}
+00150 \textcolor{comment}{             * to be undefined, so we compare objects lexicographically.}
+00151 \textcolor{comment}{             * This way the result of SORT is deterministic. */}
+00152             cmp = compareStringObjects(so1->obj,so2->obj);
+00153         \}
+00154     \} \textcolor{keywordflow}{else} \{
+00155         \textcolor{comment}{/* Alphanumeric sorting */}
+00156         \textcolor{keywordflow}{if} (server.sort\_bypattern) \{
+00157             \textcolor{keywordflow}{if} (!so1->u.cmpobj || !so2->u.cmpobj) \{
+00158                 \textcolor{comment}{/* At least one compare object is NULL */}
+00159                 \textcolor{keywordflow}{if} (so1->u.cmpobj == so2->u.cmpobj)
+00160                     cmp = 0;
+00161                 \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (so1->u.cmpobj == NULL)
+00162                     cmp = -1;
+00163                 \textcolor{keywordflow}{else}
+00164                     cmp = 1;
+00165             \} \textcolor{keywordflow}{else} \{
+00166                 \textcolor{comment}{/* We have both the objects, compare them. */}
+00167                 \textcolor{keywordflow}{if} (server.sort\_store) \{
+00168                     cmp = compareStringObjects(so1->u.cmpobj,so2->u.cmpobj);
+00169                 \} \textcolor{keywordflow}{else} \{
+00170                     \textcolor{comment}{/* Here we can use strcoll() directly as we are sure that}
+00171 \textcolor{comment}{                     * the objects are decoded string objects. */}
+00172                     cmp = strcoll(so1->u.cmpobj->ptr,so2->u.cmpobj->ptr);
+00173                 \}
+00174             \}
+00175         \} \textcolor{keywordflow}{else} \{
+00176             \textcolor{comment}{/* Compare elements directly. */}
+00177             \textcolor{keywordflow}{if} (server.sort\_store) \{
+00178                 cmp = compareStringObjects(so1->obj,so2->obj);
+00179             \} \textcolor{keywordflow}{else} \{
+00180                 cmp = collateStringObjects(so1->obj,so2->obj);
+00181             \}
+00182         \}
+00183     \}
+00184     \textcolor{keywordflow}{return} server.sort\_desc ? -cmp : cmp;
+00185 \}
+00186 
+00187 \textcolor{comment}{/* The SORT command is the most complex command in Redis. Warning: this code}
+00188 \textcolor{comment}{ * is optimized for speed and a bit less for readability */}
+00189 \textcolor{keywordtype}{void} sortCommand(\hyperlink{structclient}{client} *c) \{
+00190     list *operations;
+00191     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{int} outputlen = 0;
+00192     \textcolor{keywordtype}{int} desc = 0, alpha = 0;
+00193     \textcolor{keywordtype}{long} limit\_start = 0, limit\_count = -1, start, end;
+00194     \textcolor{keywordtype}{int} j, dontsort = 0, vectorlen;
+00195     \textcolor{keywordtype}{int} getop = 0; \textcolor{comment}{/* GET operation counter */}
+00196     \textcolor{keywordtype}{int} int\_convertion\_error = 0;
+00197     \textcolor{keywordtype}{int} syntax\_error = 0;
+00198     robj *sortval, *sortby = NULL, *storekey = NULL;
+00199     redisSortObject *vector; \textcolor{comment}{/* Resulting vector to sort */}
+00200 
+00201     \textcolor{comment}{/* Lookup the key to sort. It must be of the right types */}
+00202     sortval = lookupKeyRead(c->db,c->argv[1]);
+00203     \textcolor{keywordflow}{if} (sortval && sortval->type != \hyperlink{server_8h_a8d179375a4aac33d3fa7aa80c8ccc75f}{OBJ\_SET} &&
+00204                    sortval->type != \hyperlink{server_8h_a4a5f22a280949c97a0cb0d4213275126}{OBJ\_LIST} &&
+00205                    sortval->type != \hyperlink{server_8h_a8c356422ddbc03bd77694880a30a1953}{OBJ\_ZSET})
+00206     \{
+00207         addReply(c,shared.wrongtypeerr);
+00208         \textcolor{keywordflow}{return};
+00209     \}
+00210 
+00211     \textcolor{comment}{/* Create a list of operations to perform for every sorted element.}
+00212 \textcolor{comment}{     * Operations can be GET */}
+00213     operations = listCreate();
+00214     \hyperlink{adlist_8h_a648e4a2d20decff3182a72a608b0b8f2}{listSetFreeMethod}(operations,zfree);
+00215     j = 2; \textcolor{comment}{/* options start at argv[2] */}
+00216 
+00217     \textcolor{comment}{/* Now we need to protect sortval incrementing its count, in the future}
+00218 \textcolor{comment}{     * SORT may have options able to overwrite/delete keys during the sorting}
+00219 \textcolor{comment}{     * and the sorted key itself may get destroyed */}
+00220     \textcolor{keywordflow}{if} (sortval)
+00221         incrRefCount(sortval);
+00222     \textcolor{keywordflow}{else}
+00223         sortval = createQuicklistObject();
+00224 
+00225     \textcolor{comment}{/* The SORT command has an SQL-alike syntax, parse it */}
+00226     \textcolor{keywordflow}{while}(j < c->argc) \{
+00227         \textcolor{keywordtype}{int} leftargs = c->argc-j-1;
+00228         \textcolor{keywordflow}{if} (!strcasecmp(c->argv[j]->ptr,\textcolor{stringliteral}{"asc"})) \{
+00229             desc = 0;
+00230         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcasecmp(c->argv[j]->ptr,\textcolor{stringliteral}{"desc"})) \{
+00231             desc = 1;
+00232         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcasecmp(c->argv[j]->ptr,\textcolor{stringliteral}{"alpha"})) \{
+00233             alpha = 1;
+00234         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcasecmp(c->argv[j]->ptr,\textcolor{stringliteral}{"limit"}) && leftargs >= 2) \{
+00235             \textcolor{keywordflow}{if} ((getLongFromObjectOrReply(c, c->argv[j+1], &limit\_start, NULL)
+00236                  != \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK}) ||
+00237                 (getLongFromObjectOrReply(c, c->argv[j+2], &limit\_count, NULL)
+00238                  != \hyperlink{server_8h_a303769ef1065076e68731584e758d3e1}{C\_OK}))
+00239             \{
+00240                 syntax\_error++;
+00241                 \textcolor{keywordflow}{break};
+00242             \}
+00243             j+=2;
+00244         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcasecmp(c->argv[j]->ptr,\textcolor{stringliteral}{"store"}) && leftargs >= 1) \{
+00245             storekey = c->argv[j+1];
+00246             j++;
+00247         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcasecmp(c->argv[j]->ptr,\textcolor{stringliteral}{"by"}) && leftargs >= 1) \{
+00248             sortby = c->argv[j+1];
+00249             \textcolor{comment}{/* If the BY pattern does not contain '*', i.e. it is constant,}
+00250 \textcolor{comment}{             * we don't need to sort nor to lookup the weight keys. */}
+00251             \textcolor{keywordflow}{if} (strchr(c->argv[j+1]->ptr,\textcolor{stringliteral}{'*'}) == NULL) \{
+00252                 dontsort = 1;
+00253             \} \textcolor{keywordflow}{else} \{
+00254                 \textcolor{comment}{/* If BY is specified with a real patter, we can't accept}
+00255 \textcolor{comment}{                 * it in cluster mode. */}
+00256                 \textcolor{keywordflow}{if} (server.cluster\_enabled) \{
+00257                     addReplyError(c,\textcolor{stringliteral}{"BY option of SORT denied in Cluster mode."});
+00258                     syntax\_error++;
+00259                     \textcolor{keywordflow}{break};
+00260                 \}
+00261             \}
+00262             j++;
+00263         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (!strcasecmp(c->argv[j]->ptr,\textcolor{stringliteral}{"get"}) && leftargs >= 1) \{
+00264             \textcolor{keywordflow}{if} (server.cluster\_enabled) \{
+00265                 addReplyError(c,\textcolor{stringliteral}{"GET option of SORT denied in Cluster mode."});
+00266                 syntax\_error++;
+00267                 \textcolor{keywordflow}{break};
+00268             \}
+00269             listAddNodeTail(operations,createSortOperation(
+00270                 \hyperlink{server_8h_ae9b61d5c032be6ac2f29076ee43cef8b}{SORT\_OP\_GET},c->argv[j+1]));
+00271             getop++;
+00272             j++;
+00273         \} \textcolor{keywordflow}{else} \{
+00274             addReply(c,shared.syntaxerr);
+00275             syntax\_error++;
+00276             \textcolor{keywordflow}{break};
+00277         \}
+00278         j++;
+00279     \}
+00280 
+00281     \textcolor{comment}{/* Handle syntax errors set during options parsing. */}
+00282     \textcolor{keywordflow}{if} (syntax\_error) \{
+00283         decrRefCount(sortval);
+00284         listRelease(operations);
+00285         \textcolor{keywordflow}{return};
+00286     \}
+00287 
+00288     \textcolor{comment}{/* When sorting a set with no sort specified, we must sort the output}
+00289 \textcolor{comment}{     * so the result is consistent across scripting and replication.}
+00290 \textcolor{comment}{     *}
+00291 \textcolor{comment}{     * The other types (list, sorted set) will retain their native order}
+00292 \textcolor{comment}{     * even if no sort order is requested, so they remain stable across}
+00293 \textcolor{comment}{     * scripting and replication. */}
+00294     \textcolor{keywordflow}{if} (dontsort &&
+00295         sortval->type == \hyperlink{server_8h_a8d179375a4aac33d3fa7aa80c8ccc75f}{OBJ\_SET} &&
+00296         (storekey || c->flags & \hyperlink{server_8h_af9d0b0f45ef2c1fd29ac714a300de706}{CLIENT\_LUA}))
+00297     \{
+00298         \textcolor{comment}{/* Force ALPHA sorting */}
+00299         dontsort = 0;
+00300         alpha = 1;
+00301         sortby = NULL;
+00302     \}
+00303 
+00304     \textcolor{comment}{/* Destructively convert encoded sorted sets for SORT. */}
+00305     \textcolor{keywordflow}{if} (sortval->type == \hyperlink{server_8h_a8c356422ddbc03bd77694880a30a1953}{OBJ\_ZSET})
+00306         zsetConvert(sortval, \hyperlink{server_8h_acfb35db5cb30ed113ed23aeb1a224c4c}{OBJ\_ENCODING\_SKIPLIST});
+00307 
+00308     \textcolor{comment}{/* Objtain the length of the object to sort. */}
+00309     \textcolor{keywordflow}{switch}(sortval->type) \{
+00310     \textcolor{keywordflow}{case} \hyperlink{server_8h_a4a5f22a280949c97a0cb0d4213275126}{OBJ\_LIST}: vectorlen = listTypeLength(sortval); \textcolor{keywordflow}{break};
+00311     \textcolor{keywordflow}{case} \hyperlink{server_8h_a8d179375a4aac33d3fa7aa80c8ccc75f}{OBJ\_SET}: vectorlen =  setTypeSize(sortval); \textcolor{keywordflow}{break};
+00312     \textcolor{keywordflow}{case} \hyperlink{server_8h_a8c356422ddbc03bd77694880a30a1953}{OBJ\_ZSET}: vectorlen = \hyperlink{dict_8h_af193430dd3d5579a52b194512f72c1f0}{dictSize}(((zset*)sortval->ptr)->dict); \textcolor{keywordflow}{break};
+00313     \textcolor{keywordflow}{default}: vectorlen = 0; \hyperlink{server_8h_a11cc378e7778a830b41240578de3b204}{serverPanic}(\textcolor{stringliteral}{"Bad SORT type"}); \textcolor{comment}{/* Avoid GCC warning */}
+00314     \}
+00315 
+00316     \textcolor{comment}{/* Perform LIMIT start,count sanity checking. */}
+00317     start = (limit\_start < 0) ? 0 : limit\_start;
+00318     end = (limit\_count < 0) ? vectorlen-1 : start+limit\_count-1;
+00319     \textcolor{keywordflow}{if} (start >= vectorlen) \{
+00320         start = vectorlen-1;
+00321         end = vectorlen-2;
+00322     \}
+00323     \textcolor{keywordflow}{if} (end >= vectorlen) end = vectorlen-1;
+00324 
+00325     \textcolor{comment}{/* Whenever possible, we load elements into the output array in a more}
+00326 \textcolor{comment}{     * direct way. This is possible if:}
+00327 \textcolor{comment}{     *}
+00328 \textcolor{comment}{     * 1) The object to sort is a sorted set or a list (internally sorted).}
+00329 \textcolor{comment}{     * 2) There is nothing to sort as dontsort is true (BY <constant string>).}
+00330 \textcolor{comment}{     *}
+00331 \textcolor{comment}{     * In this special case, if we have a LIMIT option that actually reduces}
+00332 \textcolor{comment}{     * the number of elements to fetch, we also optimize to just load the}
+00333 \textcolor{comment}{     * range we are interested in and allocating a vector that is big enough}
+00334 \textcolor{comment}{     * for the selected range length. */}
+00335     \textcolor{keywordflow}{if} ((sortval->type == \hyperlink{server_8h_a8c356422ddbc03bd77694880a30a1953}{OBJ\_ZSET} || sortval->type == \hyperlink{server_8h_a4a5f22a280949c97a0cb0d4213275126}{OBJ\_LIST}) &&
+00336         dontsort &&
+00337         (start != 0 || end != vectorlen-1))
+00338     \{
+00339         vectorlen = end-start+1;
+00340     \}
+00341 
+00342     \textcolor{comment}{/* Load the sorting vector with all the objects to sort */}
+00343     vector = zmalloc(\textcolor{keyword}{sizeof}(redisSortObject)*vectorlen);
+00344     j = 0;
+00345 
+00346     \textcolor{keywordflow}{if} (sortval->type == \hyperlink{server_8h_a4a5f22a280949c97a0cb0d4213275126}{OBJ\_LIST} && dontsort) \{
+00347         \textcolor{comment}{/* Special handling for a list, if 'dontsort' is true.}
+00348 \textcolor{comment}{         * This makes sure we return elements in the list original}
+00349 \textcolor{comment}{         * ordering, accordingly to DESC / ASC options.}
+00350 \textcolor{comment}{         *}
+00351 \textcolor{comment}{         * Note that in this case we also handle LIMIT here in a direct}
+00352 \textcolor{comment}{         * way, just getting the required range, as an optimization. */}
+00353         \textcolor{keywordflow}{if} (end >= start) \{
+00354             listTypeIterator *li;
+00355             listTypeEntry entry;
+00356             li = listTypeInitIterator(sortval,
+00357                     desc ? (\textcolor{keywordtype}{long})(listTypeLength(sortval) - start - 1) : start,
+00358                     desc ? \hyperlink{server_8h_a5fc6a15ca26c6208f66ad2768a3108ef}{LIST\_HEAD} : \hyperlink{server_8h_a745de98bef5b645df56479181803235b}{LIST\_TAIL});
+00359 
+00360             \textcolor{keywordflow}{while}(j < vectorlen && listTypeNext(li,&entry)) \{
+00361                 vector[j].obj = listTypeGet(&entry);
+00362                 vector[j].u.score = 0;
+00363                 vector[j].u.cmpobj = NULL;
+00364                 j++;
+00365             \}
+00366             listTypeReleaseIterator(li);
+00367             \textcolor{comment}{/* Fix start/end: output code is not aware of this optimization. */}
+00368             end -= start;
+00369             start = 0;
+00370         \}
+00371     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (sortval->type == \hyperlink{server_8h_a4a5f22a280949c97a0cb0d4213275126}{OBJ\_LIST}) \{
+00372         listTypeIterator *li = listTypeInitIterator(sortval,0,\hyperlink{server_8h_a745de98bef5b645df56479181803235b}{LIST\_TAIL});
+00373         listTypeEntry entry;
+00374         \textcolor{keywordflow}{while}(listTypeNext(li,&entry)) \{
+00375             vector[j].obj = listTypeGet(&entry);
+00376             vector[j].u.score = 0;
+00377             vector[j].u.cmpobj = NULL;
+00378             j++;
+00379         \}
+00380         listTypeReleaseIterator(li);
+00381     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (sortval->type == \hyperlink{server_8h_a8d179375a4aac33d3fa7aa80c8ccc75f}{OBJ\_SET}) \{
+00382         setTypeIterator *si = setTypeInitIterator(sortval);
+00383         sds sdsele;
+00384         \textcolor{keywordflow}{while}((sdsele = setTypeNextObject(si)) != NULL) \{
+00385             vector[j].obj = createObject(\hyperlink{server_8h_a65236ea160f69cdef33ec942092af88f}{OBJ\_STRING},sdsele);
+00386             vector[j].u.score = 0;
+00387             vector[j].u.cmpobj = NULL;
+00388             j++;
+00389         \}
+00390         setTypeReleaseIterator(si);
+00391     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (sortval->type == \hyperlink{server_8h_a8c356422ddbc03bd77694880a30a1953}{OBJ\_ZSET} && dontsort) \{
+00392         \textcolor{comment}{/* Special handling for a sorted set, if 'dontsort' is true.}
+00393 \textcolor{comment}{         * This makes sure we return elements in the sorted set original}
+00394 \textcolor{comment}{         * ordering, accordingly to DESC / ASC options.}
+00395 \textcolor{comment}{         *}
+00396 \textcolor{comment}{         * Note that in this case we also handle LIMIT here in a direct}
+00397 \textcolor{comment}{         * way, just getting the required range, as an optimization. */}
+00398 
+00399         zset *zs = sortval->ptr;
+00400         zskiplist *zsl = zs->zsl;
+00401         zskiplistNode *ln;
+00402         sds sdsele;
+00403         \textcolor{keywordtype}{int} rangelen = vectorlen;
+00404 
+00405         \textcolor{comment}{/* Check if starting point is trivial, before doing log(N) lookup. */}
+00406         \textcolor{keywordflow}{if} (desc) \{
+00407             \textcolor{keywordtype}{long} zsetlen = \hyperlink{dict_8h_af193430dd3d5579a52b194512f72c1f0}{dictSize}(((zset*)sortval->ptr)->dict);
+00408 
+00409             ln = zsl->tail;
+00410             \textcolor{keywordflow}{if} (start > 0)
+00411                 ln = zslGetElementByRank(zsl,zsetlen-start);
+00412         \} \textcolor{keywordflow}{else} \{
+00413             ln = zsl->header->level[0].forward;
+00414             \textcolor{keywordflow}{if} (start > 0)
+00415                 ln = zslGetElementByRank(zsl,start+1);
+00416         \}
+00417 
+00418         \textcolor{keywordflow}{while}(rangelen--) \{
+00419             \hyperlink{server_8h_a7308f76cbff9a8d3797fe78190b91282}{serverAssertWithInfo}(c,sortval,ln != NULL);
+00420             sdsele = ln->ele;
+00421             vector[j].obj = createStringObject(sdsele,sdslen(sdsele));
+00422             vector[j].u.score = 0;
+00423             vector[j].u.cmpobj = NULL;
+00424             j++;
+00425             ln = desc ? ln->backward : ln->level[0].forward;
+00426         \}
+00427         \textcolor{comment}{/* Fix start/end: output code is not aware of this optimization. */}
+00428         end -= start;
+00429         start = 0;
+00430     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (sortval->type == \hyperlink{server_8h_a8c356422ddbc03bd77694880a30a1953}{OBJ\_ZSET}) \{
+00431         dict *set = ((zset*)sortval->ptr)->dict;
+00432         dictIterator *di;
+00433         dictEntry *setele;
+00434         sds sdsele;
+00435         di = dictGetIterator(set);
+00436         \textcolor{keywordflow}{while}((setele = dictNext(di)) != NULL) \{
+00437             sdsele =  \hyperlink{dict_8h_a3271c334309904a3086deca94f96e46e}{dictGetKey}(setele);
+00438             vector[j].obj = createStringObject(sdsele,sdslen(sdsele));
+00439             vector[j].u.score = 0;
+00440             vector[j].u.cmpobj = NULL;
+00441             j++;
+00442         \}
+00443         dictReleaseIterator(di);
+00444     \} \textcolor{keywordflow}{else} \{
+00445         \hyperlink{server_8h_a11cc378e7778a830b41240578de3b204}{serverPanic}(\textcolor{stringliteral}{"Unknown type"});
+00446     \}
+00447     \hyperlink{server_8h_a7308f76cbff9a8d3797fe78190b91282}{serverAssertWithInfo}(c,sortval,j == vectorlen);
+00448 
+00449     \textcolor{comment}{/* Now it's time to load the right scores in the sorting vector */}
+00450     \textcolor{keywordflow}{if} (dontsort == 0) \{
+00451         \textcolor{keywordflow}{for} (j = 0; j < vectorlen; j++) \{
+00452             robj *byval;
+00453             \textcolor{keywordflow}{if} (sortby) \{
+00454                 \textcolor{comment}{/* lookup value to sort by */}
+00455                 byval = lookupKeyByPattern(c->db,sortby,vector[j].obj);
+00456                 \textcolor{keywordflow}{if} (!byval) \textcolor{keywordflow}{continue};
+00457             \} \textcolor{keywordflow}{else} \{
+00458                 \textcolor{comment}{/* use object itself to sort by */}
+00459                 byval = vector[j].obj;
+00460             \}
+00461 
+00462             \textcolor{keywordflow}{if} (alpha) \{
+00463                 \textcolor{keywordflow}{if} (sortby) vector[j].u.cmpobj = getDecodedObject(byval);
+00464             \} \textcolor{keywordflow}{else} \{
+00465                 \textcolor{keywordflow}{if} (\hyperlink{server_8h_afcfb5bd97af52d1dbce331745cae030c}{sdsEncodedObject}(byval)) \{
+00466                     \textcolor{keywordtype}{char} *eptr;
+00467 
+00468                     vector[j].u.score = strtod(byval->ptr,&eptr);
+00469                     \textcolor{keywordflow}{if} (eptr[0] != \textcolor{stringliteral}{'\(\backslash\)0'} || errno == ERANGE ||
+00470                         isnan(vector[j].u.score))
+00471                     \{
+00472                         int\_convertion\_error = 1;
+00473                     \}
+00474                 \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (byval->encoding == \hyperlink{server_8h_ae934cf008a0be0ef009c92c2d006a816}{OBJ\_ENCODING\_INT}) \{
+00475                     \textcolor{comment}{/* Don't need to decode the object if it's}
+00476 \textcolor{comment}{                     * integer-encoded (the only encoding supported) so}
+00477 \textcolor{comment}{                     * far. We can just cast it */}
+00478                     vector[j].u.score = (\textcolor{keywordtype}{long})byval->ptr;
+00479                 \} \textcolor{keywordflow}{else} \{
+00480                     \hyperlink{server_8h_a7308f76cbff9a8d3797fe78190b91282}{serverAssertWithInfo}(c,sortval,1 != 1);
+00481                 \}
+00482             \}
+00483 
+00484             \textcolor{comment}{/* when the object was retrieved using lookupKeyByPattern,}
+00485 \textcolor{comment}{             * its refcount needs to be decreased. */}
+00486             \textcolor{keywordflow}{if} (sortby) \{
+00487                 decrRefCount(byval);
+00488             \}
+00489         \}
+00490     \}
+00491 
+00492     \textcolor{keywordflow}{if} (dontsort == 0) \{
+00493         server.sort\_desc = desc;
+00494         server.sort\_alpha = alpha;
+00495         server.sort\_bypattern = sortby ? 1 : 0;
+00496         server.sort\_store = storekey ? 1 : 0;
+00497         \textcolor{keywordflow}{if} (sortby && (start != 0 || end != vectorlen-1))
+00498             pqsort(vector,vectorlen,\textcolor{keyword}{sizeof}(redisSortObject),sortCompare, start,end);
+00499         \textcolor{keywordflow}{else}
+00500             qsort(vector,vectorlen,\textcolor{keyword}{sizeof}(redisSortObject),sortCompare);
+00501     \}
+00502 
+00503     \textcolor{comment}{/* Send command output to the output buffer, performing the specified}
+00504 \textcolor{comment}{     * GET/DEL/INCR/DECR operations if any. */}
+00505     outputlen = getop ? getop*(end-start+1) : end-start+1;
+00506     \textcolor{keywordflow}{if} (int\_convertion\_error) \{
+00507         addReplyError(c,\textcolor{stringliteral}{"One or more scores can't be converted into double"});
+00508     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (storekey == NULL) \{
+00509         \textcolor{comment}{/* STORE option not specified, sent the sorting result to client */}
+00510         addReplyMultiBulkLen(c,outputlen);
+00511         \textcolor{keywordflow}{for} (j = start; j <= end; j++) \{
+00512             listNode *ln;
+00513             listIter li;
+00514 
+00515             \textcolor{keywordflow}{if} (!getop) addReplyBulk(c,vector[j].obj);
+00516             listRewind(operations,&li);
+00517             \textcolor{keywordflow}{while}((ln = listNext(&li))) \{
+00518                 redisSortOperation *sop = ln->value;
+00519                 robj *val = lookupKeyByPattern(c->db,sop->pattern,
+00520                     vector[j].obj);
+00521 
+00522                 \textcolor{keywordflow}{if} (sop->type == \hyperlink{server_8h_ae9b61d5c032be6ac2f29076ee43cef8b}{SORT\_OP\_GET}) \{
+00523                     \textcolor{keywordflow}{if} (!val) \{
+00524                         addReply(c,shared.nullbulk);
+00525                     \} \textcolor{keywordflow}{else} \{
+00526                         addReplyBulk(c,val);
+00527                         decrRefCount(val);
+00528                     \}
+00529                 \} \textcolor{keywordflow}{else} \{
+00530                     \textcolor{comment}{/* Always fails */}
+00531                     \hyperlink{server_8h_a7308f76cbff9a8d3797fe78190b91282}{serverAssertWithInfo}(c,sortval,sop->type == 
+      \hyperlink{server_8h_ae9b61d5c032be6ac2f29076ee43cef8b}{SORT\_OP\_GET});
+00532                 \}
+00533             \}
+00534         \}
+00535     \} \textcolor{keywordflow}{else} \{
+00536         robj *sobj = createQuicklistObject();
+00537 
+00538         \textcolor{comment}{/* STORE option specified, set the sorting result as a List object */}
+00539         \textcolor{keywordflow}{for} (j = start; j <= end; j++) \{
+00540             listNode *ln;
+00541             listIter li;
+00542 
+00543             \textcolor{keywordflow}{if} (!getop) \{
+00544                 listTypePush(sobj,vector[j].obj,\hyperlink{server_8h_a745de98bef5b645df56479181803235b}{LIST\_TAIL});
+00545             \} \textcolor{keywordflow}{else} \{
+00546                 listRewind(operations,&li);
+00547                 \textcolor{keywordflow}{while}((ln = listNext(&li))) \{
+00548                     redisSortOperation *sop = ln->value;
+00549                     robj *val = lookupKeyByPattern(c->db,sop->pattern,
+00550                         vector[j].obj);
+00551 
+00552                     \textcolor{keywordflow}{if} (sop->type == \hyperlink{server_8h_ae9b61d5c032be6ac2f29076ee43cef8b}{SORT\_OP\_GET}) \{
+00553                         \textcolor{keywordflow}{if} (!val) val = createStringObject(\textcolor{stringliteral}{""},0);
+00554 
+00555                         \textcolor{comment}{/* listTypePush does an incrRefCount, so we should take care}
+00556 \textcolor{comment}{                         * care of the incremented refcount caused by either}
+00557 \textcolor{comment}{                         * lookupKeyByPattern or createStringObject("",0) */}
+00558                         listTypePush(sobj,val,\hyperlink{server_8h_a745de98bef5b645df56479181803235b}{LIST\_TAIL});
+00559                         decrRefCount(val);
+00560                     \} \textcolor{keywordflow}{else} \{
+00561                         \textcolor{comment}{/* Always fails */}
+00562                         \hyperlink{server_8h_a7308f76cbff9a8d3797fe78190b91282}{serverAssertWithInfo}(c,sortval,sop->type == 
+      \hyperlink{server_8h_ae9b61d5c032be6ac2f29076ee43cef8b}{SORT\_OP\_GET});
+00563                     \}
+00564                 \}
+00565             \}
+00566         \}
+00567         \textcolor{keywordflow}{if} (outputlen) \{
+00568             setKey(c->db,storekey,sobj);
+00569             notifyKeyspaceEvent(\hyperlink{server_8h_a1c0b64c84b0e66dff3554ffe3e2ec4c8}{NOTIFY\_LIST},\textcolor{stringliteral}{"sortstore"},storekey,
+00570                                 c->db->id);
+00571             server.dirty += outputlen;
+00572         \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (dbDelete(c->db,storekey)) \{
+00573             signalModifiedKey(c->db,storekey);
+00574             notifyKeyspaceEvent(\hyperlink{server_8h_a9fa53dd1068e62365f3964ad3479eec2}{NOTIFY\_GENERIC},\textcolor{stringliteral}{"del"},storekey,c->db->id);
+00575             server.dirty++;
+00576         \}
+00577         decrRefCount(sobj);
+00578         addReplyLongLong(c,outputlen);
+00579     \}
+00580 
+00581     \textcolor{comment}{/* Cleanup */}
+00582     \textcolor{keywordflow}{for} (j = 0; j < vectorlen; j++)
+00583         decrRefCount(vector[j].obj);
+00584 
+00585     decrRefCount(sortval);
+00586     listRelease(operations);
+00587     \textcolor{keywordflow}{for} (j = 0; j < vectorlen; j++) \{
+00588         \textcolor{keywordflow}{if} (alpha && vector[j].u.cmpobj)
+00589             decrRefCount(vector[j].u.cmpobj);
+00590     \}
+00591     zfree(vector);
+00592 \}
+\end{DoxyCode}

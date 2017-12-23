@@ -1,0 +1,4 @@
+<map id="redisOp" name="redisOp">
+<area shape="rect" id="node2" href="$structredisObject.html" title="{redisObject\n|+ type\l+ encoding\l+ lru\l+ refcount\l+ ptr\l|}" alt="" coords="5,49,93,185"/>
+<area shape="rect" id="node3" href="$structredisCommand.html" title="{redisCommand\n|+ name\l+ proc\l+ arity\l+ sflags\l+ flags\l+ getkeys_proc\l+ firstkey\l+ lastkey\l+ keystep\l+ microseconds\l+ calls\l|}" alt="" coords="117,5,232,229"/>
+</map>

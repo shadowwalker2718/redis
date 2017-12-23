@@ -1,0 +1,331 @@
+\hypertarget{testmodule_8c_source}{}\section{testmodule.\+c}
+\label{testmodule_8c_source}\index{src/modules/testmodule.\+c@{src/modules/testmodule.\+c}}
+
+\begin{DoxyCode}
+00001 \textcolor{comment}{/* Module designed to test the Redis modules subsystem.}
+00002 \textcolor{comment}{ *}
+00003 \textcolor{comment}{ * -----------------------------------------------------------------------------}
+00004 \textcolor{comment}{ *}
+00005 \textcolor{comment}{ * Copyright (c) 2016, Salvatore Sanfilippo <antirez at gmail dot com>}
+00006 \textcolor{comment}{ * All rights reserved.}
+00007 \textcolor{comment}{ *}
+00008 \textcolor{comment}{ * Redistribution and use in source and binary forms, with or without}
+00009 \textcolor{comment}{ * modification, are permitted provided that the following conditions are met:}
+00010 \textcolor{comment}{ *}
+00011 \textcolor{comment}{ *   * Redistributions of source code must retain the above copyright notice,}
+00012 \textcolor{comment}{ *     this list of conditions and the following disclaimer.}
+00013 \textcolor{comment}{ *   * Redistributions in binary form must reproduce the above copyright}
+00014 \textcolor{comment}{ *     notice, this list of conditions and the following disclaimer in the}
+00015 \textcolor{comment}{ *     documentation and/or other materials provided with the distribution.}
+00016 \textcolor{comment}{ *   * Neither the name of Redis nor the names of its contributors may be used}
+00017 \textcolor{comment}{ *     to endorse or promote products derived from this software without}
+00018 \textcolor{comment}{ *     specific prior written permission.}
+00019 \textcolor{comment}{ *}
+00020 \textcolor{comment}{ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"}
+00021 \textcolor{comment}{ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE}
+00022 \textcolor{comment}{ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE}
+00023 \textcolor{comment}{ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE}
+00024 \textcolor{comment}{ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR}
+00025 \textcolor{comment}{ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF}
+00026 \textcolor{comment}{ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS}
+00027 \textcolor{comment}{ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN}
+00028 \textcolor{comment}{ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)}
+00029 \textcolor{comment}{ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE}
+00030 \textcolor{comment}{ * POSSIBILITY OF SUCH DAMAGE.}
+00031 \textcolor{comment}{ */}
+00032 
+00033 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{"../redismodule.h"}
+00034 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{string}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00035 
+00036 \textcolor{comment}{/* --------------------------------- Helpers -------------------------------- */}
+00037 
+00038 \textcolor{comment}{/* Return true if the reply and the C null term string matches. */}
+00039 \textcolor{keywordtype}{int} TestMatchReply(RedisModuleCallReply *reply, \textcolor{keywordtype}{char} *str) \{
+00040     RedisModuleString *mystr;
+00041     mystr = RedisModule\_CreateStringFromCallReply(reply);
+00042     \textcolor{keywordflow}{if} (!mystr) \textcolor{keywordflow}{return} 0;
+00043     \textcolor{keyword}{const} \textcolor{keywordtype}{char} *ptr = RedisModule\_StringPtrLen(mystr,NULL);
+00044     \textcolor{keywordflow}{return} strcmp(ptr,str) == 0;
+00045 \}
+00046 
+00047 \textcolor{comment}{/* ------------------------------- Test units ------------------------------- */}
+00048 
+00049 \textcolor{comment}{/* TEST.CALL -- Test Call() API. */}
+00050 \textcolor{keywordtype}{int} TestCall(RedisModuleCtx *ctx, RedisModuleString **argv, \textcolor{keywordtype}{int} argc) \{
+00051     \hyperlink{redismodule_8h_a46d75d81383a00bd6b941af6cadf64c2}{REDISMODULE\_NOT\_USED}(argv);
+00052     \hyperlink{redismodule_8h_a46d75d81383a00bd6b941af6cadf64c2}{REDISMODULE\_NOT\_USED}(argc);
+00053 
+00054     RedisModule\_AutoMemory(ctx);
+00055     RedisModuleCallReply *reply;
+00056 
+00057     RedisModule\_Call(ctx,\textcolor{stringliteral}{"DEL"},\textcolor{stringliteral}{"c"},\textcolor{stringliteral}{"mylist"});
+00058     RedisModuleString *mystr = RedisModule\_CreateString(ctx,\textcolor{stringliteral}{"foo"},3);
+00059     RedisModule\_Call(ctx,\textcolor{stringliteral}{"RPUSH"},\textcolor{stringliteral}{"csl"},\textcolor{stringliteral}{"mylist"},mystr,(\textcolor{keywordtype}{long} \textcolor{keywordtype}{long})1234);
+00060     reply = RedisModule\_Call(ctx,\textcolor{stringliteral}{"LRANGE"},\textcolor{stringliteral}{"ccc"},\textcolor{stringliteral}{"mylist"},\textcolor{stringliteral}{"0"},\textcolor{stringliteral}{"-1"});
+00061     \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} items = RedisModule\_CallReplyLength(reply);
+00062     \textcolor{keywordflow}{if} (items != 2) \textcolor{keywordflow}{goto} fail;
+00063 
+00064     RedisModuleCallReply *item0, *item1;
+00065 
+00066     item0 = RedisModule\_CallReplyArrayElement(reply,0);
+00067     item1 = RedisModule\_CallReplyArrayElement(reply,1);
+00068     \textcolor{keywordflow}{if} (!TestMatchReply(item0,\textcolor{stringliteral}{"foo"})) \textcolor{keywordflow}{goto} fail;
+00069     \textcolor{keywordflow}{if} (!TestMatchReply(item1,\textcolor{stringliteral}{"1234"})) \textcolor{keywordflow}{goto} fail;
+00070 
+00071     RedisModule\_ReplyWithSimpleString(ctx,\textcolor{stringliteral}{"OK"});
+00072     \textcolor{keywordflow}{return} \hyperlink{redismodule_8h_a1bc5bfd69abcd378ff52c640adc5418d}{REDISMODULE\_OK};
+00073 
+00074 fail:
+00075     RedisModule\_ReplyWithSimpleString(ctx,\textcolor{stringliteral}{"ERR"});
+00076     \textcolor{keywordflow}{return} \hyperlink{redismodule_8h_a1bc5bfd69abcd378ff52c640adc5418d}{REDISMODULE\_OK};
+00077 \}
+00078 
+00079 \textcolor{comment}{/* TEST.STRING.APPEND -- Test appending to an existing string object. */}
+00080 \textcolor{keywordtype}{int} TestStringAppend(RedisModuleCtx *ctx, RedisModuleString **argv, \textcolor{keywordtype}{int} argc) \{
+00081     \hyperlink{redismodule_8h_a46d75d81383a00bd6b941af6cadf64c2}{REDISMODULE\_NOT\_USED}(argv);
+00082     \hyperlink{redismodule_8h_a46d75d81383a00bd6b941af6cadf64c2}{REDISMODULE\_NOT\_USED}(argc);
+00083 
+00084     RedisModuleString *s = RedisModule\_CreateString(ctx,\textcolor{stringliteral}{"foo"},3);
+00085     RedisModule\_StringAppendBuffer(ctx,s,\textcolor{stringliteral}{"bar"},3);
+00086     RedisModule\_ReplyWithString(ctx,s);
+00087     RedisModule\_FreeString(ctx,s);
+00088     \textcolor{keywordflow}{return} \hyperlink{redismodule_8h_a1bc5bfd69abcd378ff52c640adc5418d}{REDISMODULE\_OK};
+00089 \}
+00090 
+00091 \textcolor{comment}{/* TEST.STRING.APPEND.AM -- Test append with retain when auto memory is on. */}
+00092 \textcolor{keywordtype}{int} TestStringAppendAM(RedisModuleCtx *ctx, RedisModuleString **argv, \textcolor{keywordtype}{int} argc) \{
+00093     \hyperlink{redismodule_8h_a46d75d81383a00bd6b941af6cadf64c2}{REDISMODULE\_NOT\_USED}(argv);
+00094     \hyperlink{redismodule_8h_a46d75d81383a00bd6b941af6cadf64c2}{REDISMODULE\_NOT\_USED}(argc);
+00095 
+00096     RedisModule\_AutoMemory(ctx);
+00097     RedisModuleString *s = RedisModule\_CreateString(ctx,\textcolor{stringliteral}{"foo"},3);
+00098     RedisModule\_RetainString(ctx,s);
+00099     RedisModule\_StringAppendBuffer(ctx,s,\textcolor{stringliteral}{"bar"},3);
+00100     RedisModule\_ReplyWithString(ctx,s);
+00101     RedisModule\_FreeString(ctx,s);
+00102     \textcolor{keywordflow}{return} \hyperlink{redismodule_8h_a1bc5bfd69abcd378ff52c640adc5418d}{REDISMODULE\_OK};
+00103 \}
+00104 
+00105 \textcolor{comment}{/* TEST.STRING.PRINTF -- Test string formatting. */}
+00106 \textcolor{keywordtype}{int} TestStringPrintf(RedisModuleCtx *ctx, RedisModuleString **argv, \textcolor{keywordtype}{int} argc) \{
+00107     RedisModule\_AutoMemory(ctx);
+00108     \textcolor{keywordflow}{if} (argc < 3) \{
+00109         \textcolor{keywordflow}{return} RedisModule\_WrongArity(ctx);
+00110     \}
+00111     RedisModuleString *s = RedisModule\_CreateStringPrintf(ctx,
+00112         \textcolor{stringliteral}{"Got %d args. argv[1]: %s, argv[2]: %s"},
+00113         argc,
+00114         RedisModule\_StringPtrLen(argv[1], NULL),
+00115         RedisModule\_StringPtrLen(argv[2], NULL)
+00116     );
+00117 
+00118     RedisModule\_ReplyWithString(ctx,s);
+00119 
+00120     \textcolor{keywordflow}{return} \hyperlink{redismodule_8h_a1bc5bfd69abcd378ff52c640adc5418d}{REDISMODULE\_OK};
+00121 \}
+00122 
+00123 
+00124 \textcolor{comment}{/* TEST.CTXFLAGS -- Test GetContextFlags. */}
+00125 \textcolor{keywordtype}{int} TestCtxFlags(RedisModuleCtx *ctx, RedisModuleString **argv, \textcolor{keywordtype}{int} argc) \{
+00126     \hyperlink{redismodule_8h_a46d75d81383a00bd6b941af6cadf64c2}{REDISMODULE\_NOT\_USED}(argc);
+00127     \hyperlink{redismodule_8h_a46d75d81383a00bd6b941af6cadf64c2}{REDISMODULE\_NOT\_USED}(argv);
+00128 
+00129     RedisModule\_AutoMemory(ctx);
+00130 
+00131     \textcolor{keywordtype}{int} ok = 1;
+00132     \textcolor{keyword}{const} \textcolor{keywordtype}{char} *errString = NULL;
+00133 
+00134   \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{FAIL}\textcolor{preprocessor}{(}\textcolor{preprocessor}{msg}\textcolor{preprocessor}{)}
+00135     \textcolor{preprocessor}{\{}
+00136       \textcolor{preprocessor}{ok} \textcolor{preprocessor}{=} 0\textcolor{preprocessor}{;}
+00137       \textcolor{preprocessor}{errString} \textcolor{preprocessor}{=} \textcolor{preprocessor}{msg}\textcolor{preprocessor}{;}
+00138       \textcolor{keywordflow}{goto} \textcolor{preprocessor}{end}\textcolor{preprocessor}{;}
+00139     \textcolor{preprocessor}{\}}
+00140 
+00141     \textcolor{keywordtype}{int} flags = RedisModule\_GetContextFlags(ctx);
+00142     \textcolor{keywordflow}{if} (flags == 0) \{
+00143       \hyperlink{testmodule_8c_a292ad803e75cf5ca00676b8595513ace}{FAIL}(\textcolor{stringliteral}{"Got no flags"});
+00144     \}
+00145 
+00146     \textcolor{keywordflow}{if} (flags & \hyperlink{redismodule_8h_ae1eac2a152ac7acd3ac8c7eb84d3bc45}{REDISMODULE\_CTX\_FLAGS\_LUA}) \hyperlink{testmodule_8c_a292ad803e75cf5ca00676b8595513ace}{FAIL}(\textcolor{stringliteral}{"Lua flag was set"});
+00147     \textcolor{keywordflow}{if} (flags & \hyperlink{redismodule_8h_a2498b6bcdcdc1733a2913a23d23c2b56}{REDISMODULE\_CTX\_FLAGS\_MULTI}) 
+      \hyperlink{testmodule_8c_a292ad803e75cf5ca00676b8595513ace}{FAIL}(\textcolor{stringliteral}{"Multi flag was set"});
+00148 
+00149     \textcolor{keywordflow}{if} (flags & \hyperlink{redismodule_8h_a33ce10fefe981f7c6f3676b8d6ed6195}{REDISMODULE\_CTX\_FLAGS\_AOF}) \hyperlink{testmodule_8c_a292ad803e75cf5ca00676b8595513ace}{FAIL}(\textcolor{stringliteral}{"AOF Flag was set"})
+00150     \textcolor{comment}{/* Enable AOF to test AOF flags */}
+00151     RedisModule\_Call(ctx, \textcolor{stringliteral}{"config"}, \textcolor{stringliteral}{"ccc"}, \textcolor{stringliteral}{"set"}, \textcolor{stringliteral}{"appendonly"}, \textcolor{stringliteral}{"yes"});
+00152     flags = RedisModule\_GetContextFlags(ctx);
+00153     \textcolor{keywordflow}{if} (!(flags & \hyperlink{redismodule_8h_a33ce10fefe981f7c6f3676b8d6ed6195}{REDISMODULE\_CTX\_FLAGS\_AOF}))
+00154       \hyperlink{testmodule_8c_a292ad803e75cf5ca00676b8595513ace}{FAIL}(\textcolor{stringliteral}{"AOF Flag not set after config set"});
+00155 
+00156     \textcolor{keywordflow}{if} (flags & \hyperlink{redismodule_8h_a27a5c58d9cbaba98c06c532d09dc7a41}{REDISMODULE\_CTX\_FLAGS\_RDB}) \hyperlink{testmodule_8c_a292ad803e75cf5ca00676b8595513ace}{FAIL}(\textcolor{stringliteral}{"RDB Flag was set"});
+00157     \textcolor{comment}{/* Enable RDB to test RDB flags */}
+00158     RedisModule\_Call(ctx, \textcolor{stringliteral}{"config"}, \textcolor{stringliteral}{"ccc"}, \textcolor{stringliteral}{"set"}, \textcolor{stringliteral}{"save"}, \textcolor{stringliteral}{"900 1"});
+00159     flags = RedisModule\_GetContextFlags(ctx);
+00160     \textcolor{keywordflow}{if} (!(flags & \hyperlink{redismodule_8h_a27a5c58d9cbaba98c06c532d09dc7a41}{REDISMODULE\_CTX\_FLAGS\_RDB}))
+00161       \hyperlink{testmodule_8c_a292ad803e75cf5ca00676b8595513ace}{FAIL}(\textcolor{stringliteral}{"RDB Flag was not set after config set"});
+00162 
+00163     \textcolor{keywordflow}{if} (!(flags & \hyperlink{redismodule_8h_a4ada8d595eeaaea1d343cafaab7be85a}{REDISMODULE\_CTX\_FLAGS\_MASTER})) 
+      \hyperlink{testmodule_8c_a292ad803e75cf5ca00676b8595513ace}{FAIL}(\textcolor{stringliteral}{"Master flag was not set"});
+00164     \textcolor{keywordflow}{if} (flags & \hyperlink{redismodule_8h_ae6c2d2900511d92be4f9ecab6a330459}{REDISMODULE\_CTX\_FLAGS\_SLAVE}) 
+      \hyperlink{testmodule_8c_a292ad803e75cf5ca00676b8595513ace}{FAIL}(\textcolor{stringliteral}{"Slave flag was set"});
+00165     \textcolor{keywordflow}{if} (flags & \hyperlink{redismodule_8h_a58e4767512e8e1491f048cb77ac9371f}{REDISMODULE\_CTX\_FLAGS\_READONLY}) 
+      \hyperlink{testmodule_8c_a292ad803e75cf5ca00676b8595513ace}{FAIL}(\textcolor{stringliteral}{"Read-only flag was set"});
+00166     \textcolor{keywordflow}{if} (flags & \hyperlink{redismodule_8h_a5c34f8b64241bbbd00bc3df9c3c08844}{REDISMODULE\_CTX\_FLAGS\_CLUSTER}) 
+      \hyperlink{testmodule_8c_a292ad803e75cf5ca00676b8595513ace}{FAIL}(\textcolor{stringliteral}{"Cluster flag was set"});
+00167 
+00168     \textcolor{keywordflow}{if} (flags & \hyperlink{redismodule_8h_a8c676eb00ac368cca7c8515aa115213d}{REDISMODULE\_CTX\_FLAGS\_MAXMEMORY}) 
+      \hyperlink{testmodule_8c_a292ad803e75cf5ca00676b8595513ace}{FAIL}(\textcolor{stringliteral}{"Maxmemory flag was set"});
+00169     ;
+00170     RedisModule\_Call(ctx, \textcolor{stringliteral}{"config"}, \textcolor{stringliteral}{"ccc"}, \textcolor{stringliteral}{"set"}, \textcolor{stringliteral}{"maxmemory"}, \textcolor{stringliteral}{"100000000"});
+00171     flags = RedisModule\_GetContextFlags(ctx);
+00172     \textcolor{keywordflow}{if} (!(flags & \hyperlink{redismodule_8h_a8c676eb00ac368cca7c8515aa115213d}{REDISMODULE\_CTX\_FLAGS\_MAXMEMORY}))
+00173       \hyperlink{testmodule_8c_a292ad803e75cf5ca00676b8595513ace}{FAIL}(\textcolor{stringliteral}{"Maxmemory flag was not set after config set"});
+00174 
+00175     \textcolor{keywordflow}{if} (flags & \hyperlink{redismodule_8h_acc6e7822ea410be48f1006b39cf8c487}{REDISMODULE\_CTX\_FLAGS\_EVICT}) 
+      \hyperlink{testmodule_8c_a292ad803e75cf5ca00676b8595513ace}{FAIL}(\textcolor{stringliteral}{"Eviction flag was set"});
+00176     RedisModule\_Call(ctx, \textcolor{stringliteral}{"config"}, \textcolor{stringliteral}{"ccc"}, \textcolor{stringliteral}{"set"}, \textcolor{stringliteral}{"maxmemory-policy"},
+00177                      \textcolor{stringliteral}{"allkeys-lru"});
+00178     flags = RedisModule\_GetContextFlags(ctx);
+00179     \textcolor{keywordflow}{if} (!(flags & \hyperlink{redismodule_8h_acc6e7822ea410be48f1006b39cf8c487}{REDISMODULE\_CTX\_FLAGS\_EVICT}))
+00180       \hyperlink{testmodule_8c_a292ad803e75cf5ca00676b8595513ace}{FAIL}(\textcolor{stringliteral}{"Eviction flag was not set after config set"});
+00181 
+00182   end:
+00183     \textcolor{comment}{/* Revert config changes */}
+00184     RedisModule\_Call(ctx, \textcolor{stringliteral}{"config"}, \textcolor{stringliteral}{"ccc"}, \textcolor{stringliteral}{"set"}, \textcolor{stringliteral}{"appendonly"}, \textcolor{stringliteral}{"no"});
+00185     RedisModule\_Call(ctx, \textcolor{stringliteral}{"config"}, \textcolor{stringliteral}{"ccc"}, \textcolor{stringliteral}{"set"}, \textcolor{stringliteral}{"save"}, \textcolor{stringliteral}{""});
+00186     RedisModule\_Call(ctx, \textcolor{stringliteral}{"config"}, \textcolor{stringliteral}{"ccc"}, \textcolor{stringliteral}{"set"}, \textcolor{stringliteral}{"maxmemory"}, \textcolor{stringliteral}{"0"});
+00187     RedisModule\_Call(ctx, \textcolor{stringliteral}{"config"}, \textcolor{stringliteral}{"ccc"}, \textcolor{stringliteral}{"set"}, \textcolor{stringliteral}{"maxmemory-policy"}, \textcolor{stringliteral}{"noeviction"});
+00188 
+00189     \textcolor{keywordflow}{if} (!ok) \{
+00190       RedisModule\_Log(ctx, \textcolor{stringliteral}{"warning"}, \textcolor{stringliteral}{"Failed CTXFLAGS Test. Reason: %s"},
+00191                       errString);
+00192       \textcolor{keywordflow}{return} RedisModule\_ReplyWithSimpleString(ctx, \textcolor{stringliteral}{"ERR"});
+00193     \}
+00194 
+00195     \textcolor{keywordflow}{return} RedisModule\_ReplyWithSimpleString(ctx, \textcolor{stringliteral}{"OK"});
+00196   \}
+00197 
+00198 
+00199 \textcolor{comment}{/* ----------------------------- Test framework ----------------------------- */}
+00200 
+00201 \textcolor{comment}{/* Return 1 if the reply matches the specified string, otherwise log errors}
+00202 \textcolor{comment}{ * in the server log and return 0. */}
+00203 \textcolor{keywordtype}{int} TestAssertStringReply(RedisModuleCtx *ctx, RedisModuleCallReply *reply, \textcolor{keywordtype}{char} *str, size\_t len) \{
+00204     RedisModuleString *mystr, *expected;
+00205 
+00206     \textcolor{keywordflow}{if} (RedisModule\_CallReplyType(reply) != \hyperlink{redismodule_8h_abc8a4584f9085b55692994244a26012b}{REDISMODULE\_REPLY\_STRING}) \{
+00207         RedisModule\_Log(ctx,\textcolor{stringliteral}{"warning"},\textcolor{stringliteral}{"Unexpected reply type %d"},
+00208             RedisModule\_CallReplyType(reply));
+00209         \textcolor{keywordflow}{return} 0;
+00210     \}
+00211     mystr = RedisModule\_CreateStringFromCallReply(reply);
+00212     expected = RedisModule\_CreateString(ctx,str,len);
+00213     \textcolor{keywordflow}{if} (RedisModule\_StringCompare(mystr,expected) != 0) \{
+00214         \textcolor{keyword}{const} \textcolor{keywordtype}{char} *mystr\_ptr = RedisModule\_StringPtrLen(mystr,NULL);
+00215         \textcolor{keyword}{const} \textcolor{keywordtype}{char} *expected\_ptr = RedisModule\_StringPtrLen(expected,NULL);
+00216         RedisModule\_Log(ctx,\textcolor{stringliteral}{"warning"},
+00217             \textcolor{stringliteral}{"Unexpected string reply '%s' (instead of '%s')"},
+00218             mystr\_ptr, expected\_ptr);
+00219         \textcolor{keywordflow}{return} 0;
+00220     \}
+00221     \textcolor{keywordflow}{return} 1;
+00222 \}
+00223 
+00224 \textcolor{comment}{/* Return 1 if the reply matches the specified integer, otherwise log errors}
+00225 \textcolor{comment}{ * in the server log and return 0. */}
+00226 \textcolor{keywordtype}{int} TestAssertIntegerReply(RedisModuleCtx *ctx, RedisModuleCallReply *reply, \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} expected) \{
+00227     \textcolor{keywordflow}{if} (RedisModule\_CallReplyType(reply) != \hyperlink{redismodule_8h_a9cff1d7e4fdc52b273949ed0d83e916b}{REDISMODULE\_REPLY\_INTEGER}) \{
+00228         RedisModule\_Log(ctx,\textcolor{stringliteral}{"warning"},\textcolor{stringliteral}{"Unexpected reply type %d"},
+00229             RedisModule\_CallReplyType(reply));
+00230         \textcolor{keywordflow}{return} 0;
+00231     \}
+00232     \textcolor{keywordtype}{long} \textcolor{keywordtype}{long} val = RedisModule\_CallReplyInteger(reply);
+00233     \textcolor{keywordflow}{if} (val != expected) \{
+00234         RedisModule\_Log(ctx,\textcolor{stringliteral}{"warning"},
+00235             \textcolor{stringliteral}{"Unexpected integer reply '%lld' (instead of '%lld')"},
+00236             val, expected);
+00237         \textcolor{keywordflow}{return} 0;
+00238     \}
+00239     \textcolor{keywordflow}{return} 1;
+00240 \}
+00241 
+00242 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{T}\textcolor{preprocessor}{(}\textcolor{preprocessor}{name}\textcolor{preprocessor}{,}\textcolor{preprocessor}{...}\textcolor{preprocessor}{)}
+00243     \textcolor{keywordflow}{do} \textcolor{preprocessor}{\{}
+00244         \textcolor{preprocessor}{RedisModule\_Log}\textcolor{preprocessor}{(}\textcolor{preprocessor}{ctx}\textcolor{preprocessor}{,}\textcolor{stringliteral}{"warning"}\textcolor{preprocessor}{,}\textcolor{stringliteral}{"Testing %s"}\textcolor{preprocessor}{,} \textcolor{preprocessor}{name}\textcolor{preprocessor}{)}\textcolor{preprocessor}{;}
+00245         \textcolor{preprocessor}{reply} \textcolor{preprocessor}{=} \textcolor{preprocessor}{RedisModule\_Call}\textcolor{preprocessor}{(}\textcolor{preprocessor}{ctx}\textcolor{preprocessor}{,}\textcolor{preprocessor}{name}\textcolor{preprocessor}{,}\textcolor{preprocessor}{\_\_VA\_ARGS\_\_}\textcolor{preprocessor}{)}\textcolor{preprocessor}{;}
+00246     \textcolor{preprocessor}{\}} \textcolor{keywordflow}{while} \textcolor{preprocessor}{(}0\textcolor{preprocessor}{)}\textcolor{preprocessor}{;}
+00247 
+00248 \textcolor{comment}{/* TEST.IT -- Run all the tests. */}
+00249 \textcolor{keywordtype}{int} TestIt(RedisModuleCtx *ctx, RedisModuleString **argv, \textcolor{keywordtype}{int} argc) \{
+00250     \hyperlink{redismodule_8h_a46d75d81383a00bd6b941af6cadf64c2}{REDISMODULE\_NOT\_USED}(argv);
+00251     \hyperlink{redismodule_8h_a46d75d81383a00bd6b941af6cadf64c2}{REDISMODULE\_NOT\_USED}(argc);
+00252 
+00253     RedisModule\_AutoMemory(ctx);
+00254     RedisModuleCallReply *reply;
+00255 
+00256     \textcolor{comment}{/* Make sure the DB is empty before to proceed. */}
+00257     \hyperlink{testmodule_8c_a9834474b904750bc8258155c06efa705}{T}(\textcolor{stringliteral}{"dbsize"},\textcolor{stringliteral}{""});
+00258     \textcolor{keywordflow}{if} (!TestAssertIntegerReply(ctx,reply,0)) \textcolor{keywordflow}{goto} fail;
+00259 
+00260     \hyperlink{testmodule_8c_a9834474b904750bc8258155c06efa705}{T}(\textcolor{stringliteral}{"ping"},\textcolor{stringliteral}{""});
+00261     \textcolor{keywordflow}{if} (!TestAssertStringReply(ctx,reply,\textcolor{stringliteral}{"PONG"},4)) \textcolor{keywordflow}{goto} fail;
+00262 
+00263     \hyperlink{testmodule_8c_a9834474b904750bc8258155c06efa705}{T}(\textcolor{stringliteral}{"test.call"},\textcolor{stringliteral}{""});
+00264     \textcolor{keywordflow}{if} (!TestAssertStringReply(ctx,reply,\textcolor{stringliteral}{"OK"},2)) \textcolor{keywordflow}{goto} fail;
+00265 
+00266     \hyperlink{testmodule_8c_a9834474b904750bc8258155c06efa705}{T}(\textcolor{stringliteral}{"test.ctxflags"},\textcolor{stringliteral}{""});
+00267     \textcolor{keywordflow}{if} (!TestAssertStringReply(ctx,reply,\textcolor{stringliteral}{"OK"},2)) \textcolor{keywordflow}{goto} fail;
+00268 
+00269     \hyperlink{testmodule_8c_a9834474b904750bc8258155c06efa705}{T}(\textcolor{stringliteral}{"test.string.append"},\textcolor{stringliteral}{""});
+00270     \textcolor{keywordflow}{if} (!TestAssertStringReply(ctx,reply,\textcolor{stringliteral}{"foobar"},6)) \textcolor{keywordflow}{goto} fail;
+00271 
+00272     \hyperlink{testmodule_8c_a9834474b904750bc8258155c06efa705}{T}(\textcolor{stringliteral}{"test.string.append.am"},\textcolor{stringliteral}{""});
+00273     \textcolor{keywordflow}{if} (!TestAssertStringReply(ctx,reply,\textcolor{stringliteral}{"foobar"},6)) \textcolor{keywordflow}{goto} fail;
+00274 
+00275     \hyperlink{testmodule_8c_a9834474b904750bc8258155c06efa705}{T}(\textcolor{stringliteral}{"test.string.printf"}, \textcolor{stringliteral}{"cc"}, \textcolor{stringliteral}{"foo"}, \textcolor{stringliteral}{"bar"});
+00276     \textcolor{keywordflow}{if} (!TestAssertStringReply(ctx,reply,\textcolor{stringliteral}{"Got 3 args. argv[1]: foo, argv[2]: bar"},38)) \textcolor{keywordflow}{goto} fail;
+00277 
+00278     RedisModule\_ReplyWithSimpleString(ctx,\textcolor{stringliteral}{"ALL TESTS PASSED"});
+00279     \textcolor{keywordflow}{return} \hyperlink{redismodule_8h_a1bc5bfd69abcd378ff52c640adc5418d}{REDISMODULE\_OK};
+00280 
+00281 fail:
+00282     RedisModule\_ReplyWithSimpleString(ctx,
+00283         \textcolor{stringliteral}{"SOME TEST NOT PASSED! Check server logs"});
+00284     \textcolor{keywordflow}{return} \hyperlink{redismodule_8h_a1bc5bfd69abcd378ff52c640adc5418d}{REDISMODULE\_OK};
+00285 \}
+00286 
+00287 \textcolor{keywordtype}{int} RedisModule\_OnLoad(RedisModuleCtx *ctx, RedisModuleString **argv, \textcolor{keywordtype}{int} argc) \{
+00288     \hyperlink{redismodule_8h_a46d75d81383a00bd6b941af6cadf64c2}{REDISMODULE\_NOT\_USED}(argv);
+00289     \hyperlink{redismodule_8h_a46d75d81383a00bd6b941af6cadf64c2}{REDISMODULE\_NOT\_USED}(argc);
+00290 
+00291     \textcolor{keywordflow}{if} (RedisModule\_Init(ctx,\textcolor{stringliteral}{"test"},1,\hyperlink{redismodule_8h_a1fc9be44e4cd6d60f7129d4393b6b580}{REDISMODULE\_APIVER\_1})
+00292         == \hyperlink{redismodule_8h_a3df6f5bd5247289e66f44437a7cddd49}{REDISMODULE\_ERR}) \textcolor{keywordflow}{return} \hyperlink{redismodule_8h_a3df6f5bd5247289e66f44437a7cddd49}{REDISMODULE\_ERR};
+00293 
+00294     \textcolor{keywordflow}{if} (RedisModule\_CreateCommand(ctx,\textcolor{stringliteral}{"test.call"},
+00295         TestCall,\textcolor{stringliteral}{"write deny-oom"},1,1,1) == \hyperlink{redismodule_8h_a3df6f5bd5247289e66f44437a7cddd49}{REDISMODULE\_ERR})
+00296         \textcolor{keywordflow}{return} \hyperlink{redismodule_8h_a3df6f5bd5247289e66f44437a7cddd49}{REDISMODULE\_ERR};
+00297 
+00298     \textcolor{keywordflow}{if} (RedisModule\_CreateCommand(ctx,\textcolor{stringliteral}{"test.string.append"},
+00299         TestStringAppend,\textcolor{stringliteral}{"write deny-oom"},1,1,1) == \hyperlink{redismodule_8h_a3df6f5bd5247289e66f44437a7cddd49}{REDISMODULE\_ERR})
+00300         \textcolor{keywordflow}{return} \hyperlink{redismodule_8h_a3df6f5bd5247289e66f44437a7cddd49}{REDISMODULE\_ERR};
+00301 
+00302     \textcolor{keywordflow}{if} (RedisModule\_CreateCommand(ctx,\textcolor{stringliteral}{"test.string.append.am"},
+00303         TestStringAppendAM,\textcolor{stringliteral}{"write deny-oom"},1,1,1) == \hyperlink{redismodule_8h_a3df6f5bd5247289e66f44437a7cddd49}{REDISMODULE\_ERR})
+00304         \textcolor{keywordflow}{return} \hyperlink{redismodule_8h_a3df6f5bd5247289e66f44437a7cddd49}{REDISMODULE\_ERR};
+00305 
+00306     \textcolor{keywordflow}{if} (RedisModule\_CreateCommand(ctx,\textcolor{stringliteral}{"test.string.printf"},
+00307         TestStringPrintf,\textcolor{stringliteral}{"write deny-oom"},1,1,1) == \hyperlink{redismodule_8h_a3df6f5bd5247289e66f44437a7cddd49}{REDISMODULE\_ERR})
+00308         \textcolor{keywordflow}{return} \hyperlink{redismodule_8h_a3df6f5bd5247289e66f44437a7cddd49}{REDISMODULE\_ERR};
+00309 
+00310     \textcolor{keywordflow}{if} (RedisModule\_CreateCommand(ctx,\textcolor{stringliteral}{"test.ctxflags"},
+00311         TestCtxFlags,\textcolor{stringliteral}{"readonly"},1,1,1) == \hyperlink{redismodule_8h_a3df6f5bd5247289e66f44437a7cddd49}{REDISMODULE\_ERR})
+00312         \textcolor{keywordflow}{return} \hyperlink{redismodule_8h_a3df6f5bd5247289e66f44437a7cddd49}{REDISMODULE\_ERR};
+00313 
+00314     \textcolor{keywordflow}{if} (RedisModule\_CreateCommand(ctx,\textcolor{stringliteral}{"test.it"},
+00315         TestIt,\textcolor{stringliteral}{"readonly"},1,1,1) == \hyperlink{redismodule_8h_a3df6f5bd5247289e66f44437a7cddd49}{REDISMODULE\_ERR})
+00316         \textcolor{keywordflow}{return} \hyperlink{redismodule_8h_a3df6f5bd5247289e66f44437a7cddd49}{REDISMODULE\_ERR};
+00317 
+00318     \textcolor{keywordflow}{return} \hyperlink{redismodule_8h_a1bc5bfd69abcd378ff52c640adc5418d}{REDISMODULE\_OK};
+00319 \}
+\end{DoxyCode}

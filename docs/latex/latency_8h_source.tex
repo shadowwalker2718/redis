@@ -1,0 +1,98 @@
+\hypertarget{latency_8h_source}{}\section{latency.\+h}
+\label{latency_8h_source}\index{src/latency.\+h@{src/latency.\+h}}
+
+\begin{DoxyCode}
+00001 \textcolor{comment}{/* latency.h -- latency monitor API header file}
+00002 \textcolor{comment}{ * See latency.c for more information.}
+00003 \textcolor{comment}{ *}
+00004 \textcolor{comment}{ * ----------------------------------------------------------------------------}
+00005 \textcolor{comment}{ *}
+00006 \textcolor{comment}{ * Copyright (c) 2014, Salvatore Sanfilippo <antirez at gmail dot com>}
+00007 \textcolor{comment}{ * All rights reserved.}
+00008 \textcolor{comment}{ *}
+00009 \textcolor{comment}{ * Redistribution and use in source and binary forms, with or without}
+00010 \textcolor{comment}{ * modification, are permitted provided that the following conditions are met:}
+00011 \textcolor{comment}{ *}
+00012 \textcolor{comment}{ *   * Redistributions of source code must retain the above copyright notice,}
+00013 \textcolor{comment}{ *     this list of conditions and the following disclaimer.}
+00014 \textcolor{comment}{ *   * Redistributions in binary form must reproduce the above copyright}
+00015 \textcolor{comment}{ *     notice, this list of conditions and the following disclaimer in the}
+00016 \textcolor{comment}{ *     documentation and/or other materials provided with the distribution.}
+00017 \textcolor{comment}{ *   * Neither the name of Redis nor the names of its contributors may be used}
+00018 \textcolor{comment}{ *     to endorse or promote products derived from this software without}
+00019 \textcolor{comment}{ *     specific prior written permission.}
+00020 \textcolor{comment}{ *}
+00021 \textcolor{comment}{ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"}
+00022 \textcolor{comment}{ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE}
+00023 \textcolor{comment}{ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE}
+00024 \textcolor{comment}{ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE}
+00025 \textcolor{comment}{ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR}
+00026 \textcolor{comment}{ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF}
+00027 \textcolor{comment}{ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS}
+00028 \textcolor{comment}{ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN}
+00029 \textcolor{comment}{ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)}
+00030 \textcolor{comment}{ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE}
+00031 \textcolor{comment}{ * POSSIBILITY OF SUCH DAMAGE.}
+00032 \textcolor{comment}{ */}
+00033 
+00034 \textcolor{preprocessor}{#}\textcolor{preprocessor}{ifndef} \textcolor{preprocessor}{\_\_LATENCY\_H}
+00035 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{\_\_LATENCY\_H}
+00036 
+00037 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{LATENCY\_TS\_LEN} 160 \textcolor{comment}{/* History length for every monitored event. */}
+00038 
+00039 \textcolor{comment}{/* Representation of a latency sample: the sampling time and the latency}
+00040 \textcolor{comment}{ * observed in milliseconds. */}
+\Hypertarget{latency_8h_source_l00041}\hyperlink{structlatencySample}{00041} \textcolor{keyword}{struct} \hyperlink{structlatencySample}{latencySample} \{
+00042     int32\_t time; \textcolor{comment}{/* We don't use time\_t to force 4 bytes usage everywhere. */}
+00043     uint32\_t latency; \textcolor{comment}{/* Latency in milliseconds. */}
+00044 \};
+00045 
+00046 \textcolor{comment}{/* The latency time series for a given event. */}
+\Hypertarget{latency_8h_source_l00047}\hyperlink{structlatencyTimeSeries}{00047} \textcolor{keyword}{struct} \hyperlink{structlatencyTimeSeries}{latencyTimeSeries} \{
+00048     \textcolor{keywordtype}{int} idx; \textcolor{comment}{/* Index of the next sample to store. */}
+00049     uint32\_t max; \textcolor{comment}{/* Max latency observed for this event. */}
+00050     \textcolor{keyword}{struct} \hyperlink{structlatencySample}{latencySample} samples[\hyperlink{latency_8h_a7e3ba352d9d7bb4c88c2c42c16e6674b}{LATENCY\_TS\_LEN}]; \textcolor{comment}{/* Latest history. */}
+00051 \};
+00052 
+00053 \textcolor{comment}{/* Latency statistics structure. */}
+\Hypertarget{latency_8h_source_l00054}\hyperlink{structlatencyStats}{00054} \textcolor{keyword}{struct} \hyperlink{structlatencyStats}{latencyStats} \{
+00055     uint32\_t all\_time\_high; \textcolor{comment}{/* Absolute max observed since latest reset. */}
+00056     uint32\_t avg;           \textcolor{comment}{/* Average of current samples. */}
+00057     uint32\_t min;           \textcolor{comment}{/* Min of current samples. */}
+00058     uint32\_t max;           \textcolor{comment}{/* Max of current samples. */}
+00059     uint32\_t mad;           \textcolor{comment}{/* Mean absolute deviation. */}
+00060     uint32\_t samples;       \textcolor{comment}{/* Number of non-zero samples. */}
+00061     time\_t period;          \textcolor{comment}{/* Number of seconds since first event and now. */}
+00062 \};
+00063 
+00064 \textcolor{keywordtype}{void} latencyMonitorInit(\textcolor{keywordtype}{void});
+00065 \textcolor{keywordtype}{void} latencyAddSample(\textcolor{keywordtype}{char} *event, mstime\_t latency);
+00066 \textcolor{keywordtype}{int} THPIsEnabled(\textcolor{keywordtype}{void});
+00067 
+00068 \textcolor{comment}{/* Latency monitoring macros. */}
+00069 
+00070 \textcolor{comment}{/* Start monitoring an event. We just set the current time. */}
+00071 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{latencyStartMonitor}\textcolor{preprocessor}{(}\textcolor{preprocessor}{var}\textcolor{preprocessor}{)} \textcolor{keywordflow}{if} \textcolor{preprocessor}{(}\textcolor{preprocessor}{server}\textcolor{preprocessor}{.}\textcolor{preprocessor}{latency\_monitor\_threshold}\textcolor{preprocessor}{)} \textcolor{preprocessor}{\{}
+00072     \textcolor{preprocessor}{var} \textcolor{preprocessor}{=} \textcolor{preprocessor}{mstime}\textcolor{preprocessor}{(}\textcolor{preprocessor}{)}\textcolor{preprocessor}{;} \textcolor{preprocessor}{\(\backslash\)}
+00073 \textcolor{preprocessor}{\}}\textcolor{keywordflow}{else} \textcolor{preprocessor}{\{}
+00074     \textcolor{preprocessor}{var} \textcolor{preprocessor}{=} 0\textcolor{preprocessor}{;} \textcolor{preprocessor}{\(\backslash\)}
+00075 \textcolor{preprocessor}{\}}
+00076 
+00077 \textcolor{comment}{/* End monitoring an event, compute the difference with the current time}
+00078 \textcolor{comment}{ * to check the amount of time elapsed. */}
+00079 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{latencyEndMonitor}\textcolor{preprocessor}{(}\textcolor{preprocessor}{var}\textcolor{preprocessor}{)} \textcolor{keywordflow}{if} \textcolor{preprocessor}{(}\textcolor{preprocessor}{server}\textcolor{preprocessor}{.}\textcolor{preprocessor}{latency\_monitor\_threshold}\textcolor{preprocessor}{)} \textcolor{preprocessor}{\{}
+00080     \textcolor{preprocessor}{var} \textcolor{preprocessor}{=} \textcolor{preprocessor}{mstime}\textcolor{preprocessor}{(}\textcolor{preprocessor}{)} \textcolor{preprocessor}{-} \textcolor{preprocessor}{var}\textcolor{preprocessor}{;} \textcolor{preprocessor}{\(\backslash\)}
+00081 \textcolor{preprocessor}{\}}
+00082 
+00083 \textcolor{comment}{/* Add the sample only if the elapsed time is >= to the configured threshold. */}
+00084 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{latencyAddSampleIfNeeded}\textcolor{preprocessor}{(}\textcolor{preprocessor}{event}\textcolor{preprocessor}{,}\textcolor{preprocessor}{var}\textcolor{preprocessor}{)}
+00085     \textcolor{keywordflow}{if} \textcolor{preprocessor}{(}\textcolor{preprocessor}{server}\textcolor{preprocessor}{.}\textcolor{preprocessor}{latency\_monitor\_threshold} \textcolor{preprocessor}{&&}
+00086         \textcolor{preprocessor}{(}\textcolor{preprocessor}{var}\textcolor{preprocessor}{)} \textcolor{preprocessor}{>=} \textcolor{preprocessor}{server}\textcolor{preprocessor}{.}\textcolor{preprocessor}{latency\_monitor\_threshold}\textcolor{preprocessor}{)}
+00087           \textcolor{preprocessor}{latencyAddSample}\textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{event}\textcolor{preprocessor}{)}\textcolor{preprocessor}{,}\textcolor{preprocessor}{(}\textcolor{preprocessor}{var}\textcolor{preprocessor}{)}\textcolor{preprocessor}{)}\textcolor{preprocessor}{;}
+00088 
+00089 \textcolor{comment}{/* Remove time from a nested event. */}
+00090 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{latencyRemoveNestedEvent}\textcolor{preprocessor}{(}\textcolor{preprocessor}{event\_var}\textcolor{preprocessor}{,}\textcolor{preprocessor}{nested\_var}\textcolor{preprocessor}{)}
+00091     \textcolor{preprocessor}{event\_var} \textcolor{preprocessor}{+=} \textcolor{preprocessor}{nested\_var}\textcolor{preprocessor}{;}
+00092 
+00093 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif} \textcolor{comment}{/* \_\_LATENCY\_H */}
+\end{DoxyCode}

@@ -1,0 +1,181 @@
+\hypertarget{sparkline_8c_source}{}\section{sparkline.\+c}
+\label{sparkline_8c_source}\index{src/sparkline.\+c@{src/sparkline.\+c}}
+
+\begin{DoxyCode}
+00001 \textcolor{comment}{/* sparkline.c -- ASCII Sparklines}
+00002 \textcolor{comment}{ * This code is modified from http://github.com/antirez/aspark and adapted}
+00003 \textcolor{comment}{ * in order to return SDS strings instead of outputting directly to}
+00004 \textcolor{comment}{ * the terminal.}
+00005 \textcolor{comment}{ *}
+00006 \textcolor{comment}{ * ---------------------------------------------------------------------------}
+00007 \textcolor{comment}{ *}
+00008 \textcolor{comment}{ * Copyright(C) 2011-2014 Salvatore Sanfilippo <antirez@gmail.com>}
+00009 \textcolor{comment}{ * All rights reserved.}
+00010 \textcolor{comment}{ *}
+00011 \textcolor{comment}{ * Redistribution and use in source and binary forms, with or without}
+00012 \textcolor{comment}{ * modification, are permitted provided that the following conditions are met:}
+00013 \textcolor{comment}{ *}
+00014 \textcolor{comment}{ *   * Redistributions of source code must retain the above copyright notice,}
+00015 \textcolor{comment}{ *     this list of conditions and the following disclaimer.}
+00016 \textcolor{comment}{ *   * Redistributions in binary form must reproduce the above copyright}
+00017 \textcolor{comment}{ *     notice, this list of conditions and the following disclaimer in the}
+00018 \textcolor{comment}{ *     documentation and/or other materials provided with the distribution.}
+00019 \textcolor{comment}{ *}
+00020 \textcolor{comment}{ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"}
+00021 \textcolor{comment}{ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE}
+00022 \textcolor{comment}{ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE}
+00023 \textcolor{comment}{ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE}
+00024 \textcolor{comment}{ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR}
+00025 \textcolor{comment}{ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF}
+00026 \textcolor{comment}{ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS}
+00027 \textcolor{comment}{ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN}
+00028 \textcolor{comment}{ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)}
+00029 \textcolor{comment}{ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE}
+00030 \textcolor{comment}{ * POSSIBILITY OF SUCH DAMAGE.}
+00031 \textcolor{comment}{ */}
+00032 
+00033 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \hyperlink{server_8h}{"server.h"}
+00034 
+00035 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{math}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00036 
+00037 \textcolor{comment}{/* This is the charset used to display the graphs, but multiple rows are used}
+00038 \textcolor{comment}{ * to increase the resolution. */}
+00039 \textcolor{keyword}{static} \textcolor{keywordtype}{char} charset[] = \textcolor{stringliteral}{"\_-`"};
+00040 \textcolor{keyword}{static} \textcolor{keywordtype}{char} charset\_fill[] = \textcolor{stringliteral}{"\_o#"};
+00041 \textcolor{keyword}{static} \textcolor{keywordtype}{int} charset\_len = \textcolor{keyword}{sizeof}(charset)-1;
+00042 \textcolor{keyword}{static} \textcolor{keywordtype}{int} label\_margin\_top = 1;
+00043 
+00044 \textcolor{comment}{/* ----------------------------------------------------------------------------}
+00045 \textcolor{comment}{ * Sequences are arrays of samples we use to represent data to turn}
+00046 \textcolor{comment}{ * into sparklines. This is the API in order to generate a sparkline:}
+00047 \textcolor{comment}{ *}
+00048 \textcolor{comment}{ * struct sequence *seq = createSparklineSequence();}
+00049 \textcolor{comment}{ * sparklineSequenceAddSample(seq, 10, NULL);}
+00050 \textcolor{comment}{ * sparklineSequenceAddSample(seq, 20, NULL);}
+00051 \textcolor{comment}{ * sparklineSequenceAddSample(seq, 30, "last sample label");}
+00052 \textcolor{comment}{ * sds output = sparklineRender(sdsempty(), seq, 80, 4, SPARKLINE\_FILL);}
+00053 \textcolor{comment}{ * freeSparklineSequence(seq);}
+00054 \textcolor{comment}{ * ------------------------------------------------------------------------- */}
+00055 
+00056 \textcolor{comment}{/* Create a new sequence. */}
+00057 \textcolor{keyword}{struct} \hyperlink{structsequence}{sequence} *createSparklineSequence(\textcolor{keywordtype}{void}) \{
+00058     \textcolor{keyword}{struct} \hyperlink{structsequence}{sequence} *seq = zmalloc(\textcolor{keyword}{sizeof}(*seq));
+00059     seq->length = 0;
+00060     seq->samples = NULL;
+00061     \textcolor{keywordflow}{return} seq;
+00062 \}
+00063 
+00064 \textcolor{comment}{/* Add a new sample into a sequence. */}
+00065 \textcolor{keywordtype}{void} sparklineSequenceAddSample(\textcolor{keyword}{struct} \hyperlink{structsequence}{sequence} *seq, \textcolor{keywordtype}{double} value, \textcolor{keywordtype}{char} *label) \{
+00066     label = (label == NULL || label[0] == \textcolor{stringliteral}{'\(\backslash\)0'}) ? NULL : zstrdup(label);
+00067     \textcolor{keywordflow}{if} (seq->length == 0) \{
+00068         seq->min = seq->max = value;
+00069     \} \textcolor{keywordflow}{else} \{
+00070         \textcolor{keywordflow}{if} (value < seq->min) seq->min = value;
+00071         \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (value > seq->max) seq->max = value;
+00072     \}
+00073     seq->samples = zrealloc(seq->samples,\textcolor{keyword}{sizeof}(\textcolor{keyword}{struct} sample)*(seq->length+1));
+00074     seq->samples[seq->length].value = value;
+00075     seq->samples[seq->length].label = label;
+00076     seq->length++;
+00077     \textcolor{keywordflow}{if} (label) seq->labels++;
+00078 \}
+00079 
+00080 \textcolor{comment}{/* Free a sequence. */}
+00081 \textcolor{keywordtype}{void} freeSparklineSequence(\textcolor{keyword}{struct} \hyperlink{structsequence}{sequence} *seq) \{
+00082     \textcolor{keywordtype}{int} j;
+00083 
+00084     \textcolor{keywordflow}{for} (j = 0; j < seq->length; j++)
+00085         zfree(seq->samples[j].label);
+00086     zfree(seq->samples);
+00087     zfree(seq);
+00088 \}
+00089 
+00090 \textcolor{comment}{/* ----------------------------------------------------------------------------}
+00091 \textcolor{comment}{ * ASCII rendering of sequence}
+00092 \textcolor{comment}{ * ------------------------------------------------------------------------- */}
+00093 
+00094 \textcolor{comment}{/* Render part of a sequence, so that render\_sequence() call call this function}
+00095 \textcolor{comment}{ * with differnent parts in order to create the full output without overflowing}
+00096 \textcolor{comment}{ * the current terminal columns. */}
+00097 sds sparklineRenderRange(sds output, \textcolor{keyword}{struct} \hyperlink{structsequence}{sequence} *seq, \textcolor{keywordtype}{int} rows, \textcolor{keywordtype}{int} offset, \textcolor{keywordtype}{int} len, \textcolor{keywordtype}{int} 
+      flags) \{
+00098     \textcolor{keywordtype}{int} j;
+00099     \textcolor{keywordtype}{double} relmax = seq->max - seq->min;
+00100     \textcolor{keywordtype}{int} steps = charset\_len*rows;
+00101     \textcolor{keywordtype}{int} row = 0;
+00102     \textcolor{keywordtype}{char} *chars = zmalloc(len);
+00103     \textcolor{keywordtype}{int} loop = 1;
+00104     \textcolor{keywordtype}{int} opt\_fill = flags & \hyperlink{sparkline_8h_af6a091d13a723f2ac2a848be4235a6cd}{SPARKLINE\_FILL};
+00105     \textcolor{keywordtype}{int} opt\_log = flags & \hyperlink{sparkline_8h_a7b27f202623ced94e764ea1448080a25}{SPARKLINE\_LOG\_SCALE};
+00106 
+00107     \textcolor{keywordflow}{if} (opt\_log) \{
+00108         relmax = log(relmax+1);
+00109     \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if} (relmax == 0) \{
+00110         relmax = 1;
+00111     \}
+00112 
+00113     \textcolor{keywordflow}{while}(loop) \{
+00114         loop = 0;
+00115         memset(chars,\textcolor{stringliteral}{' '},len);
+00116         \textcolor{keywordflow}{for} (j = 0; j < len; j++) \{
+00117             \textcolor{keyword}{struct} \hyperlink{structsample}{sample} *s = &seq->samples[j+offset];
+00118             \textcolor{keywordtype}{double} relval = s->value - seq->min;
+00119             \textcolor{keywordtype}{int} step;
+00120 
+00121             \textcolor{keywordflow}{if} (opt\_log) relval = log(relval+1);
+00122             step = (\textcolor{keywordtype}{int}) (relval*steps)/relmax;
+00123             \textcolor{keywordflow}{if} (step < 0) step = 0;
+00124             \textcolor{keywordflow}{if} (step >= steps) step = steps-1;
+00125 
+00126             \textcolor{keywordflow}{if} (row < rows) \{
+00127                 \textcolor{comment}{/* Print the character needed to create the sparkline */}
+00128                 \textcolor{keywordtype}{int} charidx = step-((rows-row-1)*charset\_len);
+00129                 loop = 1;
+00130                 \textcolor{keywordflow}{if} (charidx >= 0 && charidx < charset\_len) \{
+00131                     chars[j] = opt\_fill ? charset\_fill[charidx] :
+00132                                           charset[charidx];
+00133                 \} \textcolor{keywordflow}{else} \textcolor{keywordflow}{if}(opt\_fill && charidx >= charset\_len) \{
+00134                     chars[j] = \textcolor{stringliteral}{'|'};
+00135                 \}
+00136             \} \textcolor{keywordflow}{else} \{
+00137                 \textcolor{comment}{/* Labels spacing */}
+00138                 \textcolor{keywordflow}{if} (seq->labels && row-rows < label\_margin\_top) \{
+00139                     loop = 1;
+00140                     \textcolor{keywordflow}{break};
+00141                 \}
+00142                 \textcolor{comment}{/* Print the label if needed. */}
+00143                 \textcolor{keywordflow}{if} (s->label) \{
+00144                     \textcolor{keywordtype}{int} label\_len = strlen(s->label);
+00145                     \textcolor{keywordtype}{int} label\_char = row - rows - label\_margin\_top;
+00146 
+00147                     \textcolor{keywordflow}{if} (label\_len > label\_char) \{
+00148                         loop = 1;
+00149                         chars[j] = s->label[label\_char];
+00150                     \}
+00151                 \}
+00152             \}
+00153         \}
+00154         \textcolor{keywordflow}{if} (loop) \{
+00155             row++;
+00156             output = sdscatlen(output,chars,len);
+00157             output = sdscatlen(output,\textcolor{stringliteral}{"\(\backslash\)n"},1);
+00158         \}
+00159     \}
+00160     zfree(chars);
+00161     \textcolor{keywordflow}{return} output;
+00162 \}
+00163 
+00164 \textcolor{comment}{/* Turn a sequence into its ASCII representation */}
+00165 sds sparklineRender(sds output, \textcolor{keyword}{struct} \hyperlink{structsequence}{sequence} *seq, \textcolor{keywordtype}{int} columns, \textcolor{keywordtype}{int} rows, \textcolor{keywordtype}{int} flags) \{
+00166     \textcolor{keywordtype}{int} j;
+00167 
+00168     \textcolor{keywordflow}{for} (j = 0; j < seq->length; j += columns) \{
+00169         \textcolor{keywordtype}{int} sublen = (seq->length-j) < columns ? (seq->length-j) : columns;
+00170 
+00171         \textcolor{keywordflow}{if} (j != 0) output = sdscatlen(output,\textcolor{stringliteral}{"\(\backslash\)n"},1);
+00172         output = sparklineRenderRange(output, seq, rows, j, sublen, flags);
+00173     \}
+00174     \textcolor{keywordflow}{return} output;
+00175 \}
+\end{DoxyCode}

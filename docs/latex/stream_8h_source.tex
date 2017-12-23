@@ -1,0 +1,67 @@
+\hypertarget{stream_8h_source}{}\section{stream.\+h}
+\label{stream_8h_source}\index{src/stream.\+h@{src/stream.\+h}}
+
+\begin{DoxyCode}
+00001 \textcolor{preprocessor}{#}\textcolor{preprocessor}{ifndef} \textcolor{preprocessor}{STREAM\_H}
+00002 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{STREAM\_H}
+00003 
+00004 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \hyperlink{rax_8h}{"rax.h"}
+00005 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \hyperlink{listpack_8h}{"listpack.h"}
+00006 
+00007 \textcolor{comment}{/* Stream item ID: a 128 bit number composed of a milliseconds time and}
+00008 \textcolor{comment}{ * a sequence counter. IDs generated in the same millisecond (or in a past}
+00009 \textcolor{comment}{ * millisecond if the clock jumped backward) will use the millisecond time}
+00010 \textcolor{comment}{ * of the latest generated ID and an incremented sequence. */}
+\Hypertarget{stream_8h_source_l00011}\hyperlink{structstreamID}{00011} \textcolor{keyword}{typedef} \textcolor{keyword}{struct} \hyperlink{structstreamID}{streamID} \{
+00012     uint64\_t ms;        \textcolor{comment}{/* Unix time in milliseconds. */}
+00013     uint64\_t seq;       \textcolor{comment}{/* Sequence number. */}
+00014 \} streamID;
+00015 
+\Hypertarget{stream_8h_source_l00016}\hyperlink{structstream}{00016} \textcolor{keyword}{typedef} \textcolor{keyword}{struct} \hyperlink{structstream}{stream} \{
+00017     rax *rax;               \textcolor{comment}{/* The radix tree holding the stream. */}
+00018     uint64\_t length;        \textcolor{comment}{/* Number of elements inside this stream. */}
+00019     streamID last\_id;       \textcolor{comment}{/* Zero if there are yet no items. */}
+00020 \} stream;
+00021 
+00022 \textcolor{comment}{/* We define an iterator to iterate stream items in an abstract way, without}
+00023 \textcolor{comment}{ * caring about the radix tree + listpack representation. Technically speaking}
+00024 \textcolor{comment}{ * the iterator is only used inside streamReplyWithRange(), so could just}
+00025 \textcolor{comment}{ * be implemented inside the function, but practically there is the AOF}
+00026 \textcolor{comment}{ * rewriting code that also needs to iterate the stream to emit the XADD}
+00027 \textcolor{comment}{ * commands. */}
+\Hypertarget{stream_8h_source_l00028}\hyperlink{structstreamIterator}{00028} \textcolor{keyword}{typedef} \textcolor{keyword}{struct} \hyperlink{structstreamIterator}{streamIterator} \{
+00029     streamID master\_id;     \textcolor{comment}{/* ID of the master entry at listpack head. */}
+00030     uint64\_t master\_fields\_count;       \textcolor{comment}{/* Master entries # of fields. */}
+00031     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *master\_fields\_start; \textcolor{comment}{/* Master entries start in listpack. */}
+00032     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *master\_fields\_ptr;   \textcolor{comment}{/* Master field to emit next. */}
+00033     \textcolor{keywordtype}{int} entry\_flags;                    \textcolor{comment}{/* Flags of entry we are emitting. */}
+00034     \textcolor{keywordtype}{int} rev;                \textcolor{comment}{/* True if iterating end to start (reverse). */}
+00035     uint64\_t start\_key[2];  \textcolor{comment}{/* Start key as 128 bit big endian. */}
+00036     uint64\_t end\_key[2];    \textcolor{comment}{/* End key as 128 bit big endian. */}
+00037     \hyperlink{structraxIterator}{raxIterator} ri;         \textcolor{comment}{/* Rax iterator. */}
+00038     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *lp;      \textcolor{comment}{/* Current listpack. */}
+00039     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} *lp\_ele;  \textcolor{comment}{/* Current listpack cursor. */}
+00040     \textcolor{comment}{/* Buffers used to hold the string of lpGet() when the element is}
+00041 \textcolor{comment}{     * integer encoded, so that there is no string representation of the}
+00042 \textcolor{comment}{     * element inside the listpack itself. */}
+00043     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} field\_buf[\hyperlink{listpack_8h_ab31e5c173b595ae4e703b72eb435a6e9}{LP\_INTBUF\_SIZE}];
+00044     \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} value\_buf[\hyperlink{listpack_8h_ab31e5c173b595ae4e703b72eb435a6e9}{LP\_INTBUF\_SIZE}];
+00045 \} streamIterator;
+00046 
+00047 \textcolor{comment}{/* Prototypes of exported APIs. */}
+00048 
+00049 \textcolor{keyword}{struct} \hyperlink{structclient}{client};
+00050 
+00051 stream *streamNew(\textcolor{keywordtype}{void});
+00052 \textcolor{keywordtype}{void} freeStream(stream *s);
+00053 size\_t streamReplyWithRange(\textcolor{keyword}{struct} client *c, stream *s, streamID *start, streamID *end, size\_t count,
+       \textcolor{keywordtype}{int} rev);
+00054 \textcolor{keywordtype}{void} streamIteratorStart(\hyperlink{structstreamIterator}{streamIterator} *si, stream *s, streamID *start, streamID *end, \textcolor{keywordtype}{
+      int} rev);
+00055 \textcolor{keywordtype}{int} streamIteratorGetID(\hyperlink{structstreamIterator}{streamIterator} *si, streamID *id, int64\_t *numfields);
+00056 \textcolor{keywordtype}{void} streamIteratorGetField(\hyperlink{structstreamIterator}{streamIterator} *si, \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} **fieldptr, \textcolor{keywordtype}{unsigned} \textcolor{keywordtype}{char} 
+      **valueptr, int64\_t *fieldlen, int64\_t *valuelen);
+00057 \textcolor{keywordtype}{void} streamIteratorStop(\hyperlink{structstreamIterator}{streamIterator} *si);
+00058 
+00059 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif}
+\end{DoxyCode}

@@ -1,0 +1,100 @@
+\hypertarget{rand_8c_source}{}\section{rand.\+c}
+\label{rand_8c_source}\index{src/rand.\+c@{src/rand.\+c}}
+
+\begin{DoxyCode}
+00001 \textcolor{comment}{/* Pseudo random number generation functions derived from the drand48()}
+00002 \textcolor{comment}{ * function obtained from pysam source code.}
+00003 \textcolor{comment}{ *}
+00004 \textcolor{comment}{ * This functions are used in order to replace the default math.random()}
+00005 \textcolor{comment}{ * Lua implementation with something having exactly the same behavior}
+00006 \textcolor{comment}{ * across different systems (by default Lua uses libc's rand() that is not}
+00007 \textcolor{comment}{ * required to implement a specific PRNG generating the same sequence}
+00008 \textcolor{comment}{ * in different systems if seeded with the same integer).}
+00009 \textcolor{comment}{ *}
+00010 \textcolor{comment}{ * The original code appears to be under the public domain.}
+00011 \textcolor{comment}{ * I modified it removing the non needed functions and all the}
+00012 \textcolor{comment}{ * 1960-style C coding stuff...}
+00013 \textcolor{comment}{ *}
+00014 \textcolor{comment}{ * ----------------------------------------------------------------------------}
+00015 \textcolor{comment}{ *}
+00016 \textcolor{comment}{ * Copyright (c) 2010-2012, Salvatore Sanfilippo <antirez at gmail dot com>}
+00017 \textcolor{comment}{ * All rights reserved.}
+00018 \textcolor{comment}{ *}
+00019 \textcolor{comment}{ * Redistribution and use in source and binary forms, with or without}
+00020 \textcolor{comment}{ * modification, are permitted provided that the following conditions are met:}
+00021 \textcolor{comment}{ *}
+00022 \textcolor{comment}{ *   * Redistributions of source code must retain the above copyright notice,}
+00023 \textcolor{comment}{ *     this list of conditions and the following disclaimer.}
+00024 \textcolor{comment}{ *   * Redistributions in binary form must reproduce the above copyright}
+00025 \textcolor{comment}{ *     notice, this list of conditions and the following disclaimer in the}
+00026 \textcolor{comment}{ *     documentation and/or other materials provided with the distribution.}
+00027 \textcolor{comment}{ *   * Neither the name of Redis nor the names of its contributors may be used}
+00028 \textcolor{comment}{ *     to endorse or promote products derived from this software without}
+00029 \textcolor{comment}{ *     specific prior written permission.}
+00030 \textcolor{comment}{ *}
+00031 \textcolor{comment}{ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"}
+00032 \textcolor{comment}{ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE}
+00033 \textcolor{comment}{ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE}
+00034 \textcolor{comment}{ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE}
+00035 \textcolor{comment}{ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR}
+00036 \textcolor{comment}{ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF}
+00037 \textcolor{comment}{ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS}
+00038 \textcolor{comment}{ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN}
+00039 \textcolor{comment}{ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)}
+00040 \textcolor{comment}{ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE}
+00041 \textcolor{comment}{ * POSSIBILITY OF SUCH DAMAGE.}
+00042 \textcolor{comment}{ */}
+00043 
+00044 \textcolor{preprocessor}{#}\textcolor{preprocessor}{include} \textcolor{preprocessor}{<}\textcolor{preprocessor}{stdint}\textcolor{preprocessor}{.}\textcolor{preprocessor}{h}\textcolor{preprocessor}{>}
+00045 
+00046 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{N}   16
+00047 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{MASK}    \textcolor{preprocessor}{(}\textcolor{preprocessor}{(}1 \textcolor{preprocessor}{<<} \textcolor{preprocessor}{(}\hyperlink{rand_8c_a0240ac851181b84ac374872dc5434ee4}{N} \textcolor{preprocessor}{-} 1\textcolor{preprocessor}{)}\textcolor{preprocessor}{)} \textcolor{preprocessor}{+} \textcolor{preprocessor}{(}1 \textcolor{preprocessor}{<<} \textcolor{preprocessor}{(}\hyperlink{rand_8c_a0240ac851181b84ac374872dc5434ee4}{N} \textcolor{preprocessor}{-} 1\textcolor{preprocessor}{)}\textcolor{preprocessor}{)} \textcolor{preprocessor}{-} 1\textcolor{preprocessor}{)}
+00048 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{LOW}\textcolor{preprocessor}{(}\textcolor{preprocessor}{x}\textcolor{preprocessor}{)}  \textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{keywordtype}{unsigned}\textcolor{preprocessor}{)}\textcolor{preprocessor}{(}\textcolor{preprocessor}{x}\textcolor{preprocessor}{)} \textcolor{preprocessor}{&} \hyperlink{rand_8c_ae7520c5477c11965aabeedc033c9862b}{MASK}\textcolor{preprocessor}{)}
+00049 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{HIGH}\textcolor{preprocessor}{(}\textcolor{preprocessor}{x}\textcolor{preprocessor}{)} \hyperlink{rand_8c_a627b1c92232deafa6370178448d76527}{LOW}\textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{x}\textcolor{preprocessor}{)} \textcolor{preprocessor}{>>} \hyperlink{rand_8c_a0240ac851181b84ac374872dc5434ee4}{N}\textcolor{preprocessor}{)}
+00050 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{MUL}\textcolor{preprocessor}{(}\textcolor{preprocessor}{x}\textcolor{preprocessor}{,} \textcolor{preprocessor}{y}\textcolor{preprocessor}{,} \textcolor{preprocessor}{z}\textcolor{preprocessor}{)}    \textcolor{preprocessor}{\{} \textcolor{preprocessor}{int32\_t} \textcolor{preprocessor}{l} \textcolor{preprocessor}{=} \textcolor{preprocessor}{(}\textcolor{keywordtype}{long}\textcolor{preprocessor}{)}\textcolor{preprocessor}{(}\textcolor{preprocessor}{x}\textcolor{preprocessor}{)} \textcolor{preprocessor}{*} \textcolor{preprocessor}{(}\textcolor{keywordtype}{long}\textcolor{preprocessor}{)}\textcolor{preprocessor}{(}\textcolor{preprocessor}{y}\textcolor{preprocessor}{)}\textcolor{preprocessor}{;}
+00051         \textcolor{preprocessor}{(}\textcolor{preprocessor}{z}\textcolor{preprocessor}{)}\textcolor{preprocessor}{[}0\textcolor{preprocessor}{]} \textcolor{preprocessor}{=} \hyperlink{rand_8c_a627b1c92232deafa6370178448d76527}{LOW}\textcolor{preprocessor}{(}\textcolor{preprocessor}{l}\textcolor{preprocessor}{)}\textcolor{preprocessor}{;} \textcolor{preprocessor}{(}\textcolor{preprocessor}{z}\textcolor{preprocessor}{)}\textcolor{preprocessor}{[}1\textcolor{preprocessor}{]} \textcolor{preprocessor}{=} \hyperlink{rand_8c_aadd31e5eb6e891077cb7fd6c906ef4af}{HIGH}\textcolor{preprocessor}{(}\textcolor{preprocessor}{l}\textcolor{preprocessor}{)}\textcolor{preprocessor}{;} \textcolor{preprocessor}{\}}
+00052 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{CARRY}\textcolor{preprocessor}{(}\textcolor{preprocessor}{x}\textcolor{preprocessor}{,} \textcolor{preprocessor}{y}\textcolor{preprocessor}{)} \textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{int32\_t}\textcolor{preprocessor}{)}\textcolor{preprocessor}{(}\textcolor{preprocessor}{x}\textcolor{preprocessor}{)} \textcolor{preprocessor}{+} \textcolor{preprocessor}{(}\textcolor{keywordtype}{long}\textcolor{preprocessor}{)}\textcolor{preprocessor}{(}\textcolor{preprocessor}{y}\textcolor{preprocessor}{)} \textcolor{preprocessor}{>} \hyperlink{rand_8c_ae7520c5477c11965aabeedc033c9862b}{MASK}\textcolor{preprocessor}{)}
+00053 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{ADDEQU}\textcolor{preprocessor}{(}\textcolor{preprocessor}{x}\textcolor{preprocessor}{,} \textcolor{preprocessor}{y}\textcolor{preprocessor}{,} \textcolor{preprocessor}{z}\textcolor{preprocessor}{)} \textcolor{preprocessor}{(}\textcolor{preprocessor}{z} \textcolor{preprocessor}{=} \hyperlink{rand_8c_acf24db0ba1fe8c642a00871c3156f536}{CARRY}\textcolor{preprocessor}{(}\textcolor{preprocessor}{x}\textcolor{preprocessor}{,} \textcolor{preprocessor}{(}\textcolor{preprocessor}{y}\textcolor{preprocessor}{)}\textcolor{preprocessor}{)}\textcolor{preprocessor}{,} \textcolor{preprocessor}{x} \textcolor{preprocessor}{=} \hyperlink{rand_8c_a627b1c92232deafa6370178448d76527}{LOW}\textcolor{preprocessor}{(}\textcolor{preprocessor}{x} \textcolor{preprocessor}{+} \textcolor{preprocessor}{(}\textcolor{preprocessor}{y}\textcolor{preprocessor}{)}\textcolor{preprocessor}{)}\textcolor{preprocessor}{)}
+00054 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{X0}  0x330E
+00055 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{X1}  0xABCD
+00056 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{X2}  0x1234
+00057 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{A0}  0xE66D
+00058 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{A1}  0xDEEC
+00059 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{A2}  0x5
+00060 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{C}   0xB
+00061 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{SET3}\textcolor{preprocessor}{(}\textcolor{preprocessor}{x}\textcolor{preprocessor}{,} \textcolor{preprocessor}{x0}\textcolor{preprocessor}{,} \textcolor{preprocessor}{x1}\textcolor{preprocessor}{,} \textcolor{preprocessor}{x2}\textcolor{preprocessor}{)} \textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{x}\textcolor{preprocessor}{)}\textcolor{preprocessor}{[}0\textcolor{preprocessor}{]} \textcolor{preprocessor}{=} \textcolor{preprocessor}{(}\textcolor{preprocessor}{x0}\textcolor{preprocessor}{)}\textcolor{preprocessor}{,} \textcolor{preprocessor}{(}\textcolor{preprocessor}{x}\textcolor{preprocessor}{)}\textcolor{preprocessor}{[}1\textcolor{preprocessor}{]} \textcolor{preprocessor}{=} \textcolor{preprocessor}{(}\textcolor{preprocessor}{x1}\textcolor{preprocessor}{)}\textcolor{preprocessor}{,} \textcolor{preprocessor}{(}\textcolor{preprocessor}{x}\textcolor{preprocessor}{)}\textcolor{preprocessor}{[}2\textcolor{preprocessor}{]} \textcolor{preprocessor}{=} \textcolor{preprocessor}{(}\textcolor{preprocessor}{x2}\textcolor{preprocessor}{)}\textcolor{preprocessor}{)}
+00062 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{SETLOW}\textcolor{preprocessor}{(}\textcolor{preprocessor}{x}\textcolor{preprocessor}{,} \textcolor{preprocessor}{y}\textcolor{preprocessor}{,} \textcolor{preprocessor}{n}\textcolor{preprocessor}{)} \hyperlink{rand_8c_a2f13588e2b1316209e96e8279eb15f6c}{SET3}\textcolor{preprocessor}{(}\textcolor{preprocessor}{x}\textcolor{preprocessor}{,} \hyperlink{rand_8c_a627b1c92232deafa6370178448d76527}{LOW}\textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{y}\textcolor{preprocessor}{)}\textcolor{preprocessor}{[}\textcolor{preprocessor}{n}\textcolor{preprocessor}{]}\textcolor{preprocessor}{)}\textcolor{preprocessor}{,} \hyperlink{rand_8c_a627b1c92232deafa6370178448d76527}{LOW}\textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{y}\textcolor{preprocessor}{)}\textcolor{preprocessor}{[}\textcolor{preprocessor}{(}\textcolor{preprocessor}{n}\textcolor{preprocessor}{)}\textcolor{preprocessor}{+}1\textcolor{preprocessor}{]}\textcolor{preprocessor}{)}\textcolor{preprocessor}{,} \hyperlink{rand_8c_a627b1c92232deafa6370178448d76527}{LOW}\textcolor{preprocessor}{(}\textcolor{preprocessor}{(}\textcolor{preprocessor}{y}\textcolor{preprocessor}{)}\textcolor{preprocessor}{[}\textcolor{preprocessor}{(}\textcolor{preprocessor}{n}\textcolor{preprocessor}{)}\textcolor{preprocessor}{+}2\textcolor{preprocessor}{]}\textcolor{preprocessor}{)}\textcolor{preprocessor}{)}
+00063 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{SEED}\textcolor{preprocessor}{(}\textcolor{preprocessor}{x0}\textcolor{preprocessor}{,} \textcolor{preprocessor}{x1}\textcolor{preprocessor}{,} \textcolor{preprocessor}{x2}\textcolor{preprocessor}{)} \textcolor{preprocessor}{(}\hyperlink{rand_8c_a2f13588e2b1316209e96e8279eb15f6c}{SET3}\textcolor{preprocessor}{(}\textcolor{preprocessor}{x}\textcolor{preprocessor}{,} \textcolor{preprocessor}{x0}\textcolor{preprocessor}{,} \textcolor{preprocessor}{x1}\textcolor{preprocessor}{,} \textcolor{preprocessor}{x2}\textcolor{preprocessor}{)}\textcolor{preprocessor}{,} \hyperlink{rand_8c_a2f13588e2b1316209e96e8279eb15f6c}{SET3}\textcolor{preprocessor}{(}\textcolor{preprocessor}{a}\textcolor{preprocessor}{,} \hyperlink{rand_8c_a0d158f1e3af2ab523eb8423db3e5bd6e}{A0}\textcolor{preprocessor}{,} \hyperlink{rand_8c_acd92b430059d886880c53f13ae038e3f}{A1}\textcolor{preprocessor}{,} 
+      \hyperlink{rand_8c_a2946bc30423c2a996eeafa49e995c30e}{A2}\textcolor{preprocessor}{)}\textcolor{preprocessor}{,} \textcolor{preprocessor}{c} \textcolor{preprocessor}{=} \hyperlink{rand_8c_ac4cf4b2ab929bd23951a8676eeac086b}{C}\textcolor{preprocessor}{)}
+00064 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{REST}\textcolor{preprocessor}{(}\textcolor{preprocessor}{v}\textcolor{preprocessor}{)} \textcolor{keywordflow}{for} \textcolor{preprocessor}{(}\textcolor{preprocessor}{i} \textcolor{preprocessor}{=} 0\textcolor{preprocessor}{;} \textcolor{preprocessor}{i} \textcolor{preprocessor}{<} 3\textcolor{preprocessor}{;} \textcolor{preprocessor}{i}\textcolor{preprocessor}{++}\textcolor{preprocessor}{)} \textcolor{preprocessor}{\{} \textcolor{preprocessor}{xsubi}\textcolor{preprocessor}{[}\textcolor{preprocessor}{i}\textcolor{preprocessor}{]} \textcolor{preprocessor}{=} \textcolor{preprocessor}{x}\textcolor{preprocessor}{[}\textcolor{preprocessor}{i}\textcolor{preprocessor}{]}\textcolor{preprocessor}{;} \textcolor{preprocessor}{x}\textcolor{preprocessor}{[}\textcolor{preprocessor}{i}\textcolor{preprocessor}{]} \textcolor{preprocessor}{=} \textcolor{preprocessor}{temp}\textcolor{preprocessor}{[}\textcolor{preprocessor}{i}\textcolor{preprocessor}{]}\textcolor{preprocessor}{;} \textcolor{preprocessor}{\}}
+00065         \textcolor{keywordflow}{return} \textcolor{preprocessor}{(}\textcolor{preprocessor}{v}\textcolor{preprocessor}{)}\textcolor{preprocessor}{;}
+00066 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{HI\_BIT}  \textcolor{preprocessor}{(}1L \textcolor{preprocessor}{<<} \textcolor{preprocessor}{(}2 \textcolor{preprocessor}{*} \hyperlink{rand_8c_a0240ac851181b84ac374872dc5434ee4}{N} \textcolor{preprocessor}{-} 1\textcolor{preprocessor}{)}\textcolor{preprocessor}{)}
+00067 
+00068 \textcolor{keyword}{static} uint32\_t x[3] = \{ \hyperlink{rand_8c_a8476f4a8de2c191433342c9ce896986a}{X0}, \hyperlink{rand_8c_a1964818ccd90a6173ea48cecb652feeb}{X1}, \hyperlink{rand_8c_a79ae03a0214cb30e57b9e8835f2a0019}{X2} \}, a[3] = \{ \hyperlink{rand_8c_a0d158f1e3af2ab523eb8423db3e5bd6e}{A0}, \hyperlink{rand_8c_acd92b430059d886880c53f13ae038e3f}{A1}, \hyperlink{rand_8c_a2946bc30423c2a996eeafa49e995c30e}{A2} \}, c = 
+      \hyperlink{rand_8c_ac4cf4b2ab929bd23951a8676eeac086b}{C};
+00069 \textcolor{keyword}{static} \textcolor{keywordtype}{void} next(\textcolor{keywordtype}{void});
+00070 
+00071 int32\_t redisLrand48() \{
+00072     next();
+00073     \textcolor{keywordflow}{return} (((int32\_t)x[2] << (\hyperlink{rand_8c_a0240ac851181b84ac374872dc5434ee4}{N} - 1)) + (x[1] >> 1));
+00074 \}
+00075 
+00076 \textcolor{keywordtype}{void} redisSrand48(int32\_t seedval) \{
+00077     \hyperlink{rand_8c_ad4fca189db70516678feaf2ada2b0153}{SEED}(\hyperlink{rand_8c_a8476f4a8de2c191433342c9ce896986a}{X0}, \hyperlink{rand_8c_a627b1c92232deafa6370178448d76527}{LOW}(seedval), \hyperlink{rand_8c_aadd31e5eb6e891077cb7fd6c906ef4af}{HIGH}(seedval));
+00078 \}
+00079 
+00080 \textcolor{keyword}{static} \textcolor{keywordtype}{void} next(\textcolor{keywordtype}{void}) \{
+00081     uint32\_t p[2], q[2], r[2], carry0, carry1;
+00082 
+00083     \hyperlink{rand_8c_aa41c2259bde5ac4595509b753d07129f}{MUL}(a[0], x[0], p);
+00084     \hyperlink{rand_8c_a904860fb195e49dc24c327820db12801}{ADDEQU}(p[0], c, carry0);
+00085     \hyperlink{rand_8c_a904860fb195e49dc24c327820db12801}{ADDEQU}(p[1], carry0, carry1);
+00086     \hyperlink{rand_8c_aa41c2259bde5ac4595509b753d07129f}{MUL}(a[0], x[1], q);
+00087     \hyperlink{rand_8c_a904860fb195e49dc24c327820db12801}{ADDEQU}(p[1], q[0], carry0);
+00088     \hyperlink{rand_8c_aa41c2259bde5ac4595509b753d07129f}{MUL}(a[1], x[0], r);
+00089     x[2] = \hyperlink{rand_8c_a627b1c92232deafa6370178448d76527}{LOW}(carry0 + carry1 + \hyperlink{rand_8c_acf24db0ba1fe8c642a00871c3156f536}{CARRY}(p[1], r[0]) + q[1] + r[1] +
+00090             a[0] * x[2] + a[1] * x[1] + a[2] * x[0]);
+00091     x[1] = \hyperlink{rand_8c_a627b1c92232deafa6370178448d76527}{LOW}(p[1] + r[0]);
+00092     x[0] = \hyperlink{rand_8c_a627b1c92232deafa6370178448d76527}{LOW}(p[0]);
+00093 \}
+\end{DoxyCode}

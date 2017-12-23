@@ -1,0 +1,62 @@
+\hypertarget{sparkline_8h_source}{}\section{sparkline.\+h}
+\label{sparkline_8h_source}\index{src/sparkline.\+h@{src/sparkline.\+h}}
+
+\begin{DoxyCode}
+00001 \textcolor{comment}{/* sparkline.h -- ASCII Sparklines header file}
+00002 \textcolor{comment}{ *}
+00003 \textcolor{comment}{ * ---------------------------------------------------------------------------}
+00004 \textcolor{comment}{ *}
+00005 \textcolor{comment}{ * Copyright(C) 2011-2014 Salvatore Sanfilippo <antirez@gmail.com>}
+00006 \textcolor{comment}{ * All rights reserved.}
+00007 \textcolor{comment}{ *}
+00008 \textcolor{comment}{ * Redistribution and use in source and binary forms, with or without}
+00009 \textcolor{comment}{ * modification, are permitted provided that the following conditions are met:}
+00010 \textcolor{comment}{ *}
+00011 \textcolor{comment}{ *   * Redistributions of source code must retain the above copyright notice,}
+00012 \textcolor{comment}{ *     this list of conditions and the following disclaimer.}
+00013 \textcolor{comment}{ *   * Redistributions in binary form must reproduce the above copyright}
+00014 \textcolor{comment}{ *     notice, this list of conditions and the following disclaimer in the}
+00015 \textcolor{comment}{ *     documentation and/or other materials provided with the distribution.}
+00016 \textcolor{comment}{ *}
+00017 \textcolor{comment}{ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"}
+00018 \textcolor{comment}{ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE}
+00019 \textcolor{comment}{ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE}
+00020 \textcolor{comment}{ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE}
+00021 \textcolor{comment}{ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR}
+00022 \textcolor{comment}{ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF}
+00023 \textcolor{comment}{ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS}
+00024 \textcolor{comment}{ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN}
+00025 \textcolor{comment}{ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)}
+00026 \textcolor{comment}{ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE}
+00027 \textcolor{comment}{ * POSSIBILITY OF SUCH DAMAGE.}
+00028 \textcolor{comment}{ */}
+00029 
+00030 \textcolor{preprocessor}{#}\textcolor{preprocessor}{ifndef} \textcolor{preprocessor}{\_\_SPARKLINE\_H}
+00031 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{\_\_SPARKLINE\_H}
+00032 
+00033 \textcolor{comment}{/* A sequence is represented of many "samples" */}
+\Hypertarget{sparkline_8h_source_l00034}\hyperlink{structsample}{00034} \textcolor{keyword}{struct} \hyperlink{structsample}{sample} \{
+00035     \textcolor{keywordtype}{double} value;
+00036     \textcolor{keywordtype}{char} *label;
+00037 \};
+00038 
+\Hypertarget{sparkline_8h_source_l00039}\hyperlink{structsequence}{00039} \textcolor{keyword}{struct} \hyperlink{structsequence}{sequence} \{
+00040     \textcolor{keywordtype}{int} length;
+00041     \textcolor{keywordtype}{int} labels;
+00042     \textcolor{keyword}{struct} \hyperlink{structsample}{sample} *samples;
+00043     \textcolor{keywordtype}{double} min, max;
+00044 \};
+00045 
+00046 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{SPARKLINE\_NO\_FLAGS} 0
+00047 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{SPARKLINE\_FILL} 1      \textcolor{comment}{/* Fill the area under the curve. */}
+00048 \textcolor{preprocessor}{#}\textcolor{preprocessor}{define} \textcolor{preprocessor}{SPARKLINE\_LOG\_SCALE} 2 \textcolor{comment}{/* Use logarithmic scale. */}
+00049 
+00050 \textcolor{keyword}{struct} \hyperlink{structsequence}{sequence} *createSparklineSequence(\textcolor{keywordtype}{void});
+00051 \textcolor{keywordtype}{void} sparklineSequenceAddSample(\textcolor{keyword}{struct} \hyperlink{structsequence}{sequence} *seq, \textcolor{keywordtype}{double} value, \textcolor{keywordtype}{char} *label);
+00052 \textcolor{keywordtype}{void} freeSparklineSequence(\textcolor{keyword}{struct} \hyperlink{structsequence}{sequence} *seq);
+00053 sds sparklineRenderRange(sds output, \textcolor{keyword}{struct} \hyperlink{structsequence}{sequence} *seq, \textcolor{keywordtype}{int} rows, \textcolor{keywordtype}{int} offset, \textcolor{keywordtype}{int} len, \textcolor{keywordtype}{int} 
+      flags);
+00054 sds sparklineRender(sds output, \textcolor{keyword}{struct} \hyperlink{structsequence}{sequence} *seq, \textcolor{keywordtype}{int} columns, \textcolor{keywordtype}{int} rows, \textcolor{keywordtype}{int} flags);
+00055 
+00056 \textcolor{preprocessor}{#}\textcolor{preprocessor}{endif} \textcolor{comment}{/* \_\_SPARKLINE\_H */}
+\end{DoxyCode}
