@@ -57,6 +57,11 @@ add_executable(redis-server
         src/networking.c
         src/util.c
         src/object.c
+        src/localtime.c
+        src/t_stream.c
+        src/listpack.c
+        src/lolwut.c
+        src/lolwut5.c
         src/db.c
         src/replication.c
         src/rdb.c
