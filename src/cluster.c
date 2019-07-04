@@ -3031,6 +3031,7 @@ void clusterHandleSlaveFailover(void) {
         if (server.cluster->mf_end) {
             server.cluster->failover_auth_time = mstime();
             server.cluster->failover_auth_rank = 0;
+	    clusterDoBeforeSleep(CLUSTER_TODO_HANDLE_FAILOVER);
         }
         serverLog(LL_WARNING,
             "Start of election delayed for %lld milliseconds "
@@ -4126,7 +4127,7 @@ void clusterReplyMultiBulkSlots(client *c) {
      */
 
     int num_masters = 0;
-    void *slot_replylen = addDeferredMultiBulkLength(c);
+    void *slot_replylen = addReplyDeferredLen(c);
 
     dictEntry *de;
     dictIterator *di = dictGetSafeIterator(server.cluster->nodes);
@@ -4146,7 +4147,7 @@ void clusterReplyMultiBulkSlots(client *c) {
             }
             if (start != -1 && (!bit || j == CLUSTER_SLOTS-1)) {
                 int nested_elements = 3; /* slots (2) + master addr (1). */
-                void *nested_replylen = addDeferredMultiBulkLength(c);
+                void *nested_replylen = addReplyDeferredLen(c);
 
                 if (bit && j == CLUSTER_SLOTS-1) j++;
 
@@ -4162,7 +4163,7 @@ void clusterReplyMultiBulkSlots(client *c) {
                 start = -1;
 
                 /* First node reply position is always the master */
-                addReplyMultiBulkLen(c, 3);
+                addReplyArrayLen(c, 3);
                 addReplyBulkCString(c, node->ip);
                 addReplyLongLong(c, node->port);
                 addReplyBulkCBuffer(c, node->name, CLUSTER_NAMELEN);
@@ -4172,19 +4173,19 @@ void clusterReplyMultiBulkSlots(client *c) {
                     /* This loop is copy/pasted from clusterGenNodeDescription()
                      * with modifications for per-slot node aggregation */
                     if (nodeFailed(node->slaves[i])) continue;
-                    addReplyMultiBulkLen(c, 3);
+                    addReplyArrayLen(c, 3);
                     addReplyBulkCString(c, node->slaves[i]->ip);
                     addReplyLongLong(c, node->slaves[i]->port);
                     addReplyBulkCBuffer(c, node->slaves[i]->name, CLUSTER_NAMELEN);
                     nested_elements++;
                 }
-                setDeferredMultiBulkLength(c, nested_replylen, nested_elements);
+                setDeferredArrayLen(c, nested_replylen, nested_elements);
                 num_masters++;
             }
         }
     }
     dictReleaseIterator(di);
-    setDeferredMultiBulkLength(c, slot_replylen, num_masters);
+    setDeferredArrayLen(c, slot_replylen, num_masters);
 }
 
 void clusterCommand(client *c) {
@@ -4548,7 +4549,7 @@ NULL
 
         keys = zmalloc(sizeof(robj*)*maxkeys);
         numkeys = getKeysInSlot(slot, keys, maxkeys);
-        addReplyMultiBulkLen(c,numkeys);
+        addReplyArrayLen(c,numkeys);
         for (j = 0; j < numkeys; j++) {
             addReplyBulk(c,keys[j]);
             decrRefCount(keys[j]);
@@ -4627,7 +4628,7 @@ NULL
             return;
         }
 
-        addReplyMultiBulkLen(c,n->numslaves);
+        addReplyArrayLen(c,n->numslaves);
         for (j = 0; j < n->numslaves; j++) {
             sds ni = clusterGenNodeDescription(n->slaves[j]);
             addReplyBulkCString(c,ni);
@@ -4775,7 +4776,7 @@ NULL
 
 /* Generates a DUMP-format representation of the object 'o', adding it to the
  * io stream pointed by 'rio'. This function can't fail. */
-void createDumpPayload(rio *payload, robj *o) {
+void createDumpPayload(rio *payload, robj *o, robj *key) {
     unsigned char buf[2];
     uint64_t crc;
 
@@ -4783,7 +4784,7 @@ void createDumpPayload(rio *payload, robj *o) {
      * byte followed by the serialized object. This is understood by RESTORE. */
     rioInitWithBuffer(payload,sdsempty());
     serverAssert(rdbSaveObjectType(payload,o));
-    serverAssert(rdbSaveObject(payload,o));
+    serverAssert(rdbSaveObject(payload,o,key));
 
     /* Write the footer, this is how it looks like:
      * ----------------+---------------------+---------------+
@@ -4836,12 +4837,12 @@ void dumpCommand(client *c) {
 
     /* Check if the key is here. */
     if ((o = lookupKeyRead(c->db,c->argv[1])) == NULL) {
-        addReply(c,shared.nullbulk);
+        addReplyNull(c);
         return;
     }
 
     /* Create the DUMP encoded representation. */
-    createDumpPayload(&payload,o);
+    createDumpPayload(&payload,o,c->argv[1]);
 
     /* Transfer to the client */
     dumpobj = createObject(OBJ_STRING,payload.io.buffer.ptr);
@@ -4914,7 +4915,7 @@ void restoreCommand(client *c) {
 
     rioInitWithBuffer(&payload,c->argv[3]->ptr);
     if (((type = rdbLoadObjectType(&payload)) == -1) ||
-        ((obj = rdbLoadObject(type,&payload)) == NULL))
+        ((obj = rdbLoadObject(type,&payload,c->argv[1])) == NULL))
     {
         addReplyError(c,"Bad data format");
         return;
@@ -5202,7 +5203,7 @@ try_again:
 
         /* Emit the payload argument, that is the serialized object using
          * the DUMP format. */
-        createDumpPayload(&payload,ov[j]);
+        createDumpPayload(&payload,ov[j],kv[j]);
         serverAssertWithInfo(c,NULL,
             rioWriteBulkString(&cmd,payload.io.buffer.ptr,
                                sdslen(payload.io.buffer.ptr)));
