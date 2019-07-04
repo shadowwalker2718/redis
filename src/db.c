@@ -83,6 +83,7 @@ robj *lookupKey(redisDb *db, robj *key, int flags) {
  * 1. A key gets expired if it reached it's TTL.
  * 2. The key last access time is updated.
  * 3. The global keys hits/misses stats are updated (reported in INFO).
+ * 4. If keyspace notifications are enabled, a "keymiss" notification is fired.
  *
  * This API should not be used when we write to the key after obtaining
  * the object linked to the key, but only for read only operations.
@@ -106,6 +107,7 @@ robj *lookupKeyReadWithFlags(redisDb *db, robj *key, int flags) {
          * to return NULL ASAP. */
         if (server.masterhost == NULL) {
             server.stat_keyspace_misses++;
+            notifyKeyspaceEvent(NOTIFY_KEY_MISS, "keymiss", key, db->id);
             return NULL;
         }
 
@@ -127,12 +129,15 @@ robj *lookupKeyReadWithFlags(redisDb *db, robj *key, int flags) {
             server.current_client->cmd->flags & CMD_READONLY)
         {
             server.stat_keyspace_misses++;
+            notifyKeyspaceEvent(NOTIFY_KEY_MISS, "keymiss", key, db->id);
             return NULL;
         }
     }
     val = lookupKey(db,key,flags);
-    if (val == NULL)
+    if (val == NULL) {
         server.stat_keyspace_misses++;
+        notifyKeyspaceEvent(NOTIFY_KEY_MISS, "keymiss", key, db->id);
+    }
     else
         server.stat_keyspace_hits++;
     return val;
@@ -241,7 +246,7 @@ robj *dbRandomKey(redisDb *db) {
         sds key;
         robj *keyobj;
 
-        de = dictGetRandomKey(db->dict);
+        de = dictGetFairRandomKey(db->dict);
         if (de == NULL) return NULL;
 
         key = dictGetKey(de);
@@ -448,10 +453,7 @@ void flushallCommand(client *c) {
     signalFlushedDb(-1);
     server.dirty += emptyDb(-1,flags,NULL);
     addReply(c,shared.ok);
-    if (server.rdb_child_pid != -1) {
-        kill(server.rdb_child_pid,SIGUSR1);
-        rdbRemoveTempFile(server.rdb_child_pid);
-    }
+    if (server.rdb_child_pid != -1) killRDBChild();
     if (server.saveparamslen > 0) {
         /* Normally rdbSave() will reset dirty, but we don't want this here
          * as otherwise FLUSHALL will not be replicated nor put into the AOF. */
@@ -525,7 +527,7 @@ void randomkeyCommand(client *c) {
     robj *key;
 
     if ((key = dbRandomKey(c->db)) == NULL) {
-        addReply(c,shared.nullbulk);
+        addReplyNull(c);
         return;
     }
 
@@ -539,7 +541,7 @@ void keysCommand(client *c) {
     sds pattern = c->argv[1]->ptr;
     int plen = sdslen(pattern), allkeys;
     unsigned long numkeys = 0;
-    void *replylen = addDeferredMultiBulkLength(c);
+    void *replylen = addReplyDeferredLen(c);
 
     di = dictGetSafeIterator(c->db->dict);
     allkeys = (pattern[0] == '*' && pattern[1] == '\0');
@@ -557,7 +559,7 @@ void keysCommand(client *c) {
         }
     }
     dictReleaseIterator(di);
-    setDeferredMultiBulkLength(c,replylen,numkeys);
+    setDeferredArrayLen(c,replylen,numkeys);
 }
 
 /* This callback is used by scanGenericCommand in order to collect elements
@@ -782,10 +784,10 @@ void scanGenericCommand(client *c, robj *o, unsigned long cursor) {
     }
 
     /* Step 4: Reply to the client. */
-    addReplyMultiBulkLen(c, 2);
+    addReplyArrayLen(c, 2);
     addReplyBulkLongLong(c,cursor);
 
-    addReplyMultiBulkLen(c, listLength(keys));
+    addReplyArrayLen(c, listLength(keys));
     while ((node = listFirst(keys)) != NULL) {
         robj *kobj = listNodeValue(node);
         addReplyBulk(c, kobj);
